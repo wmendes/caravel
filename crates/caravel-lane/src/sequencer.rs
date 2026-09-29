@@ -534,7 +534,7 @@ impl Core {
             batch,
             first_height: first,
             last_height,
-            withdrawals: serde_json_leaves(&withdrawals),
+            withdrawals: leaves_json(&withdrawals),
             status: CheckpointStatus::Sequenced,
             epoch: None,
             sigs: None,
@@ -615,8 +615,8 @@ pub fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
-/// `[[key_hex, "amount"], ...]`.
-fn serde_json_leaves(leaves: &[checkpoint::Leaf]) -> String {
+/// `[[key_hex, "amount"], ...]`, the `withdrawals` column.
+pub fn leaves_json(leaves: &[checkpoint::Leaf]) -> String {
     let items: Vec<String> = leaves
         .iter()
         .map(|l| format!("[\"{}\",\"{}\"]", hex(&l.key), l.amount))

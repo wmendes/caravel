@@ -4,6 +4,8 @@
 
 #![allow(dead_code)]
 
+pub mod harness;
+
 use std::path::PathBuf;
 
 use caravel_lane::{ExecError, WasmExecutor};

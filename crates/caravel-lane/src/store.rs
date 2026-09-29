@@ -405,6 +405,15 @@ impl Store {
         }
     }
 
+    /// Validators: every checkpoint up to `seq` is accepted on Stellar (the
+    /// contract accepts them in order).
+    pub fn mark_accepted_through(&mut self, seq: u64) -> Result<usize> {
+        Ok(self.conn.execute(
+            "UPDATE checkpoints SET status = 'accepted' WHERE seq <= ?1 AND status != 'accepted'",
+            params![i(seq)],
+        )?)
+    }
+
     pub fn checkpoint(&self, seq: u64) -> Result<Option<CheckpointRow>> {
         self.conn
             .query_row(

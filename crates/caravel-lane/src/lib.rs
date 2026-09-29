@@ -8,6 +8,7 @@ pub mod executor;
 pub mod mempool;
 pub mod sequencer;
 pub mod store;
+pub mod validator;
 pub mod views;
 
 pub use executor::{ExecError, Metering, WasmExecutor};

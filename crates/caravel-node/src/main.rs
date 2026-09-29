@@ -25,6 +25,20 @@ enum Command {
         #[arg(long)]
         config: PathBuf,
     },
+    /// Run a validator (spec §15): follow, re-execute, sign, serve proofs.
+    Validator {
+        /// The validator config, e.g. config/validator-1.local.toml.
+        #[arg(long)]
+        config: PathBuf,
+    },
+    /// Clear live-check flags on blocks up to a height, after an operator
+    /// has looked at them, so the validator signs again.
+    ValidatorClear {
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long)]
+        through: u64,
+    },
     /// Run the sequencer (spec §14): blocks, checkpoints and the API.
     Sequencer {
         /// The sequencer config, e.g. config/sequencer.local.toml.
@@ -68,6 +82,27 @@ fn main() -> Result<()> {
             let report =
                 caravel_node::check::check_store(&cfg.lane, &cfg.db, &exec, &cfg.header_ids())?;
             println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Command::Validator { config } => {
+            init_logging();
+            let cfg = caravel_node::validator::ValidatorConfig::load(&config)?;
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?
+                .block_on(caravel_node::validator::run(cfg))?;
+        }
+        Command::ValidatorClear { config, through } => {
+            let cfg = caravel_node::validator::ValidatorConfig::load(&config)?;
+            let (_, config_bytes, genesis_state) = caravel_node::lane_toml::genesis(&cfg.lane)?;
+            let config_hash = caravel_lane::checkpoint::sha256(&config_bytes);
+            let mut store = caravel_lane::store::Store::open(
+                &cfg.db,
+                &cfg.lane.lane_id(),
+                &config_hash,
+                &genesis_state,
+            )?;
+            let n = store.clear_flags(through)?;
+            println!("cleared {n} flagged block(s) up to height {through}; restart the validator if it was halted");
         }
         Command::Sequencer { config } => {
             init_logging();
