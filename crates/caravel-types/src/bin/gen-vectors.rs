@@ -9,9 +9,14 @@ fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../test-vectors"));
     std::fs::create_dir_all(&dir).expect("create output directory");
-    for f in caravel_types::vectors::all() {
-        let path = dir.join(f.name);
-        std::fs::write(&path, &f.contents).expect("write vector file");
-        println!("wrote {} ({} bytes)", path.display(), f.contents.len());
+    let mut files: Vec<(&str, String)> = caravel_types::vectors::all()
+        .into_iter()
+        .map(|f| (f.name, f.contents))
+        .collect();
+    files.push(("merkle.json", caravel_merkle::vectors::file()));
+    for (name, contents) in files {
+        let path = dir.join(name);
+        std::fs::write(&path, &contents).expect("write vector file");
+        println!("wrote {} ({} bytes)", path.display(), contents.len());
     }
 }

@@ -10,11 +10,13 @@ publish.workspace = true
 [features]
 # Enables the golden-vector generator (`cargo gen-vectors`, spec §19.2). It needs
 # a hasher and a signer; the library itself never hashes or signs.
-gen-vectors = ["dep:sha2", "dep:ed25519-dalek"]
+gen-vectors = ["dep:sha2", "dep:ed25519-dalek", "dep:caravel-merkle"]
 
 [dependencies]
 sha2 = { workspace = true, optional = true }
 ed25519-dalek = { workspace = true, optional = true }
+# Only for the generator, which also writes test-vectors/merkle.json.
+caravel-merkle = { workspace = true, optional = true, features = ["gen-vectors"] }
 
 [dev-dependencies]
 sha2 = { workspace = true }

@@ -295,6 +295,12 @@ version = "0.1.0"
 [[package]]
 name = "caravel-merkle"
 version = "0.1.0"
+dependencies = [
+ "caravel-merkle",
+ "proptest",
+ "sha2",
+ "soroban-sdk",
+]
 
 [[package]]
 name = "caravel-node"
@@ -308,6 +314,7 @@ version = "0.1.0"
 name = "caravel-types"
 version = "0.1.0"
 dependencies = [
+ "caravel-merkle",
  "ed25519-dalek",
  "proptest",
  "sha2",

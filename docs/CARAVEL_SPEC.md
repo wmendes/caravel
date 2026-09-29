@@ -1334,7 +1334,9 @@ codegen-units = 1
 lto = true
 ```
 
-Build with `stellar contract build` `[VERIFY flags]`, or `cargo build --target wasm32v1-none --release --locked`. Record `sha256sum` in `versions.json`.
+Build with `scripts/build-contracts.sh`, i.e. `stellar contract build --locked --out-dir target/contracts` with the pinned CLI (DEC-020). Record `sha256sum` in `versions.json`.
+
+Checked 2026-09-29: plain `cargo build --target wasm32v1-none` is **not** an option for contracts. The `soroban-sdk 28.0.0` build script exits with an error unless `SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2` is set, which `stellar-cli ≥ 25.2.0` does. The CLI runs `cargo rustc --locked --crate-type=cdylib --target=wasm32v1-none --release` with `--remap-path-prefix` for the registry. Crates that do not depend on `soroban-sdk` (`caravel-types`, `caravel-merkle` without `soroban`, `caravel-perps`) still build with plain cargo, and CI checks that they do.
 
 ---
 
@@ -1910,7 +1912,7 @@ Status values: `todo`, `doing`, `review`, `done`. Agents update the Status cell 
 |---|---|---|---|---|
 | T-000 | Bootstrap repo, workspace, toolchain, `versions.json`, CI, CLAUDE.md, SOURCES.md | — | §0, §6, §7, §19.1 | review |
 | T-001 | `caravel-types`: all §9 codecs, tags, reason and fatal codes, fixed-point helpers; golden vector generator | T-000 | §8, §9, §10.2, §11 (codes), §11.10 | review |
-| T-002 | `caravel-merkle`: build + verify + proof generation; native and Soroban hashers | T-000 | §9.9 | todo |
+| T-002 | `caravel-merkle`: build + verify + proof generation; native and Soroban hashers | T-000 | §9.9 | review |
 | T-003 | `caravel-perps`: genesis + step (§11 complete) + scenarios 1–18 + property tests (native) | T-001, T-002 | §8, §9.10, §10, §11 | todo |
 | T-004 | `contracts/perps-engine`: wrapper, size budget, reproducible build, hash in versions.json | T-003 | §12 | todo |
 | T-005 | `caravel-lane::executor`: soroban-env-host runner; parity gate (10k blocks + scenarios); cpu/mem benchmark at full caps | T-004 | §8.2, §12.2, §14.5 | todo |
