@@ -108,7 +108,7 @@ What is left scales with state size, at about 70M for decoding and encoding 1,02
 
 ## Settlement contract: `submit_checkpoint` at the batch cap (T-006)
 
-The settlement Wasm of record (`8280828f…1a52`, 42,900 bytes) is registered from its file, so the VM costs are counted. The call carries a real 3-block batch padded to exactly 96,000 bytes (the contract hashes the batch and does not parse it) and all 3 validator signatures. The budget is set to the live testnet transaction limits (spec §3.3).
+The settlement Wasm of record (`8a2fafbd…d503`, 42,900 bytes, the x86_64 Linux build from CI, DEC-033) is registered from its file, so the VM costs are counted. The macOS build of the same source (`8280828f…1a52`) meters identically. The call carries a real 3-block batch padded to exactly 96,000 bytes (the contract hashes the batch and does not parse it) and all 3 validator signatures. The budget is set to the live testnet transaction limits (spec §3.3).
 
 Reproduce with `cargo test -p settlement a_full_batch -- --nocapture` after `./scripts/build-contracts.sh`.
 

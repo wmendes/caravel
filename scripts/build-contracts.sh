@@ -2,6 +2,11 @@
 # Builds both contracts to Wasm with the pinned Stellar CLI, checks size limits
 # (spec §3.3, §12.2) and prints each sha256. The engine hash printed here is the
 # only engine hash of record (DEC-020): nodes, replay and Stellar load this file.
+#
+# The recorded hashes are x86_64 Linux builds (DEC-033): cargo mixes the host
+# triple into every crate's -C metadata through proc-macro and build-script
+# dependencies, and that can change function order in the Wasm. On x86_64 Linux
+# (CI) a hash mismatch is an error; on other hosts it is a warning.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -27,6 +32,8 @@ done
 sha256() { shasum -a 256 "$1" | awk '{print $1}'; }
 # The recorded hash, or empty while versions.json still has a placeholder.
 recorded() { node -p "const v = require('./versions.json').artifacts['$1']; v.startsWith('FILLED_BY_') ? '' : v"; }
+canonical_host=0
+[[ "$(uname -s)" == "Linux" && "$(uname -m)" == "x86_64" ]] && canonical_host=1
 status=0
 for name in perps_engine settlement; do
   wasm="$OUT_DIR/$name.wasm"
@@ -47,9 +54,14 @@ for name in perps_engine settlement; do
   key="${name/perps_engine/engine}_wasm_sha256"
   want="$(recorded "$key")"
   if [[ -n "$want" && "$want" != "$hash" ]]; then
-    echo "error: $name hash $hash differs from versions.json $key $want" >&2
-    echo "       (if the contract changed on purpose, update versions.json in the same change)" >&2
-    status=1
+    if (( canonical_host )); then
+      echo "error: $name hash $hash differs from versions.json $key $want" >&2
+      echo "       (if the contract changed on purpose, update versions.json in the same change)" >&2
+      status=1
+    else
+      echo "warning: $name hash differs from versions.json $key $want;" >&2
+      echo "         recorded hashes are x86_64 Linux builds (DEC-033), and CI checks them" >&2
+    fi
   fi
 done
 exit $status
