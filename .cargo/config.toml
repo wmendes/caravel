@@ -1,0 +1,3 @@
+[alias]
+# Regenerate the golden vectors in test-vectors/ (spec §19.2).
+gen-vectors = "run --locked -p caravel-types --features gen-vectors --bin gen-vectors --"

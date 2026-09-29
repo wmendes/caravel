@@ -7,4 +7,22 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# Tree building and proof generation. The verify path never allocates.
+alloc = []
+# SHA-256 via `sha2`, for the engine's native build, nodes and tests.
+native = ["dep:sha2"]
+# SHA-256 via the Soroban host (`env.crypto().sha256`), for contracts.
+soroban = ["dep:soroban-sdk"]
+# Golden vectors for test-vectors/merkle.json (spec §19.2).
+gen-vectors = ["alloc", "native"]
+
 [dependencies]
+sha2 = { workspace = true, optional = true }
+soroban-sdk = { workspace = true, optional = true }
+
+[dev-dependencies]
+# Enables every feature for this crate's own tests.
+caravel-merkle = { path = ".", features = ["alloc", "native", "soroban", "gen-vectors"] }
+soroban-sdk = { workspace = true, features = ["testutils"] }
+proptest = "1.11.0"
