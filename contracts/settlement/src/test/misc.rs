@@ -492,3 +492,50 @@ fn a_full_batch_with_3_signatures_fits_testnet_limits() {
     // a few hundred bytes. Keep 4 KiB of room.
     assert!(args_xdr + 4096 <= TX_MAX_SIZE_BYTES, "args {args_xdr} B");
 }
+
+// --- Storage layout read by validators off-chain --------------------------------------------
+
+/// Validators read `LastCkpt` straight from the instance entry with
+/// `getLedgerEntries` (caravel-node `stellar_rpc`): the key is the unit
+/// variant as `Vec[Symbol("LastCkpt")]` and the value a map whose `seq` is a
+/// `U64` and `header_hash` 32 `Bytes`.
+#[test]
+fn last_checkpoint_storage_layout() {
+    use soroban_sdk::xdr::{ScMapEntry, ScSymbol, ScVal, ScVec};
+    use soroban_sdk::TryFromVal;
+    let mut h = Harness::new();
+    h.deposit(A, 100 * USDC);
+    h.sync_inbox();
+    h.lane.block();
+    let cp = h.checkpoint();
+    h.accept(&cp);
+    let env = &h.env;
+    let key: Val = DataKey::LastCkpt.into_val(env);
+    let key = ScVal::try_from_val(env, &key).unwrap();
+    let sym = |s: &str| ScVal::Symbol(ScSymbol(s.try_into().unwrap()));
+    assert_eq!(
+        key,
+        ScVal::Vec(Some(ScVec(std::vec![sym("LastCkpt")].try_into().unwrap())))
+    );
+    let stored: Val = env.as_contract(&h.id, || {
+        env.storage()
+            .instance()
+            .get::<DataKey, Val>(&DataKey::LastCkpt)
+            .unwrap()
+    });
+    let ScVal::Map(Some(map)) = ScVal::try_from_val(env, &stored).unwrap() else {
+        panic!("LastCkpt is not a map")
+    };
+    let field = |name: &str| {
+        map.0
+            .iter()
+            .find(|e: &&ScMapEntry| e.key == sym(name))
+            .map(|e| e.val.clone())
+            .unwrap()
+    };
+    assert_eq!(field("seq"), ScVal::U64(1));
+    let ScVal::Bytes(hash) = field("header_hash") else {
+        panic!("header_hash is not bytes")
+    };
+    assert_eq!(hash.0.as_slice(), sha256(&cp.header.encode()).as_slice());
+}
