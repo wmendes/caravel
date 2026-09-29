@@ -110,3 +110,41 @@ jobs:
           tar xzf stellar-cli.tar.gz -C "$HOME/.local/bin" stellar
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: ./scripts/e2e-local.sh
+
+  # What the testnet VM runs (T-012, DEC-046): the node binary, the Wasm of
+  # record (x86_64 Linux, DEC-033) and the relayer build, from one commit on
+  # main. The VM runs Ubuntu 24.04 like this runner, so glibc matches.
+  release:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Stellar CLI
+        run: |
+          curl -sSfL -o stellar-cli.tar.gz \
+            "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${STELLAR_CLI_SHA256}  stellar-cli.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar xzf stellar-cli.tar.gz -C "$HOME/.local/bin" stellar
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: ./scripts/build-contracts.sh
+      - run: cargo build --release --locked -p caravel-node
+      - run: npm --prefix apps/relayer ci && npm --prefix apps/relayer run build
+      - name: Assemble the release
+        run: |
+          mkdir -p release/bin release/contracts release/relayer
+          cp target/release/caravel-node release/bin/
+          cp target/contracts/*.wasm release/contracts/
+          cp -r apps/relayer/dist apps/relayer/package.json apps/relayer/package-lock.json release/relayer/
+          (cd release && sha256sum bin/* contracts/* > SHA256SUMS && echo "${GITHUB_SHA}" > COMMIT)
+          cat release/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: caravel-release-linux-x86_64
+          path: release/

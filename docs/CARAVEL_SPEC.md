@@ -131,7 +131,7 @@ All values below were checked on 2026-09-29 unless dated otherwise. Anything mar
 
 | Item | Value | Source |
 |---|---|---|
-| Current protocol | 28 ("Adapter"). Testnet upgraded 2026-08-27; mainnet activated 2026-09-16 (checked 2026-09-29 via stellar-raven). **Conflict, open:** on 2026-09-29 testnet RPC `getNetwork` and `getVersionInfo` report `protocolVersion 29` (stellar-core 29.0.0, RPC 29.0.0 built 2026-09-22), while stellar-raven's docs and news cover only Protocol 28 and crates.io has no `soroban-env-host` 29 (latest 28.0.2). Pins stay at 28; the T-012 witness `step` on testnet is the byte-equality check `[VERIFY]` | SDF blog "Adapter, Protocol 28 Upgrade Guide", "Introducing Adapter, Protocol 28 on Stellar"; Stellar Weekly Roundup 2026-09-18; testnet RPC |
+| Current protocol | 28 ("Adapter"). Testnet upgraded 2026-08-27; mainnet activated 2026-09-16 (checked 2026-09-29 via stellar-raven). **Conflict, open:** on 2026-09-29 testnet RPC `getNetwork` and `getVersionInfo` report `protocolVersion 29` (stellar-core 29.0.0, RPC 29.0.0 built 2026-09-22), while stellar-raven's docs and news cover only Protocol 28 and crates.io has no `soroban-env-host` 29 (latest 28.0.2). Pins stay at 28. The T-012 witness `step` on testnet (protocol 29) returned output byte-equal to the executor on host 28.0.2 (tx `d0aa5608…a700b0`, 2026-09-29, `docs/RESULTS.md`) | SDF blog "Adapter, Protocol 28 Upgrade Guide", "Introducing Adapter, Protocol 28 on Stellar"; Stellar Weekly Roundup 2026-09-18; testnet RPC |
 | Protocol 28 CAPs | CAP-83 (empty tx set value), CAP-85 (externally managed contract executables), CAP-86 (sparse map host functions) | same |
 | `soroban-sdk` | 28.0.0 (2026-09-18) | crates.io |
 | `soroban-env-host` | 28.0.2 | crates.io |
