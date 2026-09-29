@@ -48,7 +48,7 @@ Git: one branch and PR per task (`t-0xx-short-name`). Inside a phase, PRs stack 
 
 ## Layout
 
-- `crates/`: caravel-types, caravel-merkle, caravel-perps (engine logic), caravel-lane (executor, store), caravel-node (sequencer / validator / replay).
+- `crates/`: caravel-types, caravel-merkle, caravel-perps (engine logic), caravel-lane (executor, store), caravel-node (sequencer / validator / replay / genesis), caravel-testkit (test-only: lane simulator, scenarios, `cargo gen-vectors`).
 - `contracts/`: perps-engine, settlement.
 - `apps/`: relayer (TS), web (React).
 - `config/`: lane TOML files.

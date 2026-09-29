@@ -23,6 +23,7 @@ caravel-types = { path = "crates/caravel-types" }
 caravel-merkle = { path = "crates/caravel-merkle" }
 caravel-perps = { path = "crates/caravel-perps" }
 caravel-lane = { path = "crates/caravel-lane" }
+caravel-testkit = { path = "crates/caravel-testkit" }
 
 # §12.3: reproducible, size-optimized contract builds.
 [profile.release]
@@ -34,3 +35,11 @@ debug-assertions = false
 panic = "abort"
 codegen-units = 1
 lto = true
+
+# Fast crypto in debug test builds; our own crates stay unoptimized.
+[profile.dev.package.curve25519-dalek]
+opt-level = 3
+[profile.dev.package.ed25519-dalek]
+opt-level = 3
+[profile.dev.package.sha2]
+opt-level = 3

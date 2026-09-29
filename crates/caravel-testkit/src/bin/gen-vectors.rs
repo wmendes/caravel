@@ -1,5 +1,6 @@
-//! Writes the golden vectors to `test-vectors/` (spec §19.2). Run with
-//! `cargo gen-vectors`, optionally passing an output directory.
+//! Writes every golden vector to `test-vectors/` (spec §19.2): the codecs
+//! (caravel-types), Merkle trees (caravel-merkle) and engine scenarios.
+//! Run with `cargo gen-vectors`, optionally passing an output directory.
 
 use std::path::PathBuf;
 
@@ -14,6 +15,7 @@ fn main() {
         .map(|f| (f.name, f.contents))
         .collect();
     files.push(("merkle.json", caravel_merkle::vectors::file()));
+    files.push(("scenarios.json", caravel_testkit::scenarios::vector_file()));
     for (name, contents) in files {
         let path = dir.join(name);
         std::fs::write(&path, &contents).expect("write vector file");

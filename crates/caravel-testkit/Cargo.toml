@@ -1,0 +1,19 @@
+[package]
+name = "caravel-testkit"
+description = "Caravel test harness: lane simulator, engine scenarios, golden-vector generator (test-only, std)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+caravel-types = { workspace = true, features = ["gen-vectors"] }
+caravel-merkle = { workspace = true, features = ["alloc", "native", "gen-vectors"] }
+caravel-perps = { workspace = true, features = ["native"] }
+ed25519-dalek = { workspace = true }
+sha2 = { workspace = true }
+
+[[bin]]
+name = "gen-vectors"
+path = "src/bin/gen-vectors.rs"

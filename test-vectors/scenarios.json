@@ -1,0 +1,236 @@
+{
+  "format": "engine scenarios",
+  "spec": "§19.3",
+  "hash_rule": "hash = the final state_hash (H(StateV1 bytes)) of the scenario's last lane. fields.state_hashes lists every lane's final hash; fields.blocks counts executed blocks. Native and Wasm runs MUST match (INV-P5).",
+  "context": {
+    "config_hash": "5c081d53bf1f4a6c2dfcbf54982b8d9f0cfba39799ef71fb5ebb699e604a4b44",
+    "genesis_state_hash": "c817b1ea98e383d0188eefcce5954066210255743ad6fd6530d9d60f7f201b78",
+    "genesis_state_bytes": "1277"
+  },
+  "vectors": [
+    {
+      "name": "deposit_create_account",
+      "fields": {
+        "blocks": "4",
+        "state_hashes": [
+          "c5680f62ae13339315d5966ff668032fe6eca2a4ccf7aef29ce177e82bd2cf8b",
+          "0c94eaeb01549a382668d2f3dfd9ec703df9193bd3d5ccb24d680b122c7eb254"
+        ]
+      },
+      "hex": "",
+      "hash": "0c94eaeb01549a382668d2f3dfd9ec703df9193bd3d5ccb24d680b122c7eb254"
+    },
+    {
+      "name": "limit_rest_and_cancel",
+      "fields": {
+        "blocks": "4",
+        "state_hashes": [
+          "edf5909162cd1f3672335a524d009c4903b0adfda43137a67b1128d9f2007fac"
+        ]
+      },
+      "hex": "",
+      "hash": "edf5909162cd1f3672335a524d009c4903b0adfda43137a67b1128d9f2007fac"
+    },
+    {
+      "name": "cross_and_fill_partial",
+      "fields": {
+        "blocks": "3",
+        "state_hashes": [
+          "015d0feb4cf6421a251f6600c7a9c1c8f2177b9680889375d23e1eb10ce4c932"
+        ]
+      },
+      "hex": "",
+      "hash": "015d0feb4cf6421a251f6600c7a9c1c8f2177b9680889375d23e1eb10ce4c932"
+    },
+    {
+      "name": "ioc_remainder_canceled",
+      "fields": {
+        "blocks": "3",
+        "state_hashes": [
+          "c0ab97b3559c851d6177517ad3312c3f54dedc8d649ac2916adda94881b612ed"
+        ]
+      },
+      "hex": "",
+      "hash": "c0ab97b3559c851d6177517ad3312c3f54dedc8d649ac2916adda94881b612ed"
+    },
+    {
+      "name": "post_only_rejected_when_crossing",
+      "fields": {
+        "blocks": "3",
+        "state_hashes": [
+          "ac02545743c9c39849d2d6a84675361abfe62d1c40340c3be7a369b814992954"
+        ]
+      },
+      "hex": "",
+      "hash": "ac02545743c9c39849d2d6a84675361abfe62d1c40340c3be7a369b814992954"
+    },
+    {
+      "name": "self_trade_prevention",
+      "fields": {
+        "blocks": "3",
+        "state_hashes": [
+          "68b316198f892442c01168fe1c4ab184a9e870b8b1ec0e1a88efb29e73f77eaa"
+        ]
+      },
+      "hex": "",
+      "hash": "68b316198f892442c01168fe1c4ab184a9e870b8b1ec0e1a88efb29e73f77eaa"
+    },
+    {
+      "name": "margin_reject_worst_case",
+      "fields": {
+        "blocks": "2",
+        "state_hashes": [
+          "75ed0be2c06e158b6de44277bd2cfce23fcf58c36e7ab4c1eb473e062b16d6bb"
+        ]
+      },
+      "hex": "",
+      "hash": "75ed0be2c06e158b6de44277bd2cfce23fcf58c36e7ab4c1eb473e062b16d6bb"
+    },
+    {
+      "name": "flip_position",
+      "fields": {
+        "blocks": "5",
+        "state_hashes": [
+          "7bad784564a492c94ec499ad813d6d2de3d81c027cf9c327447837894f1c3c75"
+        ]
+      },
+      "hex": "",
+      "hash": "7bad784564a492c94ec499ad813d6d2de3d81c027cf9c327447837894f1c3c75"
+    },
+    {
+      "name": "funding_zero_sum",
+      "fields": {
+        "blocks": "7",
+        "state_hashes": [
+          "3ac93a667db182cde546cb76b2861f95110c658a86cf30f16d02aa1f2f585bbe"
+        ]
+      },
+      "hex": "",
+      "hash": "3ac93a667db182cde546cb76b2861f95110c658a86cf30f16d02aa1f2f585bbe"
+    },
+    {
+      "name": "liquidation_to_backstop",
+      "fields": {
+        "blocks": "4",
+        "state_hashes": [
+          "5b948dd3318c06954ba3481ce611bf41e9a9926b258ce51aaac5c7ed8816a7cd"
+        ]
+      },
+      "hex": "",
+      "hash": "5b948dd3318c06954ba3481ce611bf41e9a9926b258ce51aaac5c7ed8816a7cd"
+    },
+    {
+      "name": "backstop_deficit_flag",
+      "fields": {
+        "blocks": "6",
+        "state_hashes": [
+          "316cd8cf04c2b8e158732a92fcfb6be511ea42d75d677d7b6bd802dfc1280dfa"
+        ]
+      },
+      "hex": "",
+      "hash": "316cd8cf04c2b8e158732a92fcfb6be511ea42d75d677d7b6bd802dfc1280dfa"
+    },
+    {
+      "name": "withdraw_then_checkpoint",
+      "fields": {
+        "blocks": "4",
+        "state_hashes": [
+          "4bd063b02ab5461a862166839a5ce239bba7ffca1a7a33156d89494e9b39cf68"
+        ]
+      },
+      "hex": "",
+      "hash": "4bd063b02ab5461a862166839a5ce239bba7ffca1a7a33156d89494e9b39cf68"
+    },
+    {
+      "name": "forced_withdrawal_cancels_orders",
+      "fields": {
+        "blocks": "3",
+        "state_hashes": [
+          "fcd25d3d690ea812b09884582396e5fa628e52d84064341f63a86f82172084a3"
+        ]
+      },
+      "hex": "",
+      "hash": "fcd25d3d690ea812b09884582396e5fa628e52d84064341f63a86f82172084a3"
+    },
+    {
+      "name": "session_key_permissions",
+      "fields": {
+        "blocks": "8",
+        "state_hashes": [
+          "f544718c8258e6c8f2d2c808d872794fdf563123c009fe75e2a583bc425e962c"
+        ]
+      },
+      "hex": "",
+      "hash": "f544718c8258e6c8f2d2c808d872794fdf563123c009fe75e2a583bc425e962c"
+    },
+    {
+      "name": "nonce_rules",
+      "fields": {
+        "blocks": "4",
+        "state_hashes": [
+          "e7e4fcc5744fd69795aa3679b3b422334cd9acc320b5e5fadba76e4a8611a307"
+        ]
+      },
+      "hex": "",
+      "hash": "e7e4fcc5744fd69795aa3679b3b422334cd9acc320b5e5fadba76e4a8611a307"
+    },
+    {
+      "name": "oracle_rules",
+      "fields": {
+        "blocks": "7",
+        "state_hashes": [
+          "c26e11d4c80d86fd72ee9e7ccf393662ef0da658186e32e26b9d3438c043eec2"
+        ]
+      },
+      "hex": "",
+      "hash": "c26e11d4c80d86fd72ee9e7ccf393662ef0da658186e32e26b9d3438c043eec2"
+    },
+    {
+      "name": "fatal_cases",
+      "fields": {
+        "blocks": "3",
+        "state_hashes": [
+          "6a10fcc6c5427f0c8d7848d640129b5d8955aace7a79b591f60c2ec6f079010d",
+          "4fcb60e28835ede7e81c97d7ae54f19044b640bf478acff2c7219ff3610c9878"
+        ]
+      },
+      "hex": "",
+      "hash": "4fcb60e28835ede7e81c97d7ae54f19044b640bf478acff2c7219ff3610c9878"
+    },
+    {
+      "name": "withdraw_liquidity_and_cash",
+      "fields": {
+        "blocks": "12",
+        "state_hashes": [
+          "64e02b324b36df51784484c59dab33b6cebabf5b4579e44a0bd465137419442f",
+          "8e1c05e4332c6e42859943945620556305258c7d84b5aa948d720d56e9eb863c"
+        ]
+      },
+      "hex": "",
+      "hash": "8e1c05e4332c6e42859943945620556305258c7d84b5aa948d720d56e9eb863c"
+    },
+    {
+      "name": "account_slot_reuse",
+      "fields": {
+        "blocks": "8",
+        "state_hashes": [
+          "1e7c2abcf88b0a2fcdf68306850ebd3757223f12ef368c4d54ef349047791eda"
+        ]
+      },
+      "hex": "",
+      "hash": "1e7c2abcf88b0a2fcdf68306850ebd3757223f12ef368c4d54ef349047791eda"
+    },
+    {
+      "name": "oracle_breaker_widens",
+      "fields": {
+        "blocks": "4",
+        "state_hashes": [
+          "63bfcf40c62aa5d65f9c5a866d03e38b3ba9f37775dc881b24b1573546b2ba77"
+        ]
+      },
+      "hex": "",
+      "hash": "63bfcf40c62aa5d65f9c5a866d03e38b3ba9f37775dc881b24b1573546b2ba77"
+    }
+  ],
+  "invalid": []
+}

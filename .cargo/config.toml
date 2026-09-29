@@ -1,3 +1,4 @@
 [alias]
-# Regenerate the golden vectors in test-vectors/ (spec §19.2).
-gen-vectors = "run --locked -p caravel-types --features gen-vectors --bin gen-vectors --"
+# Regenerate every golden vector in test-vectors/ (spec §19.2): codecs, Merkle
+# trees and engine scenarios.
+gen-vectors = "run --locked -p caravel-testkit --bin gen-vectors --"
