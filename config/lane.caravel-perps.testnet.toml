@@ -8,7 +8,7 @@ name = "caravel-perps-testnet-0"          # lane_id = H("CARAVEL/LANE/V1" || nam
 
 [node]                                     # not consensus
 block_time_ms = 1000                       # allowed 200..=5000
-checkpoint_every_blocks = 10
+checkpoint_every_blocks = 60                # one checkpoint a minute on testnet (DEC-044)
 max_batch_bytes = 96000
 
 [accounts]

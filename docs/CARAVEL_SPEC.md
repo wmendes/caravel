@@ -798,7 +798,7 @@ name = "caravel-perps-testnet-0"          # lane_id = H("CARAVEL/LANE/V1" || nam
 
 [node]                                     # not consensus
 block_time_ms = 1000                       # allowed 200..=5000
-checkpoint_every_blocks = 10
+checkpoint_every_blocks = 60                # one a minute on testnet (DEC-044)
 max_batch_bytes = 96000
 
 [accounts]
@@ -1928,11 +1928,11 @@ Status values: `todo`, `doing`, `review`, `done`. Agents update the Status cell 
 | T-004 | `contracts/perps-engine`: wrapper, size budget, reproducible build, hash in versions.json | T-003 | §12 | done |
 | T-005 | `caravel-lane::executor`: soroban-env-host runner; parity gate (10k blocks + scenarios); cpu/mem benchmark at full caps | T-004 | §8.2, §12.2, §14.5 | done |
 | T-006 | `contracts/settlement`: all of §13 + tests in §13.7 | T-001, T-002 | §9, §11.8, §13 | done |
-| T-007 | `caravel-node sequencer`: mempool, block loop, SQLite store, API/WS, checkpoint policy + assembly | T-005 | §14 | review |
-| T-008 | `caravel-node validator`: follow, re-execute, sign, never-equivocate store | T-005 | §15 | review |
-| T-009 | `apps/relayer`: inbox watcher, checkpoint submitter, oracle feeder | T-006, T-007 | §17 | review |
-| T-010 | `caravel-node replay` | T-005, T-006 | §16 | review |
-| T-011 | Local compose + `scripts/e2e-local.sh` (§19.5 steps 1–6) | T-007…T-010 | §19.5 | review |
+| T-007 | `caravel-node sequencer`: mempool, block loop, SQLite store, API/WS, checkpoint policy + assembly | T-005 | §14 | done |
+| T-008 | `caravel-node validator`: follow, re-execute, sign, never-equivocate store | T-005 | §15 | done |
+| T-009 | `apps/relayer`: inbox watcher, checkpoint submitter, oracle feeder | T-006, T-007 | §17 | done |
+| T-010 | `caravel-node replay` | T-005, T-006 | §16 | done |
+| T-011 | Local compose + `scripts/e2e-local.sh` (§19.5 steps 1–6) | T-007…T-010 | §19.5 | done |
 | T-012 | Testnet deploy script; deploy engine + settlement; one **witness** `step` transaction on testnet with a small state, byte-equal to the executor output | T-011 | §3, §12, §13 | todo |
 | T-013 | `apps/web` (§18) against local, then testnet | T-007, T-009 | §18 | todo |
 | T-014 | Measurements (§19.6) + `docs/RESULTS.md` with dated numbers | T-012 | §19.6 | todo |
@@ -2092,6 +2092,8 @@ For lanes that need classic Stellar operations or SCP among many validators:
 | DEC-041 | Oracle sources per market, in priority order (spec §17.3): Reflector's testnet "External CEXs & DEXs" feed `CCYOZJCOPG34LLQQ7N24YXBM7LL62R7ONMZ3G6WZAAYPB5OYKOMJRN63` (`lastprice(Other(symbol))`, 14 decimals, 300 s resolution, checked on-chain 2026-09-29), then Coinbase's public spot price (`GET https://api.coinbase.com/v2/prices/{pair}/spot`), or a fixed price for local lanes. A source is used only if its own timestamp is within `maxSourceAgeSecs` (900 on testnet). Whatever the source, the relayer signs with the team's oracle key and a fresh `publish_time_ms`, publishing every 2 s on a one-tick move and at least every 10 s | Follows §17.3 and the OQ-002 default. Reflector moves only every 5 minutes, so the 10 s heartbeat keeps the lane within its 30 s staleness limit; the UI must say prices are signed by the Caravel team's oracle key | A lane oracle with its own feeds (M1) |
 | DEC-042 | Replay reads everything from ledger entries and transactions: `Config`, `LastCkpt` (instance storage), `Ckpt(seq)` and `Claimed(seq, index)` (persistent entries, keys `Vec[Symbol(name), fields…]`) with `getLedgerEntries`; each checkpoint's transaction from its `ckpt` event, starting at the record's `stellar_ledger`; the `header` and `batch` from the `InvokeContract` arguments of the envelope. Every header is rebuilt with the same assembly code as the nodes and compared byte for byte, and the first differing field is named. `--genesis-config` takes the lane TOML. `--from-archive` is not built in M0: replay needs the transactions inside RPC's retention window (7 days on testnet, checked 2026-09-29), or a validator store checked with `check-store` | One byte comparison covers every commitment field. Storage reads need no simulation. A settlement test pins every key and field replay reads | Checkpoints older than RPC retention (M1: Galexie archive) |
 | DEC-043 | The local end-to-end (`scripts/e2e-local.sh`) runs quickstart in Docker through `stellar container start local --limits testnet` (image `stellar/quickstart:latest`, protocol 28, 1 s ledgers, testnet resource limits), and the sequencer, 3 validators and the relayer as local release processes, not a compose file. It uses its own Stellar CLI config directory, a local USDC asset contract minted by a local issuer, the fixture oracle key of the local lane, and a settlement contract with `escape_timeout_secs = 30` and `force_inclusion_window_secs = 20`, because quickstart cannot move ledger time. `caravel-node tx` signs and submits lane transactions from an `S...` key file | One command from a clean clone, with nothing to build into images. Container images for hosting come with T-012. A short timeout stands in for "move ledger time" in §19.5 step 5 | Hosting images (T-012) |
+| DEC-044 | **Decided at Gate 3 (2026-09-29).** The testnet lane checkpoints every 60 blocks (one a minute at 1 s blocks) instead of 10. `checkpoint_every_blocks` is a node setting, so the genesis hashes do not change; rules (b) and (c) of §14.2 still end a batch early when it fills | A small checkpoint cost 0.067 XLM on the local network with testnet limits (T-011). Every 10 blocks that would be about 8,600 transactions and 580 XLM a day; every 60 it is about 1,440 and 96 XLM. Withdrawals wait up to a minute longer to become claimable | Measured testnet fees (T-014) |
+| DEC-045 | **Decided at Gate 3 (2026-09-29).** Hosting is the Google Cloud project `caravel-testnet` ("Caravel"), billed to the user's "My Billing Account 1" (BRL). A budget of R$100 a month for this project alerts at 50, 90 and 100%, and at 100% a Cloud Run function (`infra/gcp/billing-cap`, set up by `infra/gcp/setup-billing-cap.sh`) removes the project's billing account, which stops everything in it. The function's service account holds only Project Billing Manager and Browser on this project, not Billing Account Administrator as Google's guide suggests. Both paths were tested on 2026-09-29: below the budget it does nothing; above it billing was off within about 20 s, then relinked | The user asked for a spending limit; a budget alone only alerts. Google's caveats apply: notifications lag real costs, so the cap is not exact, and resources left without billing can be deleted | The budget amount, if the VM size changes |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 
@@ -2101,9 +2103,9 @@ Agents append new decisions here as `DEC-018+` with the same columns.
 
 | ID | Question | Default if unanswered |
 |---|---|---|
-| OQ-001 | Who operates the 3 validators for the demo? (ideally 3 different people or orgs) | Team runs all 3 on separate machines; UI says so |
+| OQ-001 | Who operates the 3 validators for the demo? (ideally 3 different people or orgs) | **Answered 2026-09-29 (Gate 3):** the team runs the sequencer and all 3 validators on one machine (see OQ-003), and the UI and docs say exactly that |
 | OQ-002 | Oracle source for testnet (Reflector feeds available for BTC/ETH/XLM?) | Reflector if available, else a public spot API, signed by the team's oracle key; UI says so |
-| OQ-003 | Hosting for the sequencer, validators and web | **Answered 2026-09-29:** Google Cloud for everything, kept cheap. The layout and its monthly cost are chosen before T-012 deploys anything (it affects OQ-001) |
+| OQ-003 | Hosting for the sequencer, validators and web | **Answered 2026-09-29:** Google Cloud for everything, kept cheap. **Chosen at Gate 3:** one e2-small VM in us-central1 (about $12 a month) running the sequencer, the 3 validators, the relayer and the web app |
 | OQ-004 | Demo timing for freeze/escape (needs short `escape_timeout_secs`) | Separate demo instance with 20-minute timeout; main instance 6 hours |
 | OQ-005 | Should the landing-page waitlist link to the testnet app? | No until T-013 is done |
 | OQ-006 | License for the repo | `MIT OR Apache-2.0` |
