@@ -1785,7 +1785,7 @@ Node ≥ 22 with `@stellar/stellar-sdk 17.2.0`. Contract calls go through `rpc.S
 
 ### 18.1 Stack and brand
 
-- React + Vite + TypeScript, with `@stellar/stellar-sdk`, `@stellar/freighter-api`, `@noble/ed25519` and `@noble/hashes`. Use `lightweight-charts` for the price chart `[VERIFY versions, pin in versions.json]`.
+- React + Vite + TypeScript, with `@stellar/stellar-sdk` 17.2.0, `@stellar/freighter-api` 6.0.1, `@noble/ed25519` 3.2.0 and `@noble/hashes` 2.4.0. Use `lightweight-charts` 5.2.1 for the price chart (versions pinned in `versions.json` and `apps/web/package.json`).
 - Brand: the Caravel design system.
   - Font: Schibsted Grotesk 400/700.
   - Dark theme ("Stage") by default. Tokens:
@@ -1817,7 +1817,7 @@ Node ≥ 22 with `@stellar/stellar-sdk 17.2.0`. Contract calls go through `rpc.S
   1. Generate an ed25519 session key (`@noble/ed25519`) and store it in IndexedDB. This is acceptable on testnet; label it "trading key on this device".
   2. Sign `ADD_SESSION_KEY` (`PERM_TRADE|PERM_CANCEL`, 24h expiry) with Freighter `signMessage` (scheme 1, message format §9.2).
   3. POST it.
-  - Check the exact `signMessage` argument and return shapes for freighter-api 6.0.1 `[VERIFY]`.
+  - freighter-api 6.0.1 (checked 2026-09-29 in its typings): `signMessage(message, {networkPassphrase, address})` returns `{signedMessage, signerAddress, error?}`, where `signedMessage` is a `Buffer` (v3 response) or a base64 string (v4); `signTransaction(xdr, {networkPassphrase, address})` returns `{signedTxXdr, signerAddress}`; `getNetworkDetails()` returns `{network, networkUrl, networkPassphrase, sorobanRpcUrl?}`.
 - **Order:** build `PLACE_ORDER` with the next nonce (from `/v1/accounts`, then tracked locally), sign with the session key (scheme 0), POST, and show the receipt from the WS stream.
 - **Withdraw:**
   1. Sign `WITHDRAW` with Freighter (scheme 1).
@@ -1934,7 +1934,7 @@ Status values: `todo`, `doing`, `review`, `done`. Agents update the Status cell 
 | T-010 | `caravel-node replay` | T-005, T-006 | §16 | done |
 | T-011 | Local compose + `scripts/e2e-local.sh` (§19.5 steps 1–6) | T-007…T-010 | §19.5 | done |
 | T-012 | Testnet deploy script; deploy engine + settlement; one **witness** `step` transaction on testnet with a small state, byte-equal to the executor output | T-011 | §3, §12, §13 | review |
-| T-013 | `apps/web` (§18) against local, then testnet | T-007, T-009 | §18 | todo |
+| T-013 | `apps/web` (§18) against local, then testnet | T-007, T-009 | §18 | review |
 | T-014 | Measurements (§19.6) + `docs/RESULTS.md` with dated numbers | T-012 | §19.6 | todo |
 | T-015 | `docs/RUNBOOK.md`: run locally, run a validator, deploy, rotate keys, freeze drill, replay | T-012 | all | todo |
 | T-016 | Security pass: walk §24 checklist, fix or file each item | T-012 | §24 | todo |
@@ -2095,6 +2095,15 @@ For lanes that need classic Stellar operations or SCP among many validators:
 | DEC-044 | **Decided at Gate 3 (2026-09-29).** The testnet lane checkpoints every 60 blocks (one a minute at 1 s blocks) instead of 10. `checkpoint_every_blocks` is a node setting, so the genesis hashes do not change; rules (b) and (c) of §14.2 still end a batch early when it fills | A small checkpoint cost 0.067 XLM on the local network with testnet limits (T-011). Every 10 blocks that would be about 8,600 transactions and 580 XLM a day; every 60 it is about 1,440 and 96 XLM. Withdrawals wait up to a minute longer to become claimable | Measured testnet fees (T-014) |
 | DEC-045 | **Decided at Gate 3 (2026-09-29).** Hosting is the Google Cloud project `caravel-testnet` ("Caravel"), billed to the user's "My Billing Account 1" (BRL). A budget of R$100 a month for this project alerts at 50, 90 and 100%, and at 100% a Cloud Run function (`infra/gcp/billing-cap`, set up by `infra/gcp/setup-billing-cap.sh`) removes the project's billing account, which stops everything in it. The function's service account holds only Project Billing Manager and Browser on this project, not Billing Account Administrator as Google's guide suggests. Both paths were tested on 2026-09-29: below the budget it does nothing; above it billing was off within about 20 s, then relinked | The user asked for a spending limit; a budget alone only alerts. Google's caveats apply: notifications lag real costs, so the cap is not exact, and resources left without billing can be deleted | The budget amount, if the VM size changes |
 | DEC-046 | Testnet hosting layout: VM `caravel-1` (e2-small, us-central1-a, Ubuntu 24.04, 20 GB standard disk, no service account, shielded boot) with static IP `35.224.76.64`, served as `35-224-76-64.sslip.io` with a free Let's Encrypt certificate from Caddy. SSH comes only through IAP (default SSH and RDP rules removed); ports 80 and 443 are open to the VM's tag. systemd runs the sequencer, `caravel-validator@1..3` and the relayer as the unprivileged `caravel` user with a read-only system (`ProtectSystem=strict`, writes only to `/opt/caravel/data`). Caddy exposes `/v1/*` (sequencer), `/validators/N/*` and the web app, never `/internal/*` or the validators' `/v1/sign`. Binaries and Wasm come from the CI `release` job (ubuntu-24.04, DEC-033) via `scripts/deploy-vm.sh`; secrets are copied once from the local Stellar keystore to `/opt/caravel/keys` (mode 600) | One cheap machine, as chosen at Gate 3; sslip.io gives TLS without buying a domain; building on the VM would be slow on 0.5 vCPU | A second machine or a domain |
+| DEC-047 | Web app choices (T-013):
+- a small pathname router instead of react-router, for five routes;
+- the `buffer` package installed as `globalThis.Buffer` for the SDK and Freighter;
+- the session key in IndexedDB, 24 h, `PERM_TRADE | PERM_CANCEL`;
+- trades and cancels signed by that key when it exists, everything else through Freighter's SEP-53 `signMessage`;
+- the price chart sampled in the browser from `/v1/markets` (the lane keeps no price history);
+- buy/sell, bids/asks and PnL shown with words, signs and weight, not color, because `lane` and `harbor` are reserved for lane and Stellar things (§18.1);
+- served from the same origin as the API on the VM (DEC-046), configurable with `VITE_*` for local lanes;
+- `/v1/status` gains `config_hash`, which the browser needs to compute tx hashes | Fewer dependencies; the brand rule forbids a third accent | — |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 
