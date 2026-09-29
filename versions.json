@@ -22,7 +22,7 @@
     "@noble/hashes": "2.4.0"
   },
   "artifacts": {
-    "engine_wasm_sha256": "FILLED_BY_T-004",
+    "engine_wasm_sha256": "04c731d0c0d6981e194965ae5df4717fdc266f81b156560856500ec088b5c2c5",
     "settlement_wasm_sha256": "FILLED_BY_T-006",
     "genesis_config_sha256": "eb29b3edbe4de1dbca966b95a3a4f3772efa2b17427c43a1e28ac14a9f289b71",
     "genesis_state_sha256": "a79ccf32302bc592813bcefa617aa7327951004aef568d625bee800349a04fd7"

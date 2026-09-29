@@ -12,7 +12,13 @@ crate-type = ["cdylib", "rlib"]
 doctest = false
 
 [dependencies]
-soroban-sdk = { workspace = true }
+caravel-perps = { workspace = true }
+caravel-types = { workspace = true }
+# The engine allocates (state and blocks are variable-length); the SDK's
+# bump allocator serves it.
+soroban-sdk = { workspace = true, features = ["alloc"] }
 
 [dev-dependencies]
-soroban-sdk = { workspace = true, features = ["testutils"] }
+soroban-sdk = { workspace = true, features = ["testutils", "alloc"] }
+caravel-perps = { workspace = true, features = ["native"] }
+caravel-testkit = { workspace = true }
