@@ -174,7 +174,7 @@ All values below were checked on 2026-09-29 unless dated otherwise. Anything mar
 Consequences, used throughout this spec:
 
 - `MAX_BATCH_BYTES = 96_000`, so a checkpoint transaction (header, batch, signatures, envelope) stays under the transaction-size limit with margin.
-- `max_block_bytes` (consensus, default 24,000) caps one `BlockInputV1`, so every block fits in a batch. The engine enforces it (§11.2), and the sequencer ends a batch before the next block could overflow it (§14.2).
+- `max_block_bytes` (consensus, 12,000 on the testnet lane after the T-005 benchmark, DEC-028) caps one `BlockInputV1`, so every block fits in a batch. The engine enforces it (§11.2), and the sequencer ends a batch before the next block could overflow it (§14.2).
 - The engine Wasm MUST be ≤ 131,072 bytes to be deployable, so budget for ≤ 120,000.
 - A contract function's return value MUST stay under 16 KiB. Views return small structs, not batches.
 
@@ -400,10 +400,10 @@ Create this file in T-000 and keep it current. CI fails if a `Cargo.toml` or `pa
     "@noble/hashes": "2.4.0"
   },
   "artifacts": {
-    "engine_wasm_sha256": "04c731d0c0d6981e194965ae5df4717fdc266f81b156560856500ec088b5c2c5",
+    "engine_wasm_sha256": "4571cd252d4b78d523d01fc4a31ab763a1aff77aecafbb9d7302cfb879abbf0a",
     "settlement_wasm_sha256": "FILLED_BY_T-006",
-    "genesis_config_sha256": "eb29b3edbe4de1dbca966b95a3a4f3772efa2b17427c43a1e28ac14a9f289b71",
-    "genesis_state_sha256": "a79ccf32302bc592813bcefa617aa7327951004aef568d625bee800349a04fd7"
+    "genesis_config_sha256": "f4b9db09137583ba9d66ea0b8a3a2b658a163f7b72993e0f242f04ea3ac93997",
+    "genesis_state_sha256": "22702d9f4c45f88306aca02169cf7a86ccaec3b45ed85103c7a9fc4277291e77"
   },
   "testnet": {
     "rpc_url": "https://soroban-testnet.stellar.org",
@@ -824,15 +824,15 @@ insurance_share_bps = 3000                 # 30% of every fee to backstop, rest 
 [limits]
 min_deposit = 10000000                     # 1 USDC (the settlement contract also enforces its own min, §13.1)
 min_withdrawal = 10000000
-max_accounts = 1024
-max_orders_per_side = 256
+max_accounts = 256                         # caps from the T-005 benchmark (DEC-028)
+max_orders_per_side = 128
 max_open_orders_per_account = 32
 max_session_keys = 4
 max_txs_per_account_per_block = 50
 max_entries_per_block = 256                # all entry types together
-max_block_bytes = 24000                    # ~110 PLACE_ORDER txs; see §3.3
+max_block_bytes = 12000                    # ~56 PLACE_ORDER txs; see §3.3
 max_pending_withdrawals = 512
-exec_cpu_limit = 400000000                 # set from the T-005 benchmark; blocks must stay well below
+exec_cpu_limit = 200000000                 # T-005: worst block at these caps is 95.8M host insns
 exec_mem_limit = 41943040
 
 [[markets]]
@@ -1316,16 +1316,17 @@ The contract has no storage. It copies `Bytes` into linear memory, calls `carave
 
 ### 12.2 Size and cost budget
 
-- Wasm ≤ 120,000 bytes (hard limit 131,072). Measured 2026-09-29 (T-004): **63,090 bytes**, sha256 `04c731d0…c2c5`, identical from a clean clone in another directory. Achieve this with `opt-level = "z"`, `lto`, `codegen-units = 1`, `panic = "abort"`, `strip`, and no `format!`/`core::fmt` in hot paths.
+- Wasm ≤ 120,000 bytes (hard limit 131,072). Achieve this with `lto`, `codegen-units = 1`, `panic = "abort"`, `strip`, and no `format!`/`core::fmt` in hot paths. The size-optimized `opt-level = "z"` fits easily (63,090 bytes, T-004) but makes the interpreted engine 2.7–4.6× more expensive, so the profile uses `opt-level = 2` (DEC-027): **84,764 bytes**, sha256 `4571cd25…bf0a` (T-005), identical from a clean clone in another directory.
   - If the Wasm is over budget, first remove formatting and generics bloat. Only then consider splitting (SoroDOOM rule: benchmark before splitting).
-- CPU per block in the host at full caps (1,024 accounts, 3 markets × 2 × 256 orders, 256 entries, 24,000-byte block) SHOULD stay ≤ 100M instructions. Measure it in T-005.
+- CPU per block in the host at full caps SHOULD stay ≤ 100M instructions. Measure it in T-005.
   - If over, reduce caps in `lane.toml` before optimizing algorithms.
+  - Measured 2026-09-29 (`docs/BENCHMARKS.md`). At the original caps (1,024 accounts, 3 × 2 × 256 orders, 24,000-byte blocks) even an empty block cost 607M, over the 400M limit. After `opt-level = 2` (DEC-027) and computing resting lots once per block, the worst block at those caps was 270M. The testnet lane now uses 256 accounts, 128 orders per side and 12,000-byte blocks (DEC-028): the worst block measured is **95.8M** (IOC takers sweeping the book), and memory stays under 5 MB.
 
 ### 12.3 Release profile
 
 ```toml
 [profile.release]
-opt-level = "z"
+opt-level = 2                # not "z": see DEC-027
 overflow-checks = true
 debug = 0
 strip = "symbols"
@@ -1645,14 +1646,15 @@ host.set_ledger_info(LedgerInfo { protocol_version: 28, sequence_number: 1, time
 host.as_budget().reset_unlimited()?;
 let contract = host.register_test_contract_wasm_from_source_account(&wasm, generate_account_id(&host), [9; 32])?;
 // per call:
-host.as_budget().reset_limits(cfg.exec_cpu_limit, cfg.exec_mem_limit)?;   // consensus budget [VERIFY exact API]
+host.as_budget().reset_limits(cfg.exec_cpu_limit, cfg.exec_mem_limit)?;   // consensus budget; also zeroes the counters
 let out: BytesObject = host.call(contract, Symbol::try_from_small_str("step")?, host.vec_new_from_slice(&[state.into(), block.into()])?)?.try_into()?;
 ```
 
 Rules:
-- The engine MUST NOT read ledger info (timestamp, sequence), so these values cannot affect output. Add a test that runs the same block under two different `LedgerInfo` values and asserts identical output.
+- The engine MUST NOT read ledger info (timestamp, sequence), so these values cannot affect output. Add a test that runs the same block under two different `LedgerInfo` values and asserts identical output. (Done in T-005: identical output **and** identical metering.)
+- Each call runs in a fresh host (DEC-029): register the Wasm with an unlimited budget, create the argument objects, then `reset_limits` and call. The budget covers exactly the `step` call, including Wasm parsing and instantiation, because the module cache stays off. A contract error maps to the fatal code; `ScErrorType::Crypto`/`InvalidInput` (the `ed25519_verify` trap) maps to `BAD_SIGNATURE`; `Budget`/`ExceededLimit` is budget exhaustion. All three are fatal.
 - The per-call budget is **consensus**:
-  - set CPU and memory limits to `config.exec_cpu_limit` and `config.exec_mem_limit` from `GenesisConfigV1`, using the pinned host's API for explicit limits (for example `Budget::reset_limits`) `[VERIFY]`;
+  - set CPU and memory limits to `config.exec_cpu_limit` and `config.exec_mem_limit` from `GenesisConfigV1` with `Budget::reset_limits(cpu, mem)`. Checked 2026-09-29 in `soroban-env-host 28.0.2` (`src/budget/util.rs`): it sets both limits and zeroes the consumed counters, and it is behind the `testutils` feature (DEC-029);
   - never use `reset_unlimited` or an unpinned default for `step` calls;
   - metering is deterministic, so every node exhausts the budget on the same block.
 - Load the Wasm from a file and check `sha256 == engine_wasm_hash` at startup. Refuse to start on mismatch.
@@ -1830,8 +1832,9 @@ Node ≥ 22 with `@stellar/stellar-sdk 17.2.0`. Generate typed clients with `ste
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings      # plus deny(clippy::float_arithmetic) in consensus crates
-cargo test --workspace --locked
-./scripts/build-contracts.sh                                # builds both Wasm, checks size limits, prints sha256
+./scripts/build-contracts.sh                                # builds both Wasm, checks size limits and recorded hashes (before the tests)
+cargo test --workspace --locked                             # includes the parity gate on scenarios and 1,000 random blocks
+cargo test --locked -p caravel-lane --test parity -- --ignored   # the 10,000-block parity gate (INV-P5)
 npm --prefix apps/relayer ci && npm --prefix apps/relayer test
 npm --prefix apps/web ci && npm --prefix apps/web test && npm --prefix apps/web run build
 ```
@@ -1917,7 +1920,7 @@ Status values: `todo`, `doing`, `review`, `done`. Agents update the Status cell 
 | T-002 | `caravel-merkle`: build + verify + proof generation; native and Soroban hashers | T-000 | §9.9 | done |
 | T-003 | `caravel-perps`: genesis + step (§11 complete) + scenarios 1–18 + property tests (native) | T-001, T-002 | §8, §9.10, §10, §11 | done |
 | T-004 | `contracts/perps-engine`: wrapper, size budget, reproducible build, hash in versions.json | T-003 | §12 | review |
-| T-005 | `caravel-lane::executor`: soroban-env-host runner; parity gate (10k blocks + scenarios); cpu/mem benchmark at full caps | T-004 | §8.2, §12.2, §14.5 | todo |
+| T-005 | `caravel-lane::executor`: soroban-env-host runner; parity gate (10k blocks + scenarios); cpu/mem benchmark at full caps | T-004 | §8.2, §12.2, §14.5 | review |
 | T-006 | `contracts/settlement`: all of §13 + tests in §13.7 | T-001, T-002 | §9, §11.8, §13 | todo |
 | T-007 | `caravel-node sequencer`: mempool, block loop, SQLite store, API/WS, checkpoint policy + assembly | T-005 | §14 | todo |
 | T-008 | `caravel-node validator`: follow, re-execute, sign, never-equivocate store | T-005 | §15 | todo |
@@ -2066,6 +2069,9 @@ For lanes that need classic Stellar operations or SCP among many validators:
 | DEC-024 | **Accepted at Gate 1 (2026-09-29).** Where the spec is silent (each choice changes state or receipt bytes, so scenario hashes depend on it): (a) an IOC remainder never gets an order id, so its `ORDER_CANCELED` has `order_id 0`; (b) `CANCEL_ALL` with a market id that is neither `0xFFFF` nor configured is rejected `UNKNOWN_MARKET` (nonce consumed); (c) `FORCED_WITHDRAWAL` for a missing account emits no event, otherwise the event carries the amount actually queued (0 if none); (d) `LIQUIDATION.deficit` is the non-negative amount the backstop absorbed; (e) arithmetic overflow in `PLACE_ORDER` checks 8–9 or `WITHDRAW` check 5 rejects with that check's code, while overflow in a state transition is fatal `ARITHMETIC_OVERFLOW`; (f) duplicate account keys in a decoded state are `BAD_STATE_ENCODING`; (g) more than 2^20 accounts or pending withdrawals at a commitment is `ARITHMETIC_OVERFLOW` (§10.2 does not cap `max_accounts` at the Merkle depth) | Deterministic answers where §11 does not say; none touches a frozen format, an invariant, a settlement check or a claim | — |
 | DEC-025 | New test-only crate `crates/caravel-testkit`: an `Executor` trait (native now, Wasm from T-005), a `Lane` simulator that signs real blocks and checks INV-P1…P4, P7, P8 after each one, the §19.3 scenarios, and the `gen-vectors` binary | Scenarios and vectors need the engine, which depends on `caravel-types`, so the generator cannot live there; one harness runs every scenario on both execution paths | — |
 | DEC-026 | The engine contract uses `soroban-sdk`'s `alloc` feature (bump allocator) and copies `Bytes` in and out with `to_alloc_vec` / `from_slice`. `scripts/build-contracts.sh` fails when a built hash differs from the one in `versions.json` | `caravel-perps` is `no_std + alloc` by design (§4.2); the host charges linear memory to the per-call budget, which T-005 measures. The hash check makes INV-D7 continuous: an engine change must update the recorded hash in the same PR | T-005 benchmark shows memory pressure |
+| DEC-027 | Contracts build with `opt-level = 2` instead of `"z"` | The engine runs interpreted inside `soroban-env-host`. `"z"` avoids inlining, and at full caps that made decoding 4.6× and margin scans 2.7× more expensive (T-005 profile). `2` matches `3` on cost and is smaller: 84,764 bytes, within the 120,000 budget | Wasm size approaches 120 KB |
+| DEC-028 | Testnet lane caps: `max_accounts 256`, `max_orders_per_side 128`, `max_block_bytes 12,000`, `exec_cpu_limit 200,000,000` (from 1,024 / 256 / 24,000 / 400M). Genesis hashes updated | §12.2: at 1,024 / 256 / 24,000 the worst block measured 270M even after optimization. 256 / 128 / 12,000 is the largest tested set with every block shape ≤ 100M (worst 95.8M). The CPU limit leaves 2× headroom over the worst block. About 56 orders per block still covers the 50 tx/s load test | Engine gets cheaper, or M1 state layout (T-M1-02) |
+| DEC-029 | The executor enables `soroban-env-host`'s `testutils` feature and runs every call in a fresh `Host::test_host_with_recording_footprint()` with the fixed lane `LedgerInfo` (`network_id = H("CARAVEL/LANE-EXEC/V1")`) | `testutils` holds the test host, contract registration and `Budget::reset_limits`, and adds only `arbitrary` and recording mode. A fresh host per call keeps memory bounded and metering independent of history, and parity plus identical metering under two ledger infos are tested. The ungated `Budget::try_from_configs` + `invoke_function` path is left for M1 | M1 executor (T-M1-02) |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

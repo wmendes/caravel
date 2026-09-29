@@ -186,8 +186,21 @@ fn strictly_ascending<T: Ord>(items: &[T]) -> bool {
 }
 
 impl GenesisConfigV1 {
+    /// Exact length of [`GenesisConfigV1::encode`].
+    pub fn encoded_len(&self) -> usize {
+        8 + 32 * 3
+            + 1
+            + 2
+            + 32 * self.allowlist.len()
+            + 1
+            + 32 * self.oracle_keys.len()
+            + 109
+            + 2
+            + MARKET_PARAMS_LEN * self.markets.len()
+    }
+
     pub fn encode(&self) -> Result<Vec<u8>, EncodeError> {
-        let mut w = Writer::new();
+        let mut w = Writer::with_capacity(self.encoded_len());
         w.bytes(GENESIS_MAGIC);
         w.bytes(&self.lane_id);
         w.bytes(&self.backstop_key);

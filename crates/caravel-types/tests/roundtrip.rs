@@ -556,7 +556,10 @@ proptest! {
 
     #[test]
     fn state_round_trips(s in state()) {
-        prop_assert_eq!(StateV1::decode(&s.encode().unwrap()), Ok(s));
+        let bytes = s.encode().unwrap();
+        prop_assert_eq!(bytes.len(), s.encoded_len());
+        prop_assert_eq!(s.config.encode().unwrap().len(), s.config.encoded_len());
+        prop_assert_eq!(StateV1::decode(&bytes), Ok(s));
     }
 
     #[test]

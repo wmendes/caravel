@@ -308,11 +308,17 @@ mod tests {
     }
 
     /// The TOML and the §10.3 fixture in caravel-types agree on every number;
-    /// only the keys differ.
+    /// only the keys and the benchmarked caps differ.
     #[test]
     fn testnet_numbers_match_the_section_10_3_fixture() {
         let mut from_toml = testnet().genesis_config().unwrap();
-        let fixture = caravel_types::vectors::config();
+        let mut fixture = caravel_types::vectors::config();
+        // The codec fixture keeps the v0.1.0 caps; the lane runs the caps the
+        // T-005 benchmark chose (DEC-028).
+        fixture.max_accounts = 256;
+        fixture.max_orders_per_side = 128;
+        fixture.max_block_bytes = 12_000;
+        fixture.exec_cpu_limit = 200_000_000;
         from_toml.backstop_key = fixture.backstop_key;
         from_toml.treasury_key = fixture.treasury_key;
         from_toml.oracle_keys = fixture.oracle_keys.clone();

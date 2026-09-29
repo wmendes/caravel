@@ -347,6 +347,15 @@ dependencies = [
 [[package]]
 name = "caravel-lane"
 version = "0.1.0"
+dependencies = [
+ "caravel-perps",
+ "caravel-testkit",
+ "caravel-types",
+ "ed25519-dalek",
+ "serde_json",
+ "sha2",
+ "soroban-env-host",
+]
 
 [[package]]
 name = "caravel-merkle"
@@ -888,6 +897,15 @@ dependencies = [
  "sec1",
  "subtle",
  "zeroize",
+]
+
+[[package]]
+name = "engine-profile"
+version = "0.1.0"
+dependencies = [
+ "caravel-perps",
+ "caravel-types",
+ "soroban-sdk",
 ]
 
 [[package]]

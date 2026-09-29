@@ -3,6 +3,7 @@
 //! scenarios, and the golden-vector generator (`cargo gen-vectors`).
 
 pub mod lane;
+pub mod random;
 pub mod scenarios;
 
 pub use lane::{Executor, Lane, NativeExecutor};

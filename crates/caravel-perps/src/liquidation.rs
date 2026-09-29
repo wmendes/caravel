@@ -9,7 +9,7 @@ use caravel_types::receipts::{CancelReason, Event};
 use caravel_types::state::BACKSTOP_INDEX;
 
 use crate::engine::{Engine, OrFatal, Res};
-use crate::margin::{account_margin, equity};
+use crate::margin::{account_margin_with, equity, resting_table};
 use crate::Crypto;
 
 impl<C: Crypto> Engine<'_, C> {
@@ -17,7 +17,10 @@ impl<C: Crypto> Engine<'_, C> {
         let e = BLOCK_LEVEL;
         let backstop = BACKSTOP_INDEX as usize;
         let mut events = Vec::new();
-        for a in 0..self.st.accounts.len() {
+        // Resting lots per account, once per block. Liquidating an account only
+        // cancels its own orders, so the other rows stay correct.
+        let resting = resting_table(&self.st).or_fatal(e)?;
+        for (a, rest) in resting.iter().enumerate() {
             let account = &self.st.accounts[a];
             if account.system || account.positions.iter().all(|p| p.lots == 0) {
                 continue;
@@ -29,7 +32,7 @@ impl<C: Crypto> Engine<'_, C> {
             if open.iter().any(|m| !self.fresh(*m)) {
                 continue;
             }
-            let margin = account_margin(&self.st, a, None).or_fatal(e)?;
+            let margin = account_margin_with(&self.st, a, rest, None).or_fatal(e)?;
             if margin.equity >= margin.maintenance {
                 continue;
             }

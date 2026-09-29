@@ -13,6 +13,8 @@
 //! free_collat = E − Σ_m IM_m
 //! ```
 
+use alloc::vec::Vec;
+
 use caravel_types::fixed::{mul_div_ceil, ArithError};
 use caravel_types::state::StateV1;
 use caravel_types::tx::Side;
@@ -91,6 +93,27 @@ pub fn equity(st: &StateV1, a: usize) -> Result<i128, ArithError> {
     (0..st.markets.len()).try_fold(st.accounts[a].collateral, |e, m| add(e, upnl(st, a, m)?))
 }
 
+/// `(B, A)` for every account and market, from one pass over the books:
+/// `table[a][m]`. Summing per account this way gives the same numbers as
+/// [`resting_lots`], in O(orders) instead of O(accounts × orders).
+pub fn resting_table(st: &StateV1) -> Result<Vec<Vec<(i128, i128)>>, ArithError> {
+    let mut table = alloc::vec![alloc::vec![(0i128, 0i128); st.markets.len()]; st.accounts.len()];
+    for (m, market) in st.markets.iter().enumerate() {
+        for (orders, is_bid) in [(&market.bids, true), (&market.asks, false)] {
+            for o in orders {
+                let slot = table.get_mut(o.account_index as usize).ok_or(OVERFLOW)?;
+                let side = if is_bid {
+                    &mut slot[m].0
+                } else {
+                    &mut slot[m].1
+                };
+                *side = add(*side, i128::from(o.lots_remaining))?;
+            }
+        }
+    }
+    Ok(table)
+}
+
 /// Equity, IM (with resting orders and an optional new order) and MM for account `a`.
 pub fn account_margin(
     st: &StateV1,
@@ -98,6 +121,19 @@ pub fn account_margin(
     extra: Option<ExtraOrder>,
 ) -> Result<Margin, ArithError> {
     let account_index = u32::try_from(a).map_err(|_| OVERFLOW)?;
+    let resting = (0..st.markets.len())
+        .map(|m| resting_lots(st, m, account_index))
+        .collect::<Result<Vec<_>, _>>()?;
+    account_margin_with(st, a, &resting, extra)
+}
+
+/// [`account_margin`] with the account's `(B, A)` per market already known.
+pub fn account_margin_with(
+    st: &StateV1,
+    a: usize,
+    resting: &[(i128, i128)],
+    extra: Option<ExtraOrder>,
+) -> Result<Margin, ArithError> {
     let mut out = Margin {
         equity: st.accounts[a].collateral,
         initial: 0,
@@ -106,7 +142,7 @@ pub fn account_margin(
     for (m, params) in st.config.markets.iter().enumerate() {
         let s = i128::from(st.accounts[a].positions[m].lots);
         let price = i128::from(st.markets[m].oracle_price);
-        let (mut bids, mut asks) = resting_lots(st, m, account_index)?;
+        let (mut bids, mut asks) = resting[m];
         if let Some(x) = extra.filter(|x| x.market == m) {
             match x.side {
                 Side::Buy => bids = add(bids, i128::from(x.lots))?,

@@ -25,9 +25,11 @@ caravel-perps = { path = "crates/caravel-perps" }
 caravel-lane = { path = "crates/caravel-lane" }
 caravel-testkit = { path = "crates/caravel-testkit" }
 
-# §12.3: reproducible, size-optimized contract builds.
+# §12.3: reproducible contract builds. opt-level 2, not "z": the engine runs
+# interpreted inside soroban-env-host, where "z" (no inlining) made decoding
+# 4.6x and margin scans 2.7x more expensive for 20 KB of size (DEC-027).
 [profile.release]
-opt-level = "z"
+opt-level = 2
 overflow-checks = true
 debug = 0
 strip = "symbols"
@@ -42,4 +44,19 @@ opt-level = 3
 [profile.dev.package.ed25519-dalek]
 opt-level = 3
 [profile.dev.package.sha2]
+opt-level = 3
+# The Wasm interpreter and host run tens of thousands of blocks in tests.
+[profile.dev.package.soroban-env-host]
+opt-level = 3
+[profile.dev.package.soroban-env-common]
+opt-level = 3
+[profile.dev.package.soroban-wasmi]
+opt-level = 3
+[profile.dev.package.wasmi_core]
+opt-level = 3
+[profile.dev.package.wasmparser]
+opt-level = 3
+[profile.dev.package.wasmparser-nostd]
+opt-level = 3
+[profile.dev.package.stellar-xdr]
 opt-level = 3

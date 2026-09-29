@@ -268,13 +268,38 @@ pub struct StateV1 {
     pub last_commitment: CommitmentV1,
 }
 
+/// `OrderV1` bytes.
+const ORDER_LEN: usize = 36;
+
 impl StateV1 {
+    /// Exact length of [`StateV1::encode`], so encoding allocates once.
+    pub fn encoded_len(&self) -> usize {
+        let markets = self.config.markets.len();
+        let accounts: usize = self
+            .accounts
+            .iter()
+            .map(|a| 62 + 41 * a.session_keys.len() + 24 * markets)
+            .sum();
+        let books: usize = self
+            .markets
+            .iter()
+            .map(|m| 56 + ORDER_LEN * (m.bids.len() + m.asks.len()))
+            .sum();
+        209 + self.config.encoded_len()
+            + 4
+            + accounts
+            + books
+            + 4
+            + 48 * self.pending.len()
+            + COMMITMENT_LEN
+    }
+
     pub fn encode(&self) -> Result<Vec<u8>, EncodeError> {
         let market_count = self.config.markets.len();
         if self.markets.len() != market_count {
             return Err(EncodeError);
         }
-        let mut w = Writer::new();
+        let mut w = Writer::with_capacity(self.encoded_len());
         w.bytes(STATE_MAGIC);
         w.bytes(&self.lane_id);
         w.bytes(&self.config_hash);
@@ -438,6 +463,8 @@ pub(crate) mod tests {
     fn round_trip() {
         let s = sample_state();
         let bytes = s.encode().unwrap();
+        assert_eq!(bytes.len(), s.encoded_len());
+        assert_eq!(s.config.encode().unwrap().len(), s.config.encoded_len());
         assert_eq!(&bytes[..8], b"CVSTATE1");
         assert_eq!(StateV1::decode(&bytes), Ok(s));
     }
