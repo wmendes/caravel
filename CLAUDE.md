@@ -35,9 +35,11 @@ Toolchain: Rust 1.93.0 + `wasm32v1-none` (from `rust-toolchain.toml`), Stellar C
 
 ```sh
 node scripts/check-versions.mjs         # versions.json pins, Cargo.lock/package-lock, placeholders (§7)
+./scripts/build-contracts.sh            # builds Wasm with the pinned CLI, checks size and recorded hashes (DEC-020); run before the tests
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace --locked
+cargo test --locked -p caravel-lane --test parity -- --ignored      # 10,000-block native/Wasm parity gate (INV-P5)
 cargo build --locked -p caravel-types -p caravel-merkle -p caravel-perps --target wasm32v1-none   # consensus crates stay no_std
-./scripts/build-contracts.sh            # builds Wasm with the pinned CLI, checks size, prints sha256 (DEC-020)
+BENCH_ACCOUNTS=256 BENCH_ORDERS_PER_SIDE=128 BENCH_BLOCK_BYTES=12000 cargo run --release -p caravel-lane --example bench_full_caps   # docs/BENCHMARKS.md
 ./scripts/e2e-local.sh                  # quickstart + sequencer + 3 validators + relayer (after T-011)
 npm --prefix apps/relayer ci && npm --prefix apps/relayer test
 npm --prefix apps/web ci && npm --prefix apps/web test && npm --prefix apps/web run build

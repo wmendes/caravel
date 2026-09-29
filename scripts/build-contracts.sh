@@ -19,7 +19,10 @@ if [[ "$have_cli" != "$want_cli" ]]; then
 fi
 
 rm -rf "$OUT_DIR"
-stellar contract build --locked --out-dir "$OUT_DIR" --quiet
+# Only the contracts of record (contracts/engine-profile is a profiling tool).
+for pkg in perps-engine settlement; do
+  stellar contract build --locked --package "$pkg" --out-dir "$OUT_DIR" --quiet
+done
 
 sha256() { shasum -a 256 "$1" | awk '{print $1}'; }
 # The recorded hash, or empty while versions.json still has a placeholder.

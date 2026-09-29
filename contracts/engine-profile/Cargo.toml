@@ -1,0 +1,17 @@
+[package]
+name = "engine-profile"
+description = "Profiling only (never deployed): runs engine phases one at a time to meter them in the host"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[dependencies]
+caravel-perps = { workspace = true }
+caravel-types = { workspace = true }
+soroban-sdk = { workspace = true, features = ["alloc"] }
