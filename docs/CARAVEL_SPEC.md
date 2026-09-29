@@ -400,7 +400,7 @@ Create this file in T-000 and keep it current. CI fails if a `Cargo.toml` or `pa
     "@noble/hashes": "2.4.0"
   },
   "artifacts": {
-    "engine_wasm_sha256": "FILLED_BY_T-004",
+    "engine_wasm_sha256": "04c731d0c0d6981e194965ae5df4717fdc266f81b156560856500ec088b5c2c5",
     "settlement_wasm_sha256": "FILLED_BY_T-006",
     "genesis_config_sha256": "eb29b3edbe4de1dbca966b95a3a4f3772efa2b17427c43a1e28ac14a9f289b71",
     "genesis_state_sha256": "a79ccf32302bc592813bcefa617aa7327951004aef568d625bee800349a04fd7"
@@ -1312,11 +1312,11 @@ Receipts are part of the parity gate (INV-P5) but are not hashed into checkpoint
 }
 ```
 
-The contract has no storage. It copies `Bytes` into linear memory, calls `caravel_perps::step` with a `SorobanCrypto` impl (`env.crypto()`), and copies the output back. On a `Fatal`, it calls `panic_with_error!`.
+The contract has no storage. It copies `Bytes` into linear memory, calls `caravel_perps::step` with a `SorobanCrypto` impl (`env.crypto()`), and copies the output back. On a `Fatal`, it calls `panic_with_error!` with contract error code = fatal code (the `EngineError` enum, 1–17, is in the contract spec). An invalid signature traps inside `ed25519_verify` and is a host error, never a contract error code. The engine allocates through the `soroban-sdk` `alloc` feature (a bump allocator that never frees), so every allocation in a `step` call counts toward `exec_mem_limit` (DEC-026).
 
 ### 12.2 Size and cost budget
 
-- Wasm ≤ 120,000 bytes (hard limit 131,072). Achieve this with `opt-level = "z"`, `lto`, `codegen-units = 1`, `panic = "abort"`, `strip`, and no `format!`/`core::fmt` in hot paths.
+- Wasm ≤ 120,000 bytes (hard limit 131,072). Measured 2026-09-29 (T-004): **63,090 bytes**, sha256 `04c731d0…c2c5`, identical from a clean clone in another directory. Achieve this with `opt-level = "z"`, `lto`, `codegen-units = 1`, `panic = "abort"`, `strip`, and no `format!`/`core::fmt` in hot paths.
   - If the Wasm is over budget, first remove formatting and generics bloat. Only then consider splitting (SoroDOOM rule: benchmark before splitting).
 - CPU per block in the host at full caps (1,024 accounts, 3 markets × 2 × 256 orders, 256 entries, 24,000-byte block) SHOULD stay ≤ 100M instructions. Measure it in T-005.
   - If over, reduce caps in `lane.toml` before optimizing algorithms.
@@ -1916,7 +1916,7 @@ Status values: `todo`, `doing`, `review`, `done`. Agents update the Status cell 
 | T-001 | `caravel-types`: all §9 codecs, tags, reason and fatal codes, fixed-point helpers; golden vector generator | T-000 | §8, §9, §10.2, §11 (codes), §11.10 | done |
 | T-002 | `caravel-merkle`: build + verify + proof generation; native and Soroban hashers | T-000 | §9.9 | done |
 | T-003 | `caravel-perps`: genesis + step (§11 complete) + scenarios 1–18 + property tests (native) | T-001, T-002 | §8, §9.10, §10, §11 | done |
-| T-004 | `contracts/perps-engine`: wrapper, size budget, reproducible build, hash in versions.json | T-003 | §12 | todo |
+| T-004 | `contracts/perps-engine`: wrapper, size budget, reproducible build, hash in versions.json | T-003 | §12 | review |
 | T-005 | `caravel-lane::executor`: soroban-env-host runner; parity gate (10k blocks + scenarios); cpu/mem benchmark at full caps | T-004 | §8.2, §12.2, §14.5 | todo |
 | T-006 | `contracts/settlement`: all of §13 + tests in §13.7 | T-001, T-002 | §9, §11.8, §13 | todo |
 | T-007 | `caravel-node sequencer`: mempool, block loop, SQLite store, API/WS, checkpoint policy + assembly | T-005 | §14 | todo |
@@ -2065,6 +2065,7 @@ For lanes that need classic Stellar operations or SCP among many validators:
 | DEC-023 | `Crypto` gains a defaulted `check_ed25519(..) -> Result<(), InvalidSignature>` that the engine calls. The default traps through `ed25519_verify`, as the host does; `DiagnosticCrypto` overrides it so a bad signature becomes `Fatal { BAD_SIGNATURE, entry_index }` | §14.1 needs the entry index of a bad signature; the trait in §11 had no fallible path | — |
 | DEC-024 | **Accepted at Gate 1 (2026-09-29).** Where the spec is silent (each choice changes state or receipt bytes, so scenario hashes depend on it): (a) an IOC remainder never gets an order id, so its `ORDER_CANCELED` has `order_id 0`; (b) `CANCEL_ALL` with a market id that is neither `0xFFFF` nor configured is rejected `UNKNOWN_MARKET` (nonce consumed); (c) `FORCED_WITHDRAWAL` for a missing account emits no event, otherwise the event carries the amount actually queued (0 if none); (d) `LIQUIDATION.deficit` is the non-negative amount the backstop absorbed; (e) arithmetic overflow in `PLACE_ORDER` checks 8–9 or `WITHDRAW` check 5 rejects with that check's code, while overflow in a state transition is fatal `ARITHMETIC_OVERFLOW`; (f) duplicate account keys in a decoded state are `BAD_STATE_ENCODING`; (g) more than 2^20 accounts or pending withdrawals at a commitment is `ARITHMETIC_OVERFLOW` (§10.2 does not cap `max_accounts` at the Merkle depth) | Deterministic answers where §11 does not say; none touches a frozen format, an invariant, a settlement check or a claim | — |
 | DEC-025 | New test-only crate `crates/caravel-testkit`: an `Executor` trait (native now, Wasm from T-005), a `Lane` simulator that signs real blocks and checks INV-P1…P4, P7, P8 after each one, the §19.3 scenarios, and the `gen-vectors` binary | Scenarios and vectors need the engine, which depends on `caravel-types`, so the generator cannot live there; one harness runs every scenario on both execution paths | — |
+| DEC-026 | The engine contract uses `soroban-sdk`'s `alloc` feature (bump allocator) and copies `Bytes` in and out with `to_alloc_vec` / `from_slice`. `scripts/build-contracts.sh` fails when a built hash differs from the one in `versions.json` | `caravel-perps` is `no_std + alloc` by design (§4.2); the host charges linear memory to the per-call budget, which T-005 measures. The hash check makes INV-D7 continuous: an engine change must update the recorded hash in the same PR | T-005 benchmark shows memory pressure |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 
