@@ -1,0 +1,10 @@
+[package]
+name = "caravel-perps"
+description = "Caravel Perps deterministic engine logic (no_std + alloc)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]

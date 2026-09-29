@@ -1,1 +1,22 @@
+# Build output
+/target/
+node_modules/
+dist/
+
+# Secrets and local state (spec §0.3 rule 8, §24)
+*.key
+.env*
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+/keys/
+
+# Vercel project links (landing page lives in site/)
 .vercel
+
+# OS
+.DS_Store
+
+# soroban-sdk testutils writes these on every test run
+test_snapshots/
