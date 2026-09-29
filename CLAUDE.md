@@ -40,6 +40,9 @@ cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warni
 cargo test --locked -p caravel-lane --test parity -- --ignored      # 10,000-block native/Wasm parity gate (INV-P5)
 cargo build --locked -p caravel-types -p caravel-merkle -p caravel-perps --target wasm32v1-none   # consensus crates stay no_std
 BENCH_ACCOUNTS=256 BENCH_ORDERS_PER_SIDE=128 BENCH_BLOCK_BYTES=12000 cargo run --release -p caravel-lane --example bench_full_caps   # docs/BENCHMARKS.md
+CARAVEL_INTERNAL_TOKEN=$(openssl rand -hex 16) cargo run --release -p caravel-node -- sequencer --config config/sequencer.local.toml   # local sequencer (local lane, DEC-037)
+cargo run --release -p caravel-node -- check-store --config config/sequencer.local.toml   # replay a node's store through the Wasm
+DURATION=3600 TPS=50 ./scripts/soak-sequencer.sh   # T-007 soak: 1 s blocks, 50 tx/s, restart halfway
 ./scripts/e2e-local.sh                  # quickstart + sequencer + 3 validators + relayer (after T-011)
 npm --prefix apps/relayer ci && npm --prefix apps/relayer test
 npm --prefix apps/web ci && npm --prefix apps/web test && npm --prefix apps/web run build
