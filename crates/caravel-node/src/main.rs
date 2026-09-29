@@ -49,6 +49,8 @@ enum Command {
         #[arg(long)]
         prove_withdrawals: Option<String>,
     },
+    /// Sign a lane transaction with an account's key file and submit it.
+    Tx(caravel_node::txcli::TxArgs),
     /// Run a validator (spec §15): follow, re-execute, sign, serve proofs.
     Validator {
         /// The validator config, e.g. config/validator-1.local.toml.
@@ -181,6 +183,12 @@ fn main() -> Result<()> {
                 }
                 anyhow::Ok(())
             })?;
+        }
+        Command::Tx(args) => {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?
+                .block_on(caravel_node::txcli::run(args))?;
         }
         Command::Validator { config } => {
             init_logging();
