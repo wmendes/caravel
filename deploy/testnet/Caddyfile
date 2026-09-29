@@ -1,22 +1,27 @@
 # The VM's only public listener (DEC-046): TLS for the sslip.io name of the
 # static IP, the public lane API, each validator's public API, and the web app.
 # The sequencer's /internal/* and the validators' /v1/sign stay private.
+# (Caddy runs `handle` blocks before a top-level `respond`, so each block
+# rule sits inside the block it guards.)
 {$CARAVEL_HOST} {
 	encode gzip
 
-	@private path /internal/* /validators/*/v1/sign
-	respond @private 404
-
+	handle /internal/* {
+		respond 404
+	}
 	handle /v1/* {
 		reverse_proxy 127.0.0.1:8080
 	}
 	handle_path /validators/1/* {
+		respond /v1/sign 404
 		reverse_proxy 127.0.0.1:8081
 	}
 	handle_path /validators/2/* {
+		respond /v1/sign 404
 		reverse_proxy 127.0.0.1:8082
 	}
 	handle_path /validators/3/* {
+		respond /v1/sign 404
 		reverse_proxy 127.0.0.1:8083
 	}
 	handle {

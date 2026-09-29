@@ -41,7 +41,7 @@ cp -r "$RELEASE_DIR/relayer/dist" "$RELEASE_DIR/relayer/package.json" "$RELEASE_
 cp config/lane.caravel-perps.testnet.toml deploy/testnet/*.toml deploy/testnet/relayer.json "$STAGE/opt/config/"
 cp deploy/testnet/systemd/* "$STAGE/systemd/"
 sed "s/{\$CARAVEL_HOST}/$HOST/" deploy/testnet/Caddyfile > "$STAGE/Caddyfile"
-tar -czf "$STAGE.tgz" -C "$STAGE" .
+COPYFILE_DISABLE=1 tar --no-xattrs -czf "$STAGE.tgz" -C "$STAGE" .
 gcloud compute scp "${G[@]}" "$STAGE.tgz" "$VM:/tmp/caravel-release.tgz"
 rm -f "$STAGE.tgz"
 
@@ -56,10 +56,10 @@ if [[ "${INIT_KEYS:-0}" == "1" ]]; then
     echo "CARAVEL_ORACLE_SECRET=$(stellar keys secret caravel-oracle 2>/dev/null)"
   } > "$K/env"
   chmod 600 "$K"/*
-  tar -czf "$K.tgz" -C "$K" .
+  COPYFILE_DISABLE=1 tar --no-xattrs -czf "$K.tgz" -C "$K" .
   gcloud compute scp "${G[@]}" "$K.tgz" "$VM:/tmp/caravel-keys.tgz"
   rm -f "$K.tgz"
-  vm "sudo tar -xzf /tmp/caravel-keys.tgz -C /opt/caravel/keys && sudo chown -R caravel:caravel /opt/caravel/keys && sudo chmod 600 /opt/caravel/keys/* && rm -f /tmp/caravel-keys.tgz && ls -l /opt/caravel/keys | tail -n +2 | awk '{print \$1, \$9}'"
+  vm "sudo tar -xzf /tmp/caravel-keys.tgz -C /opt/caravel/keys && rm -f /tmp/caravel-keys.tgz && sudo sh -c 'chown -R caravel:caravel /opt/caravel/keys && chmod 700 /opt/caravel/keys && chmod 600 /opt/caravel/keys/* && ls -l /opt/caravel/keys' | tail -n +2 | awk '{print \$1, \$3, \$9}'"
 fi
 
 echo "== install and restart"

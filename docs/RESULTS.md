@@ -32,3 +32,17 @@ The engine contract's `step` was invoked once on testnet with a small input. The
 | Host metering in the executor | 9,528,446 CPU instructions, 3,488,005 memory bytes (not network fees) |
 
 This shows the exact call the nodes make is a valid Stellar invocation with the same output. It does not mean Stellar validators execute lane trades (spec §2.2).
+
+## The lane on testnet (T-012, 2026-09-29)
+
+The sequencer, 3 validators and relayer run on one e2-small VM (DEC-046). Public API: `https://35-224-76-64.sslip.io/v1/status`, and each validator at `/validators/N/v1/status`. Oracle prices come from Reflector's testnet feed (DEC-041).
+
+| First checkpoint on testnet | |
+|---|---|
+| Transaction | [`59821f87f5dfdf051138dd0ed4671265cce8a7a78ef3981ee024e56d75f87802`](https://stellar.expert/explorer/testnet/tx/59821f87f5dfdf051138dd0ed4671265cce8a7a78ef3981ee024e56d75f87802) |
+| Ledger | 4,939,489, 2026-09-29 22:30:32 UTC |
+| Covers | seq 1, lane blocks 1 to 60 (`checkpoint_every_blocks = 60`, DEC-044) |
+| Batch | 9,934 bytes; header 442 bytes; 3 signatures; transaction 11,496 bytes |
+| Fee charged | 3,048,833 stroops (0.305 XLM); `minResourceFee` from simulation 3,510,124 |
+
+At one checkpoint a minute that is about 440 XLM a day of testnet XLM for the relayer account. T-014 breaks the fee down and measures it under load.

@@ -1933,7 +1933,7 @@ Status values: `todo`, `doing`, `review`, `done`. Agents update the Status cell 
 | T-009 | `apps/relayer`: inbox watcher, checkpoint submitter, oracle feeder | T-006, T-007 | §17 | done |
 | T-010 | `caravel-node replay` | T-005, T-006 | §16 | done |
 | T-011 | Local compose + `scripts/e2e-local.sh` (§19.5 steps 1–6) | T-007…T-010 | §19.5 | done |
-| T-012 | Testnet deploy script; deploy engine + settlement; one **witness** `step` transaction on testnet with a small state, byte-equal to the executor output | T-011 | §3, §12, §13 | todo |
+| T-012 | Testnet deploy script; deploy engine + settlement; one **witness** `step` transaction on testnet with a small state, byte-equal to the executor output | T-011 | §3, §12, §13 | review |
 | T-013 | `apps/web` (§18) against local, then testnet | T-007, T-009 | §18 | todo |
 | T-014 | Measurements (§19.6) + `docs/RESULTS.md` with dated numbers | T-012 | §19.6 | todo |
 | T-015 | `docs/RUNBOOK.md`: run locally, run a validator, deploy, rotate keys, freeze drill, replay | T-012 | all | todo |
