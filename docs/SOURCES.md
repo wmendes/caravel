@@ -11,6 +11,12 @@ Never copy GPL files (for example SoroDOOM's PureDOOM files). Stellar facts are 
 
 None yet.
 
+## Designs re-implemented (no code copied)
+
+| Design | Source | License | Where |
+|---|---|---|---|
+| Weighted ed25519 signer sets: sorted keys, weights and threshold, epochs, a rotation delay, retention of recent sets, a hash per set so a set cannot come back | Axelar `axelar-amplifier-stellar`, gateway `auth.rs` (read for the design only) | not needed: nothing copied | `contracts/settlement/src/signers.rs`, `rotate_signers` / `admin_rotate_signers` in `lib.rs` (spec §13.4, DEC-004) |
+
 ## Facts and versions checked
 
 | Date | What | Source | Used in |
@@ -28,3 +34,9 @@ None yet.
 | 2026-09-29 | ed25519 group order `L = 2^252 + 27742317777372353535851937790883648493` | RFC 8032 §5.1 | `S + L` vector in `test-vectors/signatures.json` |
 | 2026-09-29 | Cross-checks of the T-001 vectors: every signature verifies under Node 24's OpenSSL ed25519; `@stellar/stellar-sdk 17.2.0` `Keypair.signMessage` produces the vector's SEP-53 signature byte for byte and `verifyMessage` accepts it; Python `hashlib` reproduces every `H(hex)` | local tools | `test-vectors/*.json` |
 | 2026-09-29 | `soroban-sdk 28.0.0` `build.rs` rejects Wasm builds unless `SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2` is set (by stellar-cli ≥ 25.2.0); `Crypto::sha256(&Bytes) -> Hash<32>`, `Hash::to_array`, `Vec::from_iter(&Env, iter)` | crate source in the cargo registry | §12.3, `caravel-merkle` Soroban hasher |
+| 2026-09-29 | Mainnet activated Protocol 28 on 2026-09-16 | stellar-raven: "Stellar Weekly Roundup: Week of Sep 11, 2026" (2026-09-18) | spec §3.1 |
+| 2026-09-29 | Testnet RPC reports `protocolVersion 29` (`getNetwork`, `getLatestLedger`), `getVersionInfo`: RPC `29.0.0-b2b70168…` built 2026-09-22, captive core `stellar-core 29.0.0 (4eb83337…)`. Not in stellar-raven's docs or news (latest: Protocol 28), and crates.io's newest `soroban-env-host` is 28.0.2 (2026-08-17). Open conflict; pins stay at 28 | `https://soroban-testnet.stellar.org`; stellar-raven search; crates.io | spec §3.1; T-012 witness check |
+| 2026-09-29 | Testnet Soroban limits: tx 400,000,000 instructions, 41,943,040 bytes memory, 200 disk-read entries / 200,000 bytes, 200 write entries / 132,096 bytes, tx size 132,096 bytes, events 16,384 bytes, footprint 400 entries, contract data 65,536 bytes (key 250), Wasm 131,072 bytes, max entry TTL 3,110,400 ledgers, target close 5,000 ms | `stellar network settings --network testnet` (CLI 28.1.0) | spec §3.3; settlement budget test |
+| 2026-09-29 | `soroban-sdk 28.0.0` settlement APIs: `#[contractevent(topics = [..])]` + `#[topic]`, `Events::publish_event` (`Events::publish` is `#[deprecated]`), `Storage::max_ttl`, `Deployer::update_current_contract(ContractExecutable::Wasm(..))` (`update_current_contract_wasm` is deprecated), `TokenClient::transfer(&Address, impl Into<MuxedAddress>, &i128)`; testutils `register_stellar_asset_contract_v2`, `CostEstimate::resources` (meaningful only for a Wasm-registered contract), `Budget::reset_limits`, storage `get_ttl`, `Ledger::set_max_entry_ttl`, `ContractEvents::filter_by_contract`, `Event::to_xdr` | docs.rs / crate source `soroban-sdk-28.0.0/src` | `contracts/settlement` |
+| 2026-09-29 | Cargo 1.93.0 (`083ac5135`): `compute_metadata` mixes every dependency's `c_metadata` into a unit's `-C metadata`; `hash_rustc_version` hashes the `host:` line of `rustc -vV` only for host units (proc macros, build scripts), so target crates inherit a host-dependent hash through them | rust-lang/cargo `src/cargo/core/compiler/build_runner/compilation_files.rs` at commit `083ac5135f967fd9dc906ab057a2315861c7a80d` | DEC-033 |
+| 2026-09-29 | Same source, pinned CLI 28.1.0: macOS arm64 (source-built and release binaries agree) vs Linux x86_64 (release binary, CI) give settlement `8280828f…` vs `8a2fafbd…` (both 42,900 B, also different with `--optimize=false`, 50,521 B) and engine `4571cd25…` on both | local builds; throwaway CI workflow `wasm-repro` runs 36619193457 and 36619486533 | DEC-033 |

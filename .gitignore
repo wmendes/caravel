@@ -20,3 +20,6 @@ dist/
 
 # soroban-sdk testutils writes these on every test run
 test_snapshots/
+
+# Claude Code local state
+.claude/scheduled_tasks.lock

@@ -131,7 +131,7 @@ All values below were checked on 2026-09-29 unless dated otherwise. Anything mar
 
 | Item | Value | Source |
 |---|---|---|
-| Current protocol | 28 ("Adapter"). Testnet upgraded 2026-08-27 (checked 2026-09-29 via stellar-raven); mainnet vote 2026-09-16 `[VERIFY]` | SDF blog "Adapter, Protocol 28 Upgrade Guide", "Introducing Adapter, Protocol 28 on Stellar" |
+| Current protocol | 28 ("Adapter"). Testnet upgraded 2026-08-27; mainnet activated 2026-09-16 (checked 2026-09-29 via stellar-raven). **Conflict, open:** on 2026-09-29 testnet RPC `getNetwork` and `getVersionInfo` report `protocolVersion 29` (stellar-core 29.0.0, RPC 29.0.0 built 2026-09-22), while stellar-raven's docs and news cover only Protocol 28 and crates.io has no `soroban-env-host` 29 (latest 28.0.2). Pins stay at 28; the T-012 witness `step` on testnet is the byte-equality check `[VERIFY]` | SDF blog "Adapter, Protocol 28 Upgrade Guide", "Introducing Adapter, Protocol 28 on Stellar"; Stellar Weekly Roundup 2026-09-18; testnet RPC |
 | Protocol 28 CAPs | CAP-83 (empty tx set value), CAP-85 (externally managed contract executables), CAP-86 (sparse map host functions) | same |
 | `soroban-sdk` | 28.0.0 (2026-09-18) | crates.io |
 | `soroban-env-host` | 28.0.2 | crates.io |
@@ -157,23 +157,26 @@ All values below were checked on 2026-09-29 unless dated otherwise. Anything mar
 - `env.ledger().network_id()` returns the 32-byte network ID, which is `H(passphrase)`. `env.ledger().timestamp()` returns seconds.
 - `ToXdr::to_xdr(&env)` and `FromXdr::from_xdr(&env, &bytes)` exist in `soroban_sdk::xdr`.
 
-### 3.3 Per-transaction Soroban limits (protocol 27, rechecked 2026-07-28 by SoroDOOM) `[VERIFY for protocol 28]`
+### 3.3 Per-transaction Soroban limits (testnet, checked 2026-09-29 with `stellar network settings --network testnet`)
 
 | Limit | Value |
 |---|---:|
 | CPU instructions | 400,000,000 |
-| Memory | 40 MiB |
+| Memory | 41,943,040 bytes (40 MiB) |
 | Footprint entries | 400 |
 | Disk reads | 200 entries / 200,000 bytes |
 | Writes | 200 entries / 132,096 bytes |
 | Transaction size | 132,096 bytes |
 | Events + return value | 16,384 bytes |
-| Contract-data entry | 65,536 bytes |
+| Contract-data entry | 65,536 bytes (key ≤ 250 bytes) |
 | Contract Wasm | 131,072 bytes |
+| Max entry TTL | 3,110,400 ledgers (≈ 180 days at the 5,000 ms target close time) |
+
+These match the protocol-27 values SoroDOOM recorded on 2026-07-28. They are live network settings: recheck before a deployment `[VERIFY]`.
 
 Consequences, used throughout this spec:
 
-- `MAX_BATCH_BYTES = 96_000`, so a checkpoint transaction (header, batch, signatures, envelope) stays under the transaction-size limit with margin.
+- `MAX_BATCH_BYTES = 96_000`, so a checkpoint transaction (header, batch, signatures, envelope) stays under the transaction-size limit with margin. Measured in T-006 with the settlement Wasm: a 96,000-byte batch with 3 signatures costs 7.9M instructions and 1.3 MB of memory, writes 2 entries (1,976 bytes), and its arguments are 96,892 bytes of XDR (`docs/BENCHMARKS.md`).
 - `max_block_bytes` (consensus, 12,000 on the testnet lane after the T-005 benchmark, DEC-028) caps one `BlockInputV1`, so every block fits in a batch. The engine enforces it (§11.2), and the sequencer ends a batch before the next block could overflow it (§14.2).
 - The engine Wasm MUST be ≤ 131,072 bytes to be deployable, so budget for ≤ 120,000.
 - A contract function's return value MUST stay under 16 KiB. Views return small structs, not batches.
@@ -401,7 +404,7 @@ Create this file in T-000 and keep it current. CI fails if a `Cargo.toml` or `pa
   },
   "artifacts": {
     "engine_wasm_sha256": "4571cd252d4b78d523d01fc4a31ab763a1aff77aecafbb9d7302cfb879abbf0a",
-    "settlement_wasm_sha256": "FILLED_BY_T-006",
+    "settlement_wasm_sha256": "8a2fafbd1ad48d53333ab79d73afa1c50d5f790f39a97fafb88b5443b383d503",
     "genesis_config_sha256": "f4b9db09137583ba9d66ea0b8a3a2b658a163f7b72993e0f242f04ea3ac93997",
     "genesis_state_sha256": "22702d9f4c45f88306aca02169cf7a86ccaec3b45ed85103c7a9fc4277291e77"
   },
@@ -1336,7 +1339,7 @@ codegen-units = 1
 lto = true
 ```
 
-Build with `scripts/build-contracts.sh`, i.e. `stellar contract build --locked --out-dir target/contracts` with the pinned CLI (DEC-020). Record `sha256sum` in `versions.json`.
+Build with `scripts/build-contracts.sh`, i.e. `stellar contract build --locked --out-dir target/contracts` with the pinned CLI (DEC-020). Record `sha256sum` of the x86_64 Linux build (CI) in `versions.json` (DEC-033).
 
 Checked 2026-09-29: plain `cargo build --target wasm32v1-none` is **not** an option for contracts. The `soroban-sdk 28.0.0` build script exits with an error unless `SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2` is set, which `stellar-cli ≥ 25.2.0` does. The CLI runs `cargo rustc --locked --crate-type=cdylib --target=wasm32v1-none --release` with `--remap-path-prefix` for the registry. Crates that do not depend on `soroban-sdk` (`caravel-types`, `caravel-merkle` without `soroban`, `caravel-perps`) still build with plain cargo, and CI checks that they do.
 
@@ -1390,7 +1393,7 @@ Soroban contract, `soroban-sdk =28.0.0`. One instance per lane.
 Storage classes:
 - **Instance:** `Config`, `Epoch`, `MinValidEpoch`, `LastCkpt`, `InboxCount`, `Frozen`, `LastRotationAt`, and the two totals.
 - **Persistent:** everything else.
-- **TTL:** extend instance storage on every call. Extend a persistent entry when it is read or written and its TTL is below 30 days, targeting 120 days (≈ 17,280 ledgers per day) `[VERIFY max TTL]`.
+- **TTL:** extend instance storage on every call. Extend a persistent entry when it is read or written and its TTL is below 30 days, targeting 120 days (≈ 17,280 ledgers per day). Both are clamped to `env.storage().max_ttl()`; testnet's maximum is 3,110,400 ledgers (§3.3), above the 2,073,600-ledger target.
 
 ### 13.2 Functions
 
@@ -1402,14 +1405,14 @@ Storage classes:
 | `submit_checkpoint(header: Bytes, batch: Bytes, epoch: u64, sigs: Vec<Sig>)` | none (signatures are the auth) | §13.3 |
 | `claim_withdrawal(recipient, lane_account, seq, index, amount, proof: Vec<BytesN<32>>)` | none | §13.5; allowed when frozen |
 | `rotate_signers(new: WeightedSigners, epoch: u64, sigs: Vec<Sig>)` | current signers | §13.4 |
-| `admin_rotate_signers(new: WeightedSigners)` | `admin.require_auth()` | **testnet only**; emergency rotation: same effect without the delay, **and** sets `MinValidEpoch = Epoch` (old sets are invalid immediately); emits `admin_rotate` |
+| `admin_rotate_signers(new: WeightedSigners)` | `admin.require_auth()` | **testnet only**; emergency rotation: same effect without the delay or signatures (including the reuse rule and `LastRotationAt = now`, DEC-031), **and** sets `MinValidEpoch = Epoch` (old sets are invalid immediately); emits `admin_rotate` |
 | `freeze()` | none | §13.6 |
 | `escape_claim(recipient, lane_account, index: u32, equity: i128, proof)` | none | §13.6 |
 | `refund_unprocessed_deposit(index: u64)` | none | §13.6 |
 | `upgrade(new_wasm_hash)` | admin | **testnet only**; emits `upgrade` |
-| views | — | `config()`, `last_checkpoint()`, `checkpoint(seq)`, `inbox(index)`, `inbox_count()`, `signers(epoch)`, `epoch()`, `frozen()`, `is_claimed(seq, index)`, `totals()` |
+| views | — | `config()`, `last_checkpoint()`, `checkpoint(seq)`, `inbox(index)`, `inbox_count()`, `signers(epoch)`, `epoch()`, `min_valid_epoch()`, `frozen()`, `frozen_info()`, `is_claimed(seq, index)`, `escape_claimed(lane_account)`, `totals()` |
 
-Events are defined with `#[contractevent]` structs (the SDK's current event API; `env.events().publish` is deprecated in recent SDKs `[VERIFY]`):
+Events are defined with `#[contractevent(topics = [...])]` structs and published with `env.events().publish_event(&ev)`. In soroban-sdk 28.0.0, `env.events().publish` is `#[deprecated]` (checked 2026-09-29 in `src/events.rs`):
 
 | Event | Topics | Data |
 |---|---|---|
@@ -1419,6 +1422,9 @@ Events are defined with `#[contractevent]` structs (the SDK's current event API;
 | `Frozen` | `("frozen",)` | payout_num, payout_den |
 | `EscapeClaimed` | `("escape", lane_account)` | amount |
 | `SignersRotated` | `("rotate", epoch)` | signers_hash |
+| `AdminRotate` | `("admin_rotate", epoch)` | signers_hash |
+| `Upgrade` | `("upgrade",)` | new_wasm_hash |
+| `Refund` | `("refund", index)` | from, amount (DEC-030) |
 
 Inbox append (shared by `deposit` and `request_forced_withdrawal`):
 1. `index = InboxCount`.
@@ -1523,7 +1529,7 @@ Reject (panic with a `contracterror` code) on the first failure:
 
 ### 13.7 Required tests (soroban-sdk testutils)
 
-- Setup: register USDC with `env.register_stellar_asset_contract_v2(issuer)` `[VERIFY name in sdk 28]`, `mock_all_auths` for happy paths, plus explicit auth tests.
+- Setup: register USDC with `env.register_stellar_asset_contract_v2(issuer)` (exists in soroban-sdk 28.0.0, checked 2026-09-29), `mock_all_auths` for happy paths, plus explicit auth tests.
 - Happy path: deposit → checkpoint seq 1 (with a withdrawal leaf) → claim.
 - Rejects for **every** check in §13.3, one test per numbered check.
 - Double-claim rejected, wrong recipient rejected, proof of wrong length rejected.
@@ -1536,7 +1542,7 @@ Reject (panic with a `contracterror` code) on the first failure:
   - refund of an unprocessed deposit;
   - post-freeze calls rejected.
 - Golden vector: a header built by the Rust node code (T-001 vectors) verifies in the contract.
-- Budget: `submit_checkpoint` with a 96,000-byte batch and 3 signatures stays under limits. Measure with `env.cost_estimate()` / budget printing `[VERIFY API]`.
+- Budget: `submit_checkpoint` with a 96,000-byte batch and 3 signatures stays under limits. Measure with `env.cost_estimate().resources()` on the contract registered from its Wasm (for a natively registered contract the VM costs are missing), under `budget().reset_limits` set to the §3.3 limits. Result in §3.3.
 
 ---
 
@@ -1921,7 +1927,7 @@ Status values: `todo`, `doing`, `review`, `done`. Agents update the Status cell 
 | T-003 | `caravel-perps`: genesis + step (§11 complete) + scenarios 1–18 + property tests (native) | T-001, T-002 | §8, §9.10, §10, §11 | done |
 | T-004 | `contracts/perps-engine`: wrapper, size budget, reproducible build, hash in versions.json | T-003 | §12 | review |
 | T-005 | `caravel-lane::executor`: soroban-env-host runner; parity gate (10k blocks + scenarios); cpu/mem benchmark at full caps | T-004 | §8.2, §12.2, §14.5 | review |
-| T-006 | `contracts/settlement`: all of §13 + tests in §13.7 | T-001, T-002 | §9, §11.8, §13 | todo |
+| T-006 | `contracts/settlement`: all of §13 + tests in §13.7 | T-001, T-002 | §9, §11.8, §13 | review |
 | T-007 | `caravel-node sequencer`: mempool, block loop, SQLite store, API/WS, checkpoint policy + assembly | T-005 | §14 | todo |
 | T-008 | `caravel-node validator`: follow, re-execute, sign, never-equivocate store | T-005 | §15 | todo |
 | T-009 | `apps/relayer`: inbox watcher, checkpoint submitter, oracle feeder | T-006, T-007 | §17 | todo |
@@ -2069,9 +2075,13 @@ For lanes that need classic Stellar operations or SCP among many validators:
 | DEC-024 | **Accepted at Gate 1 (2026-09-29).** Where the spec is silent (each choice changes state or receipt bytes, so scenario hashes depend on it): (a) an IOC remainder never gets an order id, so its `ORDER_CANCELED` has `order_id 0`; (b) `CANCEL_ALL` with a market id that is neither `0xFFFF` nor configured is rejected `UNKNOWN_MARKET` (nonce consumed); (c) `FORCED_WITHDRAWAL` for a missing account emits no event, otherwise the event carries the amount actually queued (0 if none); (d) `LIQUIDATION.deficit` is the non-negative amount the backstop absorbed; (e) arithmetic overflow in `PLACE_ORDER` checks 8–9 or `WITHDRAW` check 5 rejects with that check's code, while overflow in a state transition is fatal `ARITHMETIC_OVERFLOW`; (f) duplicate account keys in a decoded state are `BAD_STATE_ENCODING`; (g) more than 2^20 accounts or pending withdrawals at a commitment is `ARITHMETIC_OVERFLOW` (§10.2 does not cap `max_accounts` at the Merkle depth) | Deterministic answers where §11 does not say; none touches a frozen format, an invariant, a settlement check or a claim | — |
 | DEC-025 | New test-only crate `crates/caravel-testkit`: an `Executor` trait (native now, Wasm from T-005), a `Lane` simulator that signs real blocks and checks INV-P1…P4, P7, P8 after each one, the §19.3 scenarios, and the `gen-vectors` binary | Scenarios and vectors need the engine, which depends on `caravel-types`, so the generator cannot live there; one harness runs every scenario on both execution paths | — |
 | DEC-026 | The engine contract uses `soroban-sdk`'s `alloc` feature (bump allocator) and copies `Bytes` in and out with `to_alloc_vec` / `from_slice`. `scripts/build-contracts.sh` fails when a built hash differs from the one in `versions.json` | `caravel-perps` is `no_std + alloc` by design (§4.2); the host charges linear memory to the per-call budget, which T-005 measures. The hash check makes INV-D7 continuous: an engine change must update the recorded hash in the same PR | T-005 benchmark shows memory pressure |
-| DEC-027 | Contracts build with `opt-level = 2` instead of `"z"` | The engine runs interpreted inside `soroban-env-host`. `"z"` avoids inlining, and at full caps that made decoding 4.6× and margin scans 2.7× more expensive (T-005 profile). `2` matches `3` on cost and is smaller: 84,764 bytes, within the 120,000 budget | Wasm size approaches 120 KB |
+| DEC-027 | Contracts build with `opt-level = 2` instead of `"z"` | The engine runs interpreted inside `soroban-env-host`. `"z"` avoids inlining, and at full caps that made decoding 4.6× and margin scans 2.7× more expensive (T-005 profile). `2` matches `3` on cost and is smaller: 84,764 bytes, within the 120,000 budget. The T-004 `"z"` build also hashed differently on Linux and macOS; that is host-dependent symbol order, not the opt level (DEC-033) | Wasm size approaches 120 KB |
 | DEC-028 | Testnet lane caps: `max_accounts 256`, `max_orders_per_side 128`, `max_block_bytes 12,000`, `exec_cpu_limit 200,000,000` (from 1,024 / 256 / 24,000 / 400M). Genesis hashes updated | §12.2: at 1,024 / 256 / 24,000 the worst block measured 270M even after optimization. 256 / 128 / 12,000 is the largest tested set with every block shape ≤ 100M (worst 95.8M). The CPU limit leaves 2× headroom over the worst block. About 56 orders per block still covers the 50 tx/s load test | Engine gets cheaper, or M1 state layout (T-M1-02) |
 | DEC-029 | The executor enables `soroban-env-host`'s `testutils` feature and runs every call in a fresh `Host::test_host_with_recording_footprint()` with the fixed lane `LedgerInfo` (`network_id = H("CARAVEL/LANE-EXEC/V1")`) | `testutils` holds the test host, contract registration and `Budget::reset_limits`, and adds only `arbitrary` and recording mode. A fresh host per call keeps memory bounded and metering independent of history, and parity plus identical metering under two ledger infos are tested. The ungated `Budget::try_from_configs` + `invoke_function` path is left for M1 | M1 executor (T-M1-02) |
+| DEC-030 | `refund_unprocessed_deposit` emits a `Refund` event, topics `("refund", index)`, data `from, amount` | §13.2 lists no refund event, but after a freeze indexers and the web app have to show which deposits went back, just as `Claimed` and `EscapeClaimed` show payouts | — |
+| DEC-031 | Settlement edge rules: (a) `admin_rotate_signers` applies the same install as `rotate_signers`: a set used before is refused (`SignersReused`) and `LastRotationAt = now`; (b) `escape_claim` marks the account claimed and emits `EscapeClaimed` even when its share is 0 (`payout_den == 0`, or `payout_num ≤ 0` because the vault is fully owed to committed withdrawals) and transfers only a positive amount; (c) `MAX_BATCH_BYTES` comes from `caravel-types`, so the contract and the lane codec share one constant | (a) "same effect" in §13.2, and a reused set could replay old rotation signatures; (b) a zero share is a valid outcome and must not be claimable again; (c) one source for a consensus limit | — |
+| DEC-032 | Settlement contract error codes: 1–2 constructor and signer sets, 10–13 deposits and forced withdrawals, 20–39 one code per `submit_checkpoint` check in §13.3 order, 40–41 rotation, 50–54 claims, 60–63 freeze, escape and refund (`contracts/settlement/src/types.rs`, also in the contract spec). An invalid signature traps in `ed25519_verify` and has no code | §13.3 asks for a `contracterror` per rejection without numbering them; the relayer and the web app need stable codes to explain a failure | New checks get new codes; codes are never reused |
+| DEC-033 | The Wasm of record is built on an **x86_64 Linux** host: the CI `rust` job (toolchain from `rust-toolchain.toml`, the pinned CLI release binary with its GitHub digest). CI uploads the files as the `contracts-wasm` artifact, and deploys (T-012) use those files. `build-contracts.sh` fails on a hash mismatch on x86_64 Linux and only warns on other hosts | On other hosts the same source builds to different bytes of the same size. The settlement Wasm is `8a2fafbd…` on Linux and `8280828f…` on macOS; the T-004 engine at `"z"` was `95814212…` vs `04c731d0…`; the engine at `2` happens to match (`4571cd25…`). Cause: cargo 1.93 mixes every dependency's metadata hash into a crate's `-C metadata`, and proc-macro and build-script dependencies are host units whose hash includes the `host:` line of `rustc -vV` (`compute_metadata`, `hash_rustc_version` in cargo's `compilation_files.rs`). So every mangled symbol hash differs between hosts (checked on unstripped builds: same names in the same order, different hashes), and rustc can order some items by symbol name. The `type`, `func` and `code` sections differ; data, metadata and contract spec do not. Both settlement builds pass the same 73 tests with identical metering. INV-D7 holds with the host as part of the pinned toolchain | A Docker builder for local runs (with T-011), or cargo no longer hashing the host into target units |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

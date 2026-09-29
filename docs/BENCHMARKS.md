@@ -105,3 +105,22 @@ What is left scales with state size, at about 70M for decoding and encoding 1,02
 `cargo test -p caravel-lane --test parity -- --ignored` runs 10,050 random blocks across 50 seeded lanes. On them:
 - the Wasm and native paths produced identical state and receipt bytes at every block;
 - the heaviest block used 18.5M host CPU instructions, since these states are small.
+
+## Settlement contract: `submit_checkpoint` at the batch cap (T-006)
+
+The settlement Wasm of record (`8a2fafbd…d503`, 42,900 bytes, the x86_64 Linux build from CI, DEC-033) is registered from its file, so the VM costs are counted. The macOS build of the same source (`8280828f…1a52`) meters identically. The call carries a real 3-block batch padded to exactly 96,000 bytes (the contract hashes the batch and does not parse it) and all 3 validator signatures. The budget is set to the live testnet transaction limits (spec §3.3).
+
+Reproduce with `cargo test -p settlement a_full_batch -- --nocapture` after `./scripts/build-contracts.sh`.
+
+| Resource | Used | Testnet limit per tx |
+|---|---:|---:|
+| CPU instructions | 7,889,048 | 400,000,000 |
+| Memory bytes | 1,318,162 | 41,943,040 |
+| Entries read from disk | 0 | 200 |
+| Entries written | 2 (1,976 bytes) | 200 (132,096 bytes) |
+| Event bytes | 236 | 16,384 |
+| Arguments (XDR) | 96,892 bytes | tx size 132,096 bytes |
+
+About 35 KB of the transaction-size limit is left for the envelope (source account, footprint, fee, one signature), which needs a few hundred bytes.
+
+The SDK's fee estimate is 7,699,033 stroops, almost all of it rent (7,682,542) for the new 120-day `Ckpt(seq)` entry. The SDK computes it from hardcoded mainnet fee rates dated 2026-07-10, with a rent rate it calls a deliberate overestimate, so it is not a testnet fee. T-014 measures real fees on testnet.

@@ -53,6 +53,14 @@ jobs:
       # The parity tests load the Wasm of record, so build it first. This also
       # checks sizes and that the hashes match versions.json (INV-D7).
       - run: ./scripts/build-contracts.sh
+      # The Wasm of record comes from this x86_64 Linux build (DEC-033): deploys
+      # take these files, and they are kept for diffing when a hash differs.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: contracts-wasm
+          path: target/contracts/*.wasm
+          if-no-files-found: ignore
       - run: cargo test --workspace --locked
       - name: Parity gate, 10,000 random blocks (INV-P5)
         run: cargo test --locked -p caravel-lane --test parity -- --ignored
