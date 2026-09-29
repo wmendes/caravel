@@ -91,8 +91,13 @@ fi
 curl -s -X POST "$RPC" -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"getNetwork"}' | jq -c .result
 
 log "accounts"
+# Friendbot comes up after RPC on a fresh quickstart, and `keys generate
+# --fund` reports a failed funding without failing, so check the account.
+exists() { node -e 'const {rpc}=require(process.argv[1]);new rpc.Server(process.argv[2],{allowHttp:true}).getAccount(process.argv[3]).then(()=>process.exit(0),()=>process.exit(1))' "$ROOT/apps/relayer/node_modules/@stellar/stellar-sdk" "$RPC" "$1"; }
+fund() { sc keys fund "$1" "${NET[@]}" && exists "$(pk "$1")"; }
 for n in admin relayer issuer alice bob; do
-  TIMEOUT=60 until_ok "funding $n" sc keys generate --fund --overwrite "${NET[@]}" "$n"
+  sc keys generate --overwrite "$n" > /dev/null
+  TIMEOUT=180 until_ok "funding $n" fund "$n"
   sc keys secret "$n" > "$WORK/keys/$n.key"
 done
 for i in 1 2 3; do
