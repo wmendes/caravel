@@ -1,0 +1,74 @@
+# Spec §19.1 gates, plus the versions.json check (§7).
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Must match versions.json "stellar_cli"; the digest is GitHub's published sha256 for the asset.
+  STELLAR_CLI_VERSION: "28.1.0"
+  STELLAR_CLI_SHA256: "c1680deee94301d33ada7a17f98411e642a4248c727afbd2e43050d345746462"
+
+jobs:
+  versions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node scripts/check-versions.mjs
+
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Stellar CLI
+        run: |
+          curl -sSfL -o stellar-cli.tar.gz \
+            "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${STELLAR_CLI_SHA256}  stellar-cli.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar xzf stellar-cli.tar.gz -C "$HOME/.local/bin" stellar
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: stellar --version
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace --locked
+      - name: Consensus crates build without std
+        run: cargo build --locked -p caravel-types -p caravel-merkle -p caravel-perps --target wasm32v1-none
+      - run: ./scripts/build-contracts.sh
+
+  apps:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [relayer, web]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/${{ matrix.app }}/package-lock.json
+      - run: npm --prefix apps/${{ matrix.app }} ci
+      - run: npm --prefix apps/${{ matrix.app }} test
+      - if: matrix.app == 'web'
+        run: npm --prefix apps/web run build

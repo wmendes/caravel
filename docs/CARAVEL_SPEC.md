@@ -131,15 +131,17 @@ All values below were checked on 2026-09-29 unless dated otherwise. Anything mar
 
 | Item | Value | Source |
 |---|---|---|
-| Current protocol | 28 ("Adapter"). Testnet upgraded 2026-08-27, mainnet vote 2026-09-16 `[VERIFY]` | SDF blog "Adapter, Protocol 28 Upgrade Guide" |
+| Current protocol | 28 ("Adapter"). Testnet upgraded 2026-08-27 (checked 2026-09-29 via stellar-raven); mainnet vote 2026-09-16 `[VERIFY]` | SDF blog "Adapter, Protocol 28 Upgrade Guide", "Introducing Adapter, Protocol 28 on Stellar" |
 | Protocol 28 CAPs | CAP-83 (empty tx set value), CAP-85 (externally managed contract executables), CAP-86 (sparse map host functions) | same |
 | `soroban-sdk` | 28.0.0 (2026-09-18) | crates.io |
 | `soroban-env-host` | 28.0.2 | crates.io |
 | `soroban-simulation` | 28.0.2 (M1 only) | crates.io |
-| `stellar-xdr` | 28.0.1 | crates.io |
+| `stellar-xdr` | 28.0.1 is the latest release; Caravel pins **28.0.0**, which `soroban-env-common 28.0.2` and `soroban-sdk 28.0.0` require exactly (DEC-018) | crates.io dependency API; developers.stellar.org "Software Versions" |
+| `stellar-strkey` | Caravel pins **0.0.16** (`soroban-sdk 28.0.0` requires it). `soroban-env-host 28.0.2` also pulls 0.0.13, an upstream duplicate (DEC-018) | crates.io dependency API |
+| Stellar CLI | 28.1.0 (2026-09-26); builds contracts for `wasm32v1-none` | crates.io, GitHub releases |
 | `@stellar/stellar-sdk` | 17.2.0 | npm |
 | `@stellar/freighter-api` | 6.0.1 | npm |
-| Rust | ≥ 1.93 (SoroDOOM builds with 1.93); contracts target `wasm32v1-none` `[VERIFY]` | SoroDOOM, OpenZeppelin Stellar README |
+| Rust | 1.93.0 (MSRV of stellar-cli 28.1.0; soroban-sdk 28.0.0 needs ≥ 1.91). Contracts target `wasm32v1-none`: checked 2026-09-29 with `stellar contract build --print-commands-only` | crates.io `rust_version`, stellar-cli |
 | Testnet passphrase | `Test SDF Network ; September 2015` | Stellar docs |
 | Testnet RPC | `https://soroban-testnet.stellar.org` | Stellar docs |
 | Testnet USDC issuer | `GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5` | developers.stellar.org "Verify Trustlines" |
@@ -332,6 +334,7 @@ caravel/
 │   ├── SOURCES.md                # every external source used, with URL and date
 │   └── RUNBOOK.md                # created in T-015: how to run locally and on testnet
 ├── versions.json                 # pinned versions and artifact hashes (§7)
+├── LICENSE-MIT, LICENSE-APACHE
 ├── Cargo.toml                    # workspace
 ├── rust-toolchain.toml
 ├── crates/
@@ -352,12 +355,14 @@ caravel/
 ├── test-vectors/                 # golden vectors (hex JSON), shared by Rust and TS tests
 ├── scripts/
 │   ├── build-contracts.sh
+│   ├── check-versions.mjs        # CI check of versions.json pins and placeholders (§7)
 │   ├── deploy-testnet.sh
 │   ├── e2e-local.sh
 │   └── e2e-testnet.sh
 ├── docker/
 │   ├── node.Dockerfile
 │   └── compose.local.yml         # quickstart + sequencer + 3 validators + relayer
+├── site/                         # landing page, deployed to Vercel from this folder only (DEC-019)
 └── .github/workflows/ci.yml
 ```
 
@@ -376,17 +381,22 @@ Create this file in T-000 and keep it current. CI fails if a `Cargo.toml` or `pa
   "network": "testnet",
   "rust_toolchain": "1.93.0",
   "wasm_target": "wasm32v1-none",
+  "stellar_cli": "28.1.0",
+  "node": "22",
   "crates": {
     "soroban-sdk": "=28.0.0",
     "soroban-env-host": "=28.0.2",
-    "stellar-xdr": "=28.0.1",
-    "stellar-strkey": "=0.0.18",
-    "ed25519-dalek": "RESOLVE_IN_T-000: exact version soroban-env-host 28.0.2 uses",
-    "sha2": "RESOLVE_IN_T-000: exact version soroban-env-host 28.0.2 uses"
+    "stellar-xdr": "=28.0.0",
+    "stellar-strkey": "=0.0.16",
+    "ed25519-dalek": "=2.2.0",
+    "sha2": "=0.10.9"
   },
   "npm": {
     "@stellar/stellar-sdk": "17.2.0",
-    "@stellar/freighter-api": "6.0.1"
+    "@stellar/freighter-api": "6.0.1",
+    "lightweight-charts": "5.2.1",
+    "@noble/ed25519": "3.2.0",
+    "@noble/hashes": "2.4.0"
   },
   "artifacts": {
     "engine_wasm_sha256": "FILLED_BY_T-004",
@@ -404,7 +414,9 @@ Create this file in T-000 and keep it current. CI fails if a `Cargo.toml` or `pa
 }
 ```
 
-`ed25519-dalek` and `sha2` in the native engine build MUST be the exact versions `soroban-env-host 28.0.2` depends on. Read its `Cargo.toml` and use `cargo tree`. This makes native and host signature verification behave identically (§8.4).
+`ed25519-dalek` and `sha2` in the native engine build MUST be the exact versions `soroban-env-host 28.0.2` depends on. Read its `Cargo.toml` and use `cargo tree`. This makes native and host signature verification behave identically (§8.4). Resolved in T-000 (2026-09-29): the host requires `^2.0.0` and `^0.10.8`, and the workspace pins `=2.2.0` and `=0.10.9`, so `Cargo.lock` holds exactly one version of each. `scripts/check-versions.mjs` enforces this.
+
+`stellar_cli` pins the CLI that builds the Wasm of record (DEC-020). `node` is the minimum Node major for the relayer and web app.
 
 Values starting with `RESOLVE_IN_` or `FILLED_BY_` are placeholders:
 - The CI version check skips them.
@@ -1894,7 +1906,7 @@ Status values: `todo`, `doing`, `review`, `done`. Agents update the Status cell 
 
 | ID | Task | Depends | Reads | Status |
 |---|---|---|---|---|
-| T-000 | Bootstrap repo, workspace, toolchain, `versions.json`, CI, CLAUDE.md, SOURCES.md | — | §0, §6, §7, §19.1 | todo |
+| T-000 | Bootstrap repo, workspace, toolchain, `versions.json`, CI, CLAUDE.md, SOURCES.md | — | §0, §6, §7, §19.1 | review |
 | T-001 | `caravel-types`: all §9 codecs, tags, reason and fatal codes, fixed-point helpers; golden vector generator | T-000 | §8, §9, §10.2, §11 (codes), §11.10 | todo |
 | T-002 | `caravel-merkle`: build + verify + proof generation; native and Soroban hashers | T-000 | §9.9 | todo |
 | T-003 | `caravel-perps`: genesis + step (§11 complete) + scenarios 1–18 + property tests (native) | T-001, T-002 | §8, §9.10, §10, §11 | todo |
@@ -2039,6 +2051,9 @@ For lanes that need classic Stellar operations or SCP among many validators:
 | DEC-015 | Host CPU/memory budget per `step` is a consensus value in `GenesisConfigV1` | Budget exhaustion is fatal, so all nodes need identical limits | — |
 | DEC-016 | Empty account slots are reused in place; new accounts start at `next_nonce = block.timestamp_ms` | Bounded state without index shifts; blocks replay of old signatures | M1-02 (unbounded state) |
 | DEC-017 | Validators may skip seqs but never sign two headers for one seq; they compute every header themselves | Liveness after restarts without weakening equivocation safety | — |
+| DEC-018 | Pin `stellar-xdr =28.0.0` and `stellar-strkey =0.0.16` instead of 28.0.1 and 0.0.18; `ed25519-dalek =2.2.0`, `sha2 =0.10.9`. Allow exactly one upstream duplicate, `stellar-strkey` 0.0.13 (from `soroban-env-host` and `stellar-xdr`) | `soroban-env-common 28.0.2` and `soroban-sdk 28.0.0` require `stellar-xdr =28.0.0`, so 28.0.1 cannot resolve. `soroban-sdk` pins strkey 0.0.16 while the host's `^0.0.13` means exactly 0.0.13. One dalek and sha2 version keeps native and host verification identical (§8.4) | soroban-sdk/env-host 29 |
+| DEC-019 | The landing page lives in `site/`, with its own `vercel.json` and Vercel link, and is deployed only from there | Deploying from the repo root would upload the whole Rust/TS repo to Vercel | Web app hosting (T-013) |
+| DEC-020 | The Wasm of record is the output of `scripts/build-contracts.sh`, i.e. `stellar contract build --locked` with the CLI version pinned in `versions.json` (`stellar_cli`). Its sha256 is the one recorded and uploaded | The CLI optimizes by default and embeds its version in contract metadata, so plain `cargo build` gives a different hash. One build path keeps INV-D7 checkable | CLI major upgrade |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

@@ -1,0 +1,24 @@
+{
+  "name": "@caravel/relayer",
+  "version": "0.1.0",
+  "description": "Caravel relayer: inbox watcher, checkpoint submitter and oracle feeder (spec §17)",
+  "private": true,
+  "type": "module",
+  "license": "MIT OR Apache-2.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsc -p tsconfig.json --noEmit && vitest run"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "17.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.4",
+    "typescript": "7.0.2",
+    "vitest": "5.0.2"
+  }
+}

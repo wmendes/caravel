@@ -1,0 +1,10 @@
+[package]
+name = "caravel-types"
+description = "Caravel binary encodings, domain tags, reason and fatal codes, fixed-point helpers (no_std)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]

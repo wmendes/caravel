@@ -1,0 +1,26 @@
+/* Caravel design tokens (spec §18.1). lane = lane things only, harbor = Stellar things only. Never a third accent. */
+:root {
+  --ground: #081e22;
+  --ground-raised: #102c31;
+  --line: #4b7178;
+  --ink: #f3eee4;
+  --ink-muted: #a8bab8;
+  --lane: #ff8c7c;
+  --lane-soft: #3e1a18;
+  --harbor: #26958f;
+  --harbor-soft: #0f3b3f;
+  --on-accent: #081e22;
+  --font: "Schibsted Grotesk", ui-sans-serif, system-ui, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font);
+  line-height: 1.55;
+}
+main { max-width: 720px; margin: 0 auto; padding: 64px 16px; }
+h1 { margin: 0 0 12px; font-size: 2.5rem; letter-spacing: -0.02em; }
+p { margin: 0; color: var(--ink-muted); }
