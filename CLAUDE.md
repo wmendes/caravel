@@ -46,6 +46,7 @@ cargo run --release -p caravel-node -- check-store --config config/sequencer.loc
 DURATION=3600 TPS=50 ./scripts/soak-sequencer.sh   # T-007 soak: 1 s blocks, 50 tx/s, restart halfway
 ./scripts/e2e-local.sh                  # quickstart + sequencer + 3 validators + relayer (after T-011)
 npm --prefix apps/relayer ci && npm --prefix apps/relayer test
+npm --prefix apps/relayer run build && node apps/relayer/dist/main.js --config config/relayer.local.json   # needs CARAVEL_INTERNAL_TOKEN, CARAVEL_RELAYER_SECRET, CARAVEL_ORACLE_SECRET
 npm --prefix apps/web ci && npm --prefix apps/web test && npm --prefix apps/web run build
 (cd site && vercel deploy --prod)       # landing page only, never from the repo root (DEC-019)
 ```

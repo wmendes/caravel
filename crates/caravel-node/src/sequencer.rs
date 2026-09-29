@@ -601,11 +601,11 @@ async fn internal_inbox(
     match report {
         InboxReport::Added => ok(json!({ "status": "added" })),
         InboxReport::AlreadyKnown => ok(json!({ "status": "known" })),
-        InboxReport::Gap { expected } => Err(ApiError::new(
+        InboxReport::Gap { expected } => Ok((
             StatusCode::CONFLICT,
-            "INBOX_GAP",
-            format!("send index {expected} first"),
-        )),
+            Json(json!({ "error": format!("send index {expected} first"), "code": "INBOX_GAP", "expected": expected.to_string() })),
+        )
+            .into_response()),
         InboxReport::Mismatch => {
             tracing::error!(
                 index = msg.index,
