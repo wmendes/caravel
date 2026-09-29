@@ -124,3 +124,21 @@ Reproduce with `cargo test -p settlement a_full_batch -- --nocapture` after `./s
 About 35 KB of the transaction-size limit is left for the envelope (source account, footprint, fee, one signature), which needs a few hundred bytes.
 
 The SDK's fee estimate is 7,699,033 stroops, almost all of it rent (7,682,542) for the new 120-day `Ckpt(seq)` entry. The SDK computes it from hardcoded mainnet fee rates dated 2026-07-10, with a rent rate it calls a deliberate overestimate, so it is not a testnet fee. T-014 measures real fees on testnet.
+
+## Sequencer soak: 1 hour at 50 tx/s (T-007)
+
+`DURATION=3600 TPS=50 ./scripts/soak-sequencer.sh` on 2026-09-29, same machine. The sequencer ran the local lane (DEC-037) with 1 s blocks through the engine Wasm of record. The load generator (`crates/caravel-node/examples/loadgen.rs`) sent 24 accounts' orders, IOC takers, cancels and small withdrawals, plus signed oracle updates every 2 s. There was no Stellar and there were no validators, so checkpoints were sealed but not signed. Halfway through, the sequencer was stopped and started again.
+
+| Measure | Result |
+|---|---:|
+| Blocks | 3,603 |
+| Transactions accepted (HTTP 202) | 180,002 at 50.0 tx/s |
+| Rejected at the API / HTTP errors | 0 / 0 |
+| Mempool at each 60 s report | 1 to 30 |
+| Checkpoints sealed | 450 |
+| Blocks per checkpoint | 8 (448), 9 (1), 10 (1) |
+| Worst block, host CPU insns | 49,183,652 |
+
+- **Restart.** The sequencer stopped at height 1,802. `caravel-node check-store` re-executed its whole store through the Wasm and got state hash `b7045073…6a`; the restarted sequencer resumed at height 1,802 with the same hash.
+- **Final check.** `check-store` re-executed all 3,603 blocks through the Wasm and rebuilt all 450 checkpoint headers byte for byte.
+- **Checkpoint spacing.** At this load a block carries about 50 transactions (roughly 10.5 KB), so after 8 blocks the next block might not fit in the 96,000-byte batch. Rule (b) of §14.2 then ends the batch before rule (a) would at 10 blocks. At lighter load, checkpoints come every 10 blocks.
