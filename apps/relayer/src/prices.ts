@@ -93,21 +93,31 @@ export interface ReflectorReader {
   lastPrice(asset: string): Promise<{ price: bigint; timestamp: bigint } | null>;
 }
 
+/**
+ * Reflector updates every 300 s, so a quote is reused for `cacheSecs` rather
+ * than simulating `lastprice` on every 2 s tick against a public RPC.
+ */
 export class ReflectorPrice implements PriceSource {
   readonly name: string;
+  private cached: { quote: Quote; atMs: number } | null = null;
 
   constructor(
     private readonly reader: ReflectorReader,
     private readonly asset: string,
     private readonly decimals: number,
+    private readonly cacheSecs = 30,
+    private readonly now: () => number = Date.now,
   ) {
     this.name = `reflector:${asset}`;
   }
 
   async quote(): Promise<Quote> {
+    if (this.cached && this.now() - this.cached.atMs < this.cacheSecs * 1000) return this.cached.quote;
     const p = await this.reader.lastPrice(this.asset);
     if (!p) throw new Error(`${this.name}: no price`);
-    return { usd: { num: p.price, den: 10n ** BigInt(this.decimals) }, observedAt: Number(p.timestamp), source: this.name };
+    const quote = { usd: { num: p.price, den: 10n ** BigInt(this.decimals) }, observedAt: Number(p.timestamp), source: this.name };
+    this.cached = { quote, atMs: this.now() };
+    return quote;
   }
 }
 

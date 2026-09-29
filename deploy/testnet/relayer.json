@@ -1,0 +1,47 @@
+{
+  "rpcUrl": "https://soroban-testnet.stellar.org",
+  "networkPassphrase": "Test SDF Network ; September 2015",
+  "settlementContract": "CBIHBEUZYFZQZEQPBJH2ID6CDRDZFEDI6XHAXVOCHG6FO5XWUIGPONWO",
+  "sequencerUrl": "http://127.0.0.1:8080",
+  "metricsFile": "/opt/caravel/data/relayer-checkpoints.jsonl",
+  "loops": {
+    "inbox": true,
+    "checkpoints": true,
+    "oracle": true
+  },
+  "intervalsMs": {
+    "inbox": 3000,
+    "checkpoints": 2000,
+    "oracle": 2000
+  },
+  "oracle": {
+    "maxSourceAgeSecs": 900,
+    "reflectorContract": "CCYOZJCOPG34LLQQ7N24YXBM7LL62R7ONMZ3G6WZAAYPB5OYKOMJRN63",
+    "markets": {
+      "1": [
+        {
+          "reflector": "BTC"
+        },
+        {
+          "coinbase": "BTC-USD"
+        }
+      ],
+      "2": [
+        {
+          "reflector": "ETH"
+        },
+        {
+          "coinbase": "ETH-USD"
+        }
+      ],
+      "3": [
+        {
+          "reflector": "XLM"
+        },
+        {
+          "coinbase": "XLM-USD"
+        }
+      ]
+    }
+  }
+}

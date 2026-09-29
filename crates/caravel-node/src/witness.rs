@@ -17,21 +17,41 @@ use crate::lane_toml::LaneFile;
 
 /// Genesis state plus one `CHECKPOINT_END` block with a deposit, so the call
 /// creates an account and computes a commitment.
-pub fn witness(lane: &LaneFile, exec: &WasmExecutor, depositor: [u8; 32], timestamp_ms: u64) -> Result<Value> {
+pub fn witness(
+    lane: &LaneFile,
+    exec: &WasmExecutor,
+    depositor: [u8; 32],
+    timestamp_ms: u64,
+) -> Result<Value> {
     let (_, config_bytes, _) = crate::lane_toml::genesis(lane)?;
-    let (state, _) = exec.genesis(&config_bytes).map_err(|e| anyhow!("genesis: {e:?}"))?;
+    let (state, _) = exec
+        .genesis(&config_bytes)
+        .map_err(|e| anyhow!("genesis: {e:?}"))?;
     let block = BlockInputV1 {
         lane_id: lane.lane_id(),
         height: 1,
         timestamp_ms,
         prev_block_hash: [0; 32],
         checkpoint_end: true,
-        entries: vec![Entry::Inbox(InboxMsgV1 { kind: InboxKind::Deposit, index: 0, lane_account: depositor, amount: 100 * 10_000_000, enqueued_at: timestamp_ms / 1000 })],
+        entries: vec![Entry::Inbox(InboxMsgV1 {
+            kind: InboxKind::Deposit,
+            index: 0,
+            lane_account: depositor,
+            amount: 100 * 10_000_000,
+            enqueued_at: timestamp_ms / 1000,
+        })],
     }
     .encode()
     .map_err(|_| anyhow!("block encoding"))?;
-    let (out, metering) = exec.step(&state, &block).map_err(|e| anyhow!("step: {e:?}"))?;
-    let expected = StepEnvelope { state: out.state, receipts: out.receipts }.encode().map_err(|_| anyhow!("envelope"))?;
+    let (out, metering) = exec
+        .step(&state, &block)
+        .map_err(|e| anyhow!("step: {e:?}"))?;
+    let expected = StepEnvelope {
+        state: out.state,
+        receipts: out.receipts,
+    }
+    .encode()
+    .map_err(|_| anyhow!("envelope"))?;
     Ok(json!({
         "state_hex": hex(&state),
         "block_hex": hex(&block),

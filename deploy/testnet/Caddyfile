@@ -1,0 +1,27 @@
+# The VM's only public listener (DEC-046): TLS for the sslip.io name of the
+# static IP, the public lane API, each validator's public API, and the web app.
+# The sequencer's /internal/* and the validators' /v1/sign stay private.
+{$CARAVEL_HOST} {
+	encode gzip
+
+	@private path /internal/* /validators/*/v1/sign
+	respond @private 404
+
+	handle /v1/* {
+		reverse_proxy 127.0.0.1:8080
+	}
+	handle_path /validators/1/* {
+		reverse_proxy 127.0.0.1:8081
+	}
+	handle_path /validators/2/* {
+		reverse_proxy 127.0.0.1:8082
+	}
+	handle_path /validators/3/* {
+		reverse_proxy 127.0.0.1:8083
+	}
+	handle {
+		root * /opt/caravel/web
+		try_files {path} /index.html
+		file_server
+	}
+}
