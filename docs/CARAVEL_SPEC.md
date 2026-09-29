@@ -1935,7 +1935,7 @@ Status values: `todo`, `doing`, `review`, `done`. Agents update the Status cell 
 | T-011 | Local compose + `scripts/e2e-local.sh` (§19.5 steps 1–6) | T-007…T-010 | §19.5 | done |
 | T-012 | Testnet deploy script; deploy engine + settlement; one **witness** `step` transaction on testnet with a small state, byte-equal to the executor output | T-011 | §3, §12, §13 | review |
 | T-013 | `apps/web` (§18) against local, then testnet | T-007, T-009 | §18 | review |
-| T-014 | Measurements (§19.6) + `docs/RESULTS.md` with dated numbers | T-012 | §19.6 | todo |
+| T-014 | Measurements (§19.6) + `docs/RESULTS.md` with dated numbers | T-012 | §19.6 | review |
 | T-015 | `docs/RUNBOOK.md`: run locally, run a validator, deploy, rotate keys, freeze drill, replay | T-012 | all | todo |
 | T-016 | Security pass: walk §24 checklist, fix or file each item | T-012 | §24 | todo |
 
@@ -2104,6 +2104,13 @@ For lanes that need classic Stellar operations or SCP among many validators:
 - buy/sell, bids/asks and PnL shown with words, signs and weight, not color, because `lane` and `harbor` are reserved for lane and Stellar things (§18.1);
 - served from the same origin as the API on the VM (DEC-046), configurable with `VITE_*` for local lanes;
 - `/v1/status` gains `config_hash`, which the browser needs to compute tx hashes | Fewer dependencies; the brand rule forbids a third accent | — |
+| DEC-048 | How T-014 measures §19.6 (`scripts/measure-testnet.sh`, `scripts/measure-report.mjs`):
+- on the live testnet lane, through its public HTTPS API, from throwaway accounts that get Circle's testnet USDC from the testnet DEX and deposit it through the settlement contract (no internal API, no minting);
+- the load generator sends from one task per account, one request at a time, so nonces stay in order and the client's round trip does not cap the rate;
+- soft latency is `POST /v1/tx` → the account's `receipt` on `WS /v1/stream` (the block message that carries it also carries its fills); hard latency is that receipt → its block inside a checkpoint the sequencer reports as accepted on Stellar, sampled for one receipt in ten and kept only for checkpoints whose blocks were all produced under load (after the load stops, the last receipts wait for an idle checkpoint);
+- host `cpu_insns` per block is sampled once a second from `/v1/status` `host_metering` (the last block's `step`), for blocks produced under load;
+- checkpoint size and fees come from the relayer's own log (`feeCharged`, simulation `minResourceFee`, transaction bytes), for checkpoints whose blocks all fall inside the load window; "per 1,000 lane tx" divides their total fee by the user transactions in those blocks | Real network fees and a user's real path to the API; no special access. One request at a time per account is how a client keeps nonces in order | A load generator next to the VM, to separate network latency from lane latency |
+
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 
