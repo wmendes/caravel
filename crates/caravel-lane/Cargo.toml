@@ -9,7 +9,12 @@ publish.workspace = true
 
 [dependencies]
 caravel-types = { workspace = true }
+caravel-merkle = { workspace = true, features = ["alloc", "native"] }
 caravel-perps = { workspace = true, features = ["native"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+stellar-strkey = { workspace = true }
 # `testutils` provides the test host, contract registration and explicit
 # per-call budget limits (DEC-027).
 soroban-env-host = { workspace = true, features = ["testutils"] }
@@ -19,4 +24,4 @@ sha2 = { workspace = true }
 caravel-testkit = { workspace = true }
 caravel-types = { workspace = true, features = ["gen-vectors"] }
 ed25519-dalek = { workspace = true }
-serde_json = "1.0.151"
+tempfile = "3.27.0"

@@ -1,0 +1,97 @@
+# LOCAL-ONLY lane for development, the load test and scripts/e2e-local.sh.
+# Same parameters as the testnet lane, but the keys are the public test
+# fixtures (seeds [0x21; 32], [0x22; 32], [0x31; 32] from caravel-types
+# vectors), whose secrets are in the source. Never use this lane on testnet.
+
+[lane]
+name = "caravel-perps-local-0"             # lane_id = H("CARAVEL/LANE/V1" || name)
+
+[node]                                     # not consensus
+block_time_ms = 1000                       # allowed 200..=5000
+checkpoint_every_blocks = 10
+max_batch_bytes = 96000
+
+[accounts]
+backstop_key = "GCEEXCCX6TVKCYJ4MFIE3M2NJPVPGRSRPIHDDXR43XKNTNBADWOQWDYC"   # system account 0 (insurance fund + liquidation backstop)
+treasury_key = "GCQJVJPUPJTVTABP7FK7RXBNFIKKLSM5EO7JP6DECJ77SOBUKWSPB64N"   # system account 1 (fees)
+
+[access]
+mode = "open"                              # "open" | "allowlist"
+allowlist = []
+
+[oracle]
+keys = ["GBEAOWSZPZZBUFLOFYDZTXS4YDCTETOG47VPDTOUMJIINDWFGIK53RM6"]
+max_staleness_ms = 30000
+max_future_ms = 5000
+circuit_breaker_bps = 1000                 # 10% base move allowed per update ...
+breaker_bps_per_sec = 10                   # ... plus 0.1% per second since the last accepted update
+
+[funding]
+interval_ms = 3600000
+damping = 8
+max_rate_ppm = 500                         # 0.05% per interval
+
+[fees]
+insurance_share_bps = 3000                 # 30% of every fee to backstop, rest to treasury
+
+[limits]
+min_deposit = 10000000                     # 1 USDC (the settlement contract also enforces its own min, §13.1)
+min_withdrawal = 10000000
+max_accounts = 256                         # caps from the T-005 benchmark (DEC-028)
+max_orders_per_side = 128
+max_open_orders_per_account = 32
+max_session_keys = 4
+max_txs_per_account_per_block = 50
+max_entries_per_block = 256                # all entry types together
+max_block_bytes = 12000                    # ~56 PLACE_ORDER txs; see §3.3
+max_pending_withdrawals = 512
+exec_cpu_limit = 200000000                 # T-005: worst block at these caps is 95.8M host insns
+exec_mem_limit = 41943040
+
+[[markets]]
+market_id = 1
+symbol = "BTC-PERP"
+display_lot_base_units = 10000             # 1 lot = 0.0001 BTC (base decimals 8)
+display_base_decimals = 8
+tick = 1000                                # 0.0001 USDC per lot = $1 per BTC
+imf_bps = 1000                             # 10x max
+mmf_bps = 500
+taker_fee_bps = 5
+maker_fee_bps = 0
+liq_fee_bps = 100
+band_bps = 500
+max_position_lots = 20000                  # 2 BTC
+max_oi_lots = 200000                       # 20 BTC
+impact_lots = 1000                         # 0.1 BTC of depth for the funding premium
+
+[[markets]]
+market_id = 2
+symbol = "ETH-PERP"
+display_lot_base_units = 100000            # 1 lot = 0.001 ETH (base decimals 8)
+display_base_decimals = 8
+tick = 1000                                # $0.10 per ETH
+imf_bps = 1000
+mmf_bps = 500
+taker_fee_bps = 5
+maker_fee_bps = 0
+liq_fee_bps = 100
+band_bps = 500
+max_position_lots = 50000
+max_oi_lots = 500000
+impact_lots = 2000                         # 2 ETH
+
+[[markets]]
+market_id = 3
+symbol = "XLM-PERP"
+display_lot_base_units = 100000000         # 1 lot = 10 XLM (base decimals 7)
+display_base_decimals = 7
+tick = 1000                                # $0.00001 per XLM
+imf_bps = 2000                             # 5x max
+mmf_bps = 1000
+taker_fee_bps = 5
+maker_fee_bps = 0
+liq_fee_bps = 100
+band_bps = 500
+max_position_lots = 100000
+max_oi_lots = 1000000
+impact_lots = 1000                         # 10,000 XLM
