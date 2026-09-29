@@ -1,0 +1,47 @@
+{
+  "format": "ed25519 edge cases",
+  "spec": "§8.4",
+  "hash_rule": "hex = public_key || message || signature; hash = H(hex). verify_strict is what soroban-env-host 28.0.2 uses; the native Crypto MUST match it on every case.",
+  "context": {
+    "dalek": "ed25519-dalek 2.2.0"
+  },
+  "vectors": [
+    {
+      "name": "valid",
+      "fields": {
+        "public_key": "db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d",
+        "message": "95350904a038eff7a2f6e05edc2e95e0310fa1cf35d34c9ada282d1813c6375d",
+        "signature": "82332b7694568fc63a08c60b0f748477d09566f4dd95ca819b3635114c645b1f373bb33089082b9481f828c69bd48fe1f42b143b9a7337f29ed62eba0bf48002",
+        "verify_strict": true,
+        "verify": true
+      },
+      "hex": "db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d95350904a038eff7a2f6e05edc2e95e0310fa1cf35d34c9ada282d1813c6375d82332b7694568fc63a08c60b0f748477d09566f4dd95ca819b3635114c645b1f373bb33089082b9481f828c69bd48fe1f42b143b9a7337f29ed62eba0bf48002",
+      "hash": "c08b61cdf0b08ed241be15c3f81a795cc61d2d6efab7f9118b6f0b3c386da192"
+    },
+    {
+      "name": "non_canonical_s_plus_l",
+      "fields": {
+        "public_key": "db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d",
+        "message": "95350904a038eff7a2f6e05edc2e95e0310fa1cf35d34c9ada282d1813c6375d",
+        "signature": "82332b7694568fc63a08c60b0f748477d09566f4dd95ca819b3635114c645b1f240fa98da36b3dec579520697ace6ef6f42b143b9a7337f29ed62eba0bf48012",
+        "verify_strict": false,
+        "verify": false
+      },
+      "hex": "db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d95350904a038eff7a2f6e05edc2e95e0310fa1cf35d34c9ada282d1813c6375d82332b7694568fc63a08c60b0f748477d09566f4dd95ca819b3635114c645b1f240fa98da36b3dec579520697ace6ef6f42b143b9a7337f29ed62eba0bf48012",
+      "hash": "108654ebf4ba3460b25a51ca461ecd48ee6d73c3946bbd89387bf413d919b200"
+    },
+    {
+      "name": "small_order_key_identity",
+      "fields": {
+        "public_key": "0100000000000000000000000000000000000000000000000000000000000000",
+        "message": "95350904a038eff7a2f6e05edc2e95e0310fa1cf35d34c9ada282d1813c6375d",
+        "signature": "01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "verify_strict": false,
+        "verify": true
+      },
+      "hex": "010000000000000000000000000000000000000000000000000000000000000095350904a038eff7a2f6e05edc2e95e0310fa1cf35d34c9ada282d1813c6375d01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "hash": "b9a6232fa5c03e78e4f115157cf145b58c19e52fd6db04042c42b295814185a1"
+    }
+  ],
+  "invalid": []
+}

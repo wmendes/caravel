@@ -1,0 +1,30 @@
+{
+  "format": "OracleUpdateV1",
+  "spec": "§9.5",
+  "hash_rule": "hash = H(TAG_ORACLE || lane_id || bytes[0..18]), the message the oracle key signs.",
+  "context": {
+    "lane_id": "319b46e9804746739b1e177fae8d79df8f013ec86dde16eaff6c83b374531047"
+  },
+  "vectors": [
+    {
+      "name": "btc_price",
+      "fields": {
+        "market_id": "1",
+        "price": "6500000000",
+        "publish_time_ms": "1790000000500",
+        "oracle_key": "48075a597e721a156e2e0799de5cc0c5324dc6e7eaf1cdd46250868ec53215dd",
+        "signature": "b0d7ca7b7cf4dcafa4cac0cb78ed9fea29ef7d1290d7bf61d3c5eed621fb170234df8490f70f303e43d07eb98138bad94283a7caeaa110d09674dd0623033e0a",
+        "signing_preimage": "4341524156454c2f4f5241434c452f5631319b46e9804746739b1e177fae8d79df8f013ec86dde16eaff6c83b374531047010000216e8301000000f46d50c4a0010000"
+      },
+      "hex": "010000216e8301000000f46d50c4a001000048075a597e721a156e2e0799de5cc0c5324dc6e7eaf1cdd46250868ec53215ddb0d7ca7b7cf4dcafa4cac0cb78ed9fea29ef7d1290d7bf61d3c5eed621fb170234df8490f70f303e43d07eb98138bad94283a7caeaa110d09674dd0623033e0a",
+      "hash": "d1aa3aa6be5b9ccea64e798da9d9ca9aa8718284c32392a5bf9db98f070643ef"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "short",
+      "hex": "010000216e8301000000f46d50c4a001000048075a597e721a156e2e0799de5cc0c5324dc6e7eaf1cdd46250868ec53215ddb0d7ca7b7cf4dcafa4cac0cb78ed9fea29ef7d1290d7bf61d3c5eed621fb170234df8490f70f303e43d07eb98138bad94283a7caeaa110d09674dd0623033e",
+      "error": "BadLength"
+    }
+  ]
+}

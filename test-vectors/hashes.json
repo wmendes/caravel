@@ -1,0 +1,105 @@
+{
+  "format": "hash preimages",
+  "spec": "§9.1, §9.2, §9.6, §11.8, §12.1, §13.4",
+  "hash_rule": "hash = H(hex): each hex is the exact preimage.",
+  "context": {},
+  "vectors": [
+    {
+      "name": "lane_id",
+      "fields": {
+        "lane_name": "caravel-perps-testnet-0"
+      },
+      "hex": "4341524156454c2f4c414e452f56316361726176656c2d70657270732d746573746e65742d30",
+      "hash": "319b46e9804746739b1e177fae8d79df8f013ec86dde16eaff6c83b374531047"
+    },
+    {
+      "name": "network_id_testnet",
+      "fields": {
+        "passphrase": "Test SDF Network ; September 2015"
+      },
+      "hex": "5465737420534446204e6574776f726b203b2053657074656d6265722032303135",
+      "hash": "cee0302d59844d32bdca915c8203dd44b33fbb7edc19051ea37abedf28ecd472"
+    },
+    {
+      "name": "engine_version",
+      "fields": {
+        "spec_version": "0.1.0"
+      },
+      "hex": "4341524156454c2f454e47494e452f5631302e312e30",
+      "hash": "4b8b18f3dfb00452218288bfd06f243dd5c717667a144feead79522e4817b099"
+    },
+    {
+      "name": "account_leaf",
+      "fields": {
+        "lane_id": "319b46e9804746739b1e177fae8d79df8f013ec86dde16eaff6c83b374531047",
+        "seq": "1",
+        "index": "2",
+        "key": "db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d",
+        "escape_equity": "9500000000"
+      },
+      "hex": "004341524156454c2f414343542f5631319b46e9804746739b1e177fae8d79df8f013ec86dde16eaff6c83b374531047010000000000000002000000db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d007f3e36020000000000000000000000",
+      "hash": "e03714414cb702674b52beaacbb5261edc4d789b097b84133c3706a1c2bb35bb"
+    },
+    {
+      "name": "withdrawal_leaf",
+      "fields": {
+        "lane_id": "319b46e9804746739b1e177fae8d79df8f013ec86dde16eaff6c83b374531047",
+        "seq": "1",
+        "index": "0",
+        "key": "db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d",
+        "amount": "500000000"
+      },
+      "hex": "004341524156454c2f57444c2f5631319b46e9804746739b1e177fae8d79df8f013ec86dde16eaff6c83b374531047010000000000000000000000db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d0065cd1d000000000000000000000000",
+      "hash": "fbfac19f5a1171fc5cb1849219921bfc50e04eed62bdde0979e40843e190a67d"
+    },
+    {
+      "name": "signers_hash_3_of_weight_1_threshold_2",
+      "fields": {
+        "keys": [
+          "2df04125f0015afb47ce853aef8772094ff9498c14cb1b9e12973c2927da0fa6",
+          "a7f6dfaf8f38b89ba8ce649b594f91e4d01fdc57f9c9493df43b5e50a9987367",
+          "af06a3e3291714e4f356c19c9b15cd1951ec6e6662aa77be07547f289383341d"
+        ],
+        "weights": [
+          "1",
+          "1",
+          "1"
+        ],
+        "threshold": "2"
+      },
+      "hex": "4341524156454c2f5349474e4552532f5631030000002df04125f0015afb47ce853aef8772094ff9498c14cb1b9e12973c2927da0fa601000000a7f6dfaf8f38b89ba8ce649b594f91e4d01fdc57f9c9493df43b5e50a998736701000000af06a3e3291714e4f356c19c9b15cd1951ec6e6662aa77be07547f289383341d0100000002000000",
+      "hash": "e3972419008550305baaaad69dd8a7c5effb46da2309e0a10d29527b3bd513e4"
+    },
+    {
+      "name": "rotate_message_epoch_2",
+      "fields": {
+        "lane_id": "319b46e9804746739b1e177fae8d79df8f013ec86dde16eaff6c83b374531047",
+        "network_id": "cee0302d59844d32bdca915c8203dd44b33fbb7edc19051ea37abedf28ecd472",
+        "settlement_addr_hash": "21ffae76a7f4a2791771cd0dabc042efd2f051d7aade140632516ee3c930322a",
+        "new_epoch": "2",
+        "signers_hash": "e3972419008550305baaaad69dd8a7c5effb46da2309e0a10d29527b3bd513e4"
+      },
+      "hex": "4341524156454c2f524f544154452f5631319b46e9804746739b1e177fae8d79df8f013ec86dde16eaff6c83b374531047cee0302d59844d32bdca915c8203dd44b33fbb7edc19051ea37abedf28ecd47221ffae76a7f4a2791771cd0dabc042efd2f051d7aade140632516ee3c930322a0200000000000000e3972419008550305baaaad69dd8a7c5effb46da2309e0a10d29527b3bd513e4",
+      "hash": "6cab90adea6bed51512a0b18f2ccfdce5e2ebac4496854674f1c9caf89bc6f31"
+    },
+    {
+      "name": "block_hash",
+      "fields": {
+        "input_hash": "2896e13dfad6b1937161dda93b3dd208a63e6dcaec747ed3277e2dfa9fe5564e",
+        "state_hash_after": "74da0d27cf6d2b40b4be03b27198c3bcbbf04cc630d10cb574842df49f8e4c74"
+      },
+      "hex": "2896e13dfad6b1937161dda93b3dd208a63e6dcaec747ed3277e2dfa9fe5564e74da0d27cf6d2b40b4be03b27198c3bcbbf04cc630d10cb574842df49f8e4c74",
+      "hash": "b529360e863036f3f172c986840b3b7dce0170ccb436c844963cb952b96a6430"
+    },
+    {
+      "name": "sep53_lane_tx",
+      "fields": {
+        "tx_hash": "9de812ecba6875e91f7893599e2611bb25acb3f0571fd4cdf209459c34c8c751",
+        "message": "Caravel lane tx 9de812ecba6875e91f7893599e2611bb25acb3f0571fd4cdf209459c34c8c751"
+      },
+      "hex": "5374656c6c6172205369676e6564204d6573736167653a0a4361726176656c206c616e652074782039646538313265636261363837356539316637383933353939653236313162623235616362336630353731666434636466323039343539633334633863373531",
+      "hash": "c7a062f66b4c3a4a905fa74147511144d4f63b12763a66b28d6aa92bb0115f60"
+    }
+  ],
+  "invalid": []
+}

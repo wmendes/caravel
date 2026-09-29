@@ -1,0 +1,107 @@
+{
+  "format": "GenesisConfigV1",
+  "spec": "§10.2",
+  "hash_rule": "hash = config_hash = H(GenesisConfigV1 bytes). Keys are fixture keys, not the deployed testnet keys.",
+  "context": {
+    "lane_name": "caravel-perps-testnet-0"
+  },
+  "vectors": [
+    {
+      "name": "section_10_3_markets",
+      "fields": {
+        "lane_id": "319b46e9804746739b1e177fae8d79df8f013ec86dde16eaff6c83b374531047",
+        "backstop_key": "884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0b",
+        "treasury_key": "a09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f0",
+        "access_mode": "0",
+        "allowlist": [],
+        "oracle_keys": [
+          "48075a597e721a156e2e0799de5cc0c5324dc6e7eaf1cdd46250868ec53215dd"
+        ],
+        "oracle_max_staleness_ms": "30000",
+        "oracle_max_future_ms": "5000",
+        "oracle_circuit_breaker_bps": "1000",
+        "oracle_breaker_bps_per_sec": "10",
+        "funding_interval_ms": "3600000",
+        "funding_damping": "8",
+        "funding_max_rate_ppm": "500",
+        "insurance_fee_share_bps": "3000",
+        "min_deposit": "10000000",
+        "min_withdrawal": "10000000",
+        "max_accounts": "1024",
+        "max_orders_per_side": "256",
+        "max_open_orders_per_account": "32",
+        "max_session_keys": "4",
+        "max_txs_per_account_per_block": "50",
+        "max_entries_per_block": "256",
+        "max_block_bytes": "24000",
+        "max_pending_withdrawals": "512",
+        "exec_cpu_limit": "400000000",
+        "exec_mem_limit": "41943040",
+        "markets": [
+          {
+            "market_id": "1",
+            "symbol": "BTC-PERP",
+            "tick": "1000",
+            "imf_bps": "1000",
+            "mmf_bps": "500",
+            "taker_fee_bps": "5",
+            "maker_fee_bps": "0",
+            "liq_fee_bps": "100",
+            "band_bps": "500",
+            "max_position_lots": "20000",
+            "max_oi_lots": "200000",
+            "impact_lots": "1000",
+            "display_lot_base_units": "10000",
+            "display_base_decimals": "8"
+          },
+          {
+            "market_id": "2",
+            "symbol": "ETH-PERP",
+            "tick": "1000",
+            "imf_bps": "1000",
+            "mmf_bps": "500",
+            "taker_fee_bps": "5",
+            "maker_fee_bps": "0",
+            "liq_fee_bps": "100",
+            "band_bps": "500",
+            "max_position_lots": "50000",
+            "max_oi_lots": "500000",
+            "impact_lots": "2000",
+            "display_lot_base_units": "100000",
+            "display_base_decimals": "8"
+          },
+          {
+            "market_id": "3",
+            "symbol": "XLM-PERP",
+            "tick": "1000",
+            "imf_bps": "2000",
+            "mmf_bps": "1000",
+            "taker_fee_bps": "5",
+            "maker_fee_bps": "0",
+            "liq_fee_bps": "100",
+            "band_bps": "500",
+            "max_position_lots": "100000",
+            "max_oi_lots": "1000000",
+            "impact_lots": "1000",
+            "display_lot_base_units": "100000000",
+            "display_base_decimals": "7"
+          }
+        ]
+      },
+      "hex": "435647454e455331319b46e9804746739b1e177fae8d79df8f013ec86dde16eaff6c83b374531047884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0ba09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f00000000148075a597e721a156e2e0799de5cc0c5324dc6e7eaf1cdd46250868ec53215dd30750000000000008813000000000000e8030a0080ee3600000000000800f4010000b80b80969800000000000000000000000000809698000000000000000000000000000004000000010000200004320000010000c05d0000000200000084d717000000000000800200000000030001004254432d504552500000000000000000e803000000000000e803f401050000006400f401204e000000000000400d030000000000e80300000000000010270000000000000802004554482d504552500000000000000000e803000000000000e803f401050000006400f40150c300000000000020a1070000000000d007000000000000a086010000000000080300584c4d2d504552500000000000000000e803000000000000d007e803050000006400f401a08601000000000040420f0000000000e80300000000000000e1f5050000000007",
+      "hash": "5c081d53bf1f4a6c2dfcbf54982b8d9f0cfba39799ef71fb5ebb699e604a4b44"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "bad_access_mode",
+      "hex": "435647454e455331319b46e9804746739b1e177fae8d79df8f013ec86dde16eaff6c83b374531047884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0ba09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f00200000148075a597e721a156e2e0799de5cc0c5324dc6e7eaf1cdd46250868ec53215dd30750000000000008813000000000000e8030a0080ee3600000000000800f4010000b80b80969800000000000000000000000000809698000000000000000000000000000004000000010000200004320000010000c05d0000000200000084d717000000000000800200000000030001004254432d504552500000000000000000e803000000000000e803f401050000006400f401204e000000000000400d030000000000e80300000000000010270000000000000802004554482d504552500000000000000000e803000000000000e803f401050000006400f40150c300000000000020a1070000000000d007000000000000a086010000000000080300584c4d2d504552500000000000000000e803000000000000d007e803050000006400f401a08601000000000040420f0000000000e80300000000000000e1f5050000000007",
+      "error": "BadEnum"
+    },
+    {
+      "name": "trailing_byte",
+      "hex": "435647454e455331319b46e9804746739b1e177fae8d79df8f013ec86dde16eaff6c83b374531047884b8857f4eaa1613c61504db34d4beaf346517a0e31de3cddd4d9b4201d9d0ba09aa5f47a6759802ff955f8dc2d2a14a5c99d23be97f864127ff9383455a4f00000000148075a597e721a156e2e0799de5cc0c5324dc6e7eaf1cdd46250868ec53215dd30750000000000008813000000000000e8030a0080ee3600000000000800f4010000b80b80969800000000000000000000000000809698000000000000000000000000000004000000010000200004320000010000c05d0000000200000084d717000000000000800200000000030001004254432d504552500000000000000000e803000000000000e803f401050000006400f401204e000000000000400d030000000000e80300000000000010270000000000000802004554482d504552500000000000000000e803000000000000e803f401050000006400f40150c300000000000020a1070000000000d007000000000000a086010000000000080300584c4d2d504552500000000000000000e803000000000000d007e803050000006400f401a08601000000000040420f0000000000e80300000000000000e1f505000000000700",
+      "error": "TrailingBytes"
+    }
+  ]
+}

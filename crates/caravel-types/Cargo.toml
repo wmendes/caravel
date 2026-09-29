@@ -7,4 +7,21 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# Enables the golden-vector generator (`cargo gen-vectors`, spec §19.2). It needs
+# a hasher and a signer; the library itself never hashes or signs.
+gen-vectors = ["dep:sha2", "dep:ed25519-dalek"]
+
 [dependencies]
+sha2 = { workspace = true, optional = true }
+ed25519-dalek = { workspace = true, optional = true }
+
+[dev-dependencies]
+sha2 = { workspace = true }
+ed25519-dalek = { workspace = true }
+proptest = "1.11.0"
+
+[[bin]]
+name = "gen-vectors"
+path = "src/bin/gen-vectors.rs"
+required-features = ["gen-vectors"]

@@ -1,0 +1,70 @@
+{
+  "format": "InboxMsgV1",
+  "spec": "§9.4",
+  "hash_rule": "hash = acc_after = H(TAG_INBOX || acc_before || msg); acc_0 is 32 zero bytes. The messages form one chain.",
+  "context": {},
+  "vectors": [
+    {
+      "name": "msg_0",
+      "fields": {
+        "kind": "0",
+        "index": "0",
+        "lane_account": "db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d",
+        "amount": "10000000000",
+        "enqueued_at": "1789999990",
+        "acc_before": "0000000000000000000000000000000000000000000000000000000000000000",
+        "acc_preimage": "4341524156454c2f494e424f582f56310000000000000000000000000000000000000000000000000000000000000000000000000000000000db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d00e40b54020000000000000000000000763bb16a00000000",
+        "acc_after": "28f06eeba1c720a91fa58b58d6be8fac2d6c92c99963cd2302e751943c3ef617"
+      },
+      "hex": "000000000000000000db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d00e40b54020000000000000000000000763bb16a00000000",
+      "hash": "28f06eeba1c720a91fa58b58d6be8fac2d6c92c99963cd2302e751943c3ef617"
+    },
+    {
+      "name": "msg_1",
+      "fields": {
+        "kind": "0",
+        "index": "1",
+        "lane_account": "2152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db12",
+        "amount": "10000000000",
+        "enqueued_at": "1789999995",
+        "acc_before": "28f06eeba1c720a91fa58b58d6be8fac2d6c92c99963cd2302e751943c3ef617",
+        "acc_preimage": "4341524156454c2f494e424f582f563128f06eeba1c720a91fa58b58d6be8fac2d6c92c99963cd2302e751943c3ef6170001000000000000002152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1200e40b540200000000000000000000007b3bb16a00000000",
+        "acc_after": "883aa84689c84dcbb854b01e2404f3948ab5f190e264b35b9c12e27fc204b7da"
+      },
+      "hex": "0001000000000000002152f8d19b791d24453242e15f2eab6cb7cffa7b6a5ed30097960e069881db1200e40b540200000000000000000000007b3bb16a00000000",
+      "hash": "883aa84689c84dcbb854b01e2404f3948ab5f190e264b35b9c12e27fc204b7da"
+    },
+    {
+      "name": "msg_2",
+      "fields": {
+        "kind": "1",
+        "index": "2",
+        "lane_account": "db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d",
+        "amount": "500000000",
+        "enqueued_at": "1790000000",
+        "acc_before": "883aa84689c84dcbb854b01e2404f3948ab5f190e264b35b9c12e27fc204b7da",
+        "acc_preimage": "4341524156454c2f494e424f582f5631883aa84689c84dcbb854b01e2404f3948ab5f190e264b35b9c12e27fc204b7da010200000000000000db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d0065cd1d000000000000000000000000803bb16a00000000",
+        "acc_after": "1988df4d48957d1d7fb4e1cae64fce6a517ae2c56dd4752aa9e8796e2f4a753e"
+      },
+      "hex": "010200000000000000db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d0065cd1d000000000000000000000000803bb16a00000000",
+      "hash": "1988df4d48957d1d7fb4e1cae64fce6a517ae2c56dd4752aa9e8796e2f4a753e"
+    }
+  ],
+  "invalid": [
+    {
+      "name": "bad_kind",
+      "hex": "020000000000000000db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d00e40b54020000000000000000000000763bb16a00000000",
+      "error": "BadEnum"
+    },
+    {
+      "name": "short",
+      "hex": "000000000000000000db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d00e40b54020000000000000000000000763bb16a000000",
+      "error": "BadLength"
+    },
+    {
+      "name": "long",
+      "hex": "000000000000000000db995fe25169d141cab9bbba92baa01f9f2e1ece7df4cb2ac05190f37fcc1f9d00e40b54020000000000000000000000763bb16a0000000000",
+      "error": "BadLength"
+    }
+  ]
+}
