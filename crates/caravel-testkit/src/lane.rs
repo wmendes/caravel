@@ -207,6 +207,13 @@ impl<E: Executor> Lane<E> {
         self.inbox(InboxKind::Deposit, key, amount)
     }
 
+    /// Queues an inbox message built elsewhere, e.g. read from the settlement
+    /// contract, so the lane processes exactly what Stellar recorded.
+    pub fn push_inbox(&mut self, msg: InboxMsgV1) {
+        self.next_inbox = self.next_inbox.max(msg.index + 1);
+        self.queued_inbox.push(msg);
+    }
+
     pub fn forced_withdrawal(&mut self, seed: u8, amount: i128) -> InboxMsgV1 {
         self.inbox(InboxKind::ForcedWithdrawal, pk(seed), amount)
     }

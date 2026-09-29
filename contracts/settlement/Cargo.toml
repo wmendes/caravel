@@ -12,7 +12,17 @@ crate-type = ["cdylib", "rlib"]
 doctest = false
 
 [dependencies]
-soroban-sdk = { workspace = true }
+caravel-types = { workspace = true }
+caravel-merkle = { workspace = true, features = ["soroban"] }
+# caravel-types builds its byte strings in Vecs (the same builders the engine uses).
+soroban-sdk = { workspace = true, features = ["alloc"] }
 
 [dev-dependencies]
-soroban-sdk = { workspace = true, features = ["testutils"] }
+soroban-sdk = { workspace = true, features = ["testutils", "alloc"] }
+caravel-merkle = { workspace = true, features = ["alloc", "native", "soroban"] }
+caravel-perps = { workspace = true, features = ["native"] }
+caravel-testkit = { workspace = true }
+caravel-types = { workspace = true, features = ["gen-vectors"] }
+ed25519-dalek = { workspace = true }
+serde_json = "1.0.151"
+stellar-strkey = { workspace = true }
