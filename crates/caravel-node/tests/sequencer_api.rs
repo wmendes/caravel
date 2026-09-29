@@ -284,6 +284,19 @@ async fn sequencer_api_end_to_end() {
     // Deposits, prices, and a WebSocket subscriber for A.
     lane.deposit(A, 10_000 * USDC).await;
     lane.deposit(B, 10_000 * USDC).await;
+    // Out of order: the sequencer names the index it needs.
+    let skip = InboxMsgV1 {
+        kind: InboxKind::Deposit,
+        index: 5,
+        lane_account: pk(A),
+        amount: USDC,
+        enqueued_at: 1,
+    };
+    let (status, gap) = lane.internal("/internal/inbox", json!({ "index": "5", "msg_hex": hex(&skip.encode()), "acc_after_hex": hex(&[0u8; 32]) })).await;
+    assert_eq!(
+        (status, gap["code"].as_str(), gap["expected"].as_str()),
+        (409, Some("INBOX_GAP"), Some("2"))
+    );
     for (m, p) in [(1, BTC_PRICE), (2, 35_000_000), (3, 40_000_000)] {
         lane.oracle(m, p).await;
     }

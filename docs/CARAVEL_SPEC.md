@@ -1747,7 +1747,7 @@ Document this in RUNBOOK.
 
 ## 17. Relayer (`apps/relayer`, TypeScript)
 
-Node ≥ 22 with `@stellar/stellar-sdk 17.2.0`. Generate typed clients with `stellar contract bindings typescript` for both contracts `[VERIFY command]`. Three loops in one process, each with its own key where signing is needed.
+Node ≥ 22 with `@stellar/stellar-sdk 17.2.0`. Contract calls go through `rpc.Server` with explicit `ScVal`s, not generated clients (DEC-040). Three loops in one process, each with its own key where signing is needed.
 
 ### 17.1 Inbox watcher
 
@@ -1768,7 +1768,7 @@ Node ≥ 22 with `@stellar/stellar-sdk 17.2.0`. Generate typed clients with `ste
 ### 17.3 Oracle feeder
 
 - Sources, in priority:
-  1. Reflector SEP-40 feeds on testnet: `lastprice(asset)`. Look up current contract IDs and decimals in the Reflector docs `[VERIFY]`.
+  1. Reflector SEP-40 feeds on testnet: `lastprice(asset)`. The "External CEXs & DEXs" testnet feed is `CCYOZJCOPG34LLQQ7N24YXBM7LL62R7ONMZ3G6WZAAYPB5OYKOMJRN63`, 14 decimals, 300 s resolution (developers.stellar.org "Oracle Providers", 2026-09-08, and on-chain `decimals()`/`resolution()`, 2026-09-29; DEC-041).
   2. A public spot API as fallback. The source is configured per market.
 - Every 2s per market:
   1. Fetch the USD price.
@@ -1930,7 +1930,7 @@ Status values: `todo`, `doing`, `review`, `done`. Agents update the Status cell 
 | T-006 | `contracts/settlement`: all of §13 + tests in §13.7 | T-001, T-002 | §9, §11.8, §13 | done |
 | T-007 | `caravel-node sequencer`: mempool, block loop, SQLite store, API/WS, checkpoint policy + assembly | T-005 | §14 | review |
 | T-008 | `caravel-node validator`: follow, re-execute, sign, never-equivocate store | T-005 | §15 | review |
-| T-009 | `apps/relayer`: inbox watcher, checkpoint submitter, oracle feeder | T-006, T-007 | §17 | todo |
+| T-009 | `apps/relayer`: inbox watcher, checkpoint submitter, oracle feeder | T-006, T-007 | §17 | review |
 | T-010 | `caravel-node replay` | T-005, T-006 | §16 | todo |
 | T-011 | Local compose + `scripts/e2e-local.sh` (§19.5 steps 1–6) | T-007…T-010 | §19.5 | todo |
 | T-012 | Testnet deploy script; deploy engine + settlement; one **witness** `step` transaction on testnet with a small state, byte-equal to the executor output | T-011 | §3, §12, §13 | todo |
@@ -2088,6 +2088,8 @@ For lanes that need classic Stellar operations or SCP among many validators:
 | DEC-037 | Local lane `config/lane.caravel-perps.local.toml`: the testnet parameters with the public fixture keys (seeds `0x21`, `0x22`, `0x31`) and the name `caravel-perps-local-0`, for development, `scripts/soak-sequencer.sh` and T-011. Never deployed. `caravel-node check-store` re-executes a node's store through the Wasm and rebuilds every checkpoint header; `crates/caravel-node/examples/loadgen.rs` drives the soak | The load test and the local e2e need an oracle key whose secret is known; a separate lane name keeps it from being mistaken for the testnet lane | — |
 | DEC-038 | Validator layout: `caravel-lane::validator::Follower` (synchronous: apply a record, compute headers, sign) inside `caravel-node validator` (axum). It follows by polling the sequencer's `/v1/blocks/{h}` every `poll_ms`; a block is "live" when `now − timestamp_ms ≤ 10 s`. Config is `config/validator-*.toml` with the `S...` secret in a separate key file; the executor is always the Wasm. It stores its own receipts, keeps every checkpoint snapshot (M0 does not prune, which covers "at least the last 3 plus the one accepted"), and keeps live-check flags in SQLite until `caravel-node validator-clear --through H`. A halt lasts until restart; a restart that fetches the same bad block halts again. `/v1/sign` refusals: `HALTED`, `HEADER_MISMATCH`, `BATCH_MISMATCH`, `SUSPICIOUS_BLOCK`, `ALREADY_SIGNED` (409), `NOT_CAUGHT_UP` (503), `BAD_HEADER` (400) | The same store, assembly and views as the sequencer, so headers match byte for byte; flags and signatures survive restarts because they are in the store | Snapshot pruning, if stores grow |
 | DEC-039 | Validators learn which checkpoint Stellar accepted by reading the settlement contract's instance entry with RPC `getLedgerEntries`: `LastCkpt` is the key `Vec[Symbol("LastCkpt")]`, with `seq` (`U64`) and `header_hash` (32 `Bytes`) in its map. A settlement test pins that layout. A matching checkpoint (and every earlier one) is marked accepted | Independent of the sequencer, and needs no simulation or source account. The spec asks for acceptance "polled from `last_checkpoint()`"; this reads the same value from storage | Contract storage layout changes |
+| DEC-040 | Relayer inbox and client choices: the inbox watcher's cursor is the sequencer's own count of reported messages (`/v1/status` `inbox.reported`), and it reads each message with the `inbox(index)` view by simulation, instead of paging `getEvents` from a cursor file. Contract calls use `@stellar/stellar-sdk` 17.2.0 `rpc.Server` directly with explicit `ScVal`s (`Sig` as a map with sorted symbol keys), not generated bindings. Secrets come from `CARAVEL_INTERNAL_TOKEN`, `CARAVEL_RELAYER_SECRET` and `CARAVEL_ORACLE_SECRET`; `config/relayer.*.json` holds the rest. The relayer accepts testnet and a local quickstart network ("Standalone Network ; February 2017") and refuses everything else | The sequencer's count survives relayer restarts and needs no local state, so resuming can neither skip nor repeat out of order. Views read the contract's own record, which does not age out of RPC retention the way events do. Six calls do not justify a generated client, and explicit encodings are tested | Many more contract calls (then generate bindings) |
+| DEC-041 | Oracle sources per market, in priority order (spec §17.3): Reflector's testnet "External CEXs & DEXs" feed `CCYOZJCOPG34LLQQ7N24YXBM7LL62R7ONMZ3G6WZAAYPB5OYKOMJRN63` (`lastprice(Other(symbol))`, 14 decimals, 300 s resolution, checked on-chain 2026-09-29), then Coinbase's public spot price (`GET https://api.coinbase.com/v2/prices/{pair}/spot`), or a fixed price for local lanes. A source is used only if its own timestamp is within `maxSourceAgeSecs` (900 on testnet). Whatever the source, the relayer signs with the team's oracle key and a fresh `publish_time_ms`, publishing every 2 s on a one-tick move and at least every 10 s | Follows §17.3 and the OQ-002 default. Reflector moves only every 5 minutes, so the 10 s heartbeat keeps the lane within its 30 s staleness limit; the UI must say prices are signed by the Caravel team's oracle key | A lane oracle with its own feeds (M1) |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 
