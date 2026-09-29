@@ -44,6 +44,7 @@ CARAVEL_INTERNAL_TOKEN=$(openssl rand -hex 16) cargo run --release -p caravel-no
 cargo run --release -p caravel-node -- validator --config config/validator-1.local.toml   # a validator (key in keys/, never in git)
 cargo run --release -p caravel-node -- check-store --config config/sequencer.local.toml   # replay a node's store through the Wasm
 DURATION=3600 TPS=50 ./scripts/soak-sequencer.sh   # T-007 soak: 1 s blocks, 50 tx/s, restart halfway
+cargo run --release -p caravel-node -- replay --rpc <url> --network-passphrase <p> --settlement C... --genesis-config config/lane.<lane>.toml --engine-wasm target/contracts/perps_engine.wasm [--prove-escape G...]   # replay from Stellar only
 ./scripts/e2e-local.sh                  # quickstart + sequencer + 3 validators + relayer (after T-011)
 npm --prefix apps/relayer ci && npm --prefix apps/relayer test
 npm --prefix apps/relayer run build && node apps/relayer/dist/main.js --config config/relayer.local.json   # needs CARAVEL_INTERNAL_TOKEN, CARAVEL_RELAYER_SECRET, CARAVEL_ORACLE_SECRET

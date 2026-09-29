@@ -25,6 +25,30 @@ enum Command {
         #[arg(long)]
         config: PathBuf,
     },
+    /// Replay the lane from Stellar data only (spec §16) and optionally print
+    /// escape or withdrawal proofs for an account.
+    Replay {
+        /// Stellar RPC URL.
+        #[arg(long)]
+        rpc: String,
+        #[arg(long)]
+        network_passphrase: String,
+        /// The settlement contract, C...
+        #[arg(long)]
+        settlement: String,
+        /// The lane TOML the genesis config is derived from (as `genesis` does).
+        #[arg(long)]
+        genesis_config: PathBuf,
+        /// The engine Wasm; its hash must be the contract's engine_wasm_hash.
+        #[arg(long)]
+        engine_wasm: PathBuf,
+        /// Print the escape proof of this G... account from the last accepted checkpoint.
+        #[arg(long)]
+        prove_escape: Option<String>,
+        /// Print this G... account's unclaimed withdrawal proofs.
+        #[arg(long)]
+        prove_withdrawals: Option<String>,
+    },
     /// Run a validator (spec §15): follow, re-execute, sign, serve proofs.
     Validator {
         /// The validator config, e.g. config/validator-1.local.toml.
@@ -82,6 +106,81 @@ fn main() -> Result<()> {
             let report =
                 caravel_node::check::check_store(&cfg.lane, &cfg.db, &exec, &cfg.header_ids())?;
             println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Command::Replay {
+            rpc,
+            network_passphrase,
+            settlement,
+            genesis_config,
+            engine_wasm,
+            prove_escape,
+            prove_withdrawals,
+        } => {
+            caravel_node::node_config::check_network(&network_passphrase)?;
+            let lane = caravel_node::lane_toml::LaneFile::load(&genesis_config)?;
+            let (_, config_bytes, _) = caravel_node::lane_toml::genesis(&lane)?;
+            let g = caravel_types::config::GenesisConfigV1::decode(&config_bytes)
+                .map_err(|_| anyhow::anyhow!("config"))?;
+            let wasm = std::fs::read(&engine_wasm)?;
+            let wasm_hash = caravel_lane::checkpoint::sha256(&wasm);
+            let exec = caravel_lane::sequencer::Executor::Wasm(caravel_lane::WasmExecutor::new(
+                wasm,
+                wasm_hash,
+                g.exec_cpu_limit,
+                g.exec_mem_limit,
+            )?);
+            let contract = caravel_node::node_config::parse_contract(&settlement)?;
+            let ids = caravel_lane::checkpoint::HeaderIds {
+                network_id: caravel_lane::checkpoint::network_id(&network_passphrase),
+                settlement_addr_hash: caravel_lane::checkpoint::settlement_addr_hash(&contract),
+                engine_wasm_hash: wasm_hash,
+            };
+            let src = caravel_node::replay::RpcSource {
+                rpc: caravel_node::stellar_rpc::Rpc::new(&rpc)?,
+                contract,
+            };
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?;
+            rt.block_on(async {
+                let outcome =
+                    match caravel_node::replay::replay(&src, &lane, &exec, wasm_hash, &ids).await {
+                        Ok(o) => o,
+                        Err(e) => {
+                            println!(
+                                "{}",
+                                serde_json::json!({ "ok": false, "error": format!("{e:#}") })
+                            );
+                            std::process::exit(2);
+                        }
+                    };
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&caravel_node::replay::report(&outcome))?
+                );
+                if let Some(a) = prove_escape {
+                    let key = caravel_lane::views::parse_g(&a)
+                        .ok_or_else(|| anyhow::anyhow!("--prove-escape needs a G... account"))?;
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&caravel_node::replay::escape_proof(
+                            &outcome, &key
+                        )?)?
+                    );
+                }
+                if let Some(a) = prove_withdrawals {
+                    let key = caravel_lane::views::parse_g(&a).ok_or_else(|| {
+                        anyhow::anyhow!("--prove-withdrawals needs a G... account")
+                    })?;
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(
+                            &caravel_node::replay::withdrawal_proofs(&src, &outcome, &key).await?
+                        )?
+                    );
+                }
+                anyhow::Ok(())
+            })?;
         }
         Command::Validator { config } => {
             init_logging();

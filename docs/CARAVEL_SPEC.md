@@ -1737,7 +1737,7 @@ Rules:
 
 ### 16.3 Data retention
 
-Stellar RPC keeps transactions only for a limited window (default about 7 days `[VERIFY]`). For older data:
+Stellar RPC keeps transactions only for a limited window: on testnet, 120,959 ledgers or 7.0 days (`getEvents` `oldestLedger` to `latestLedger`, checked 2026-09-29). For older data:
 - replay from a Galexie/SEP-54 ledger-metadata archive; or
 - replay from any validator's `/v1/blocks` store, cross-checking against on-chain header hashes.
 
@@ -1931,7 +1931,7 @@ Status values: `todo`, `doing`, `review`, `done`. Agents update the Status cell 
 | T-007 | `caravel-node sequencer`: mempool, block loop, SQLite store, API/WS, checkpoint policy + assembly | T-005 | §14 | review |
 | T-008 | `caravel-node validator`: follow, re-execute, sign, never-equivocate store | T-005 | §15 | review |
 | T-009 | `apps/relayer`: inbox watcher, checkpoint submitter, oracle feeder | T-006, T-007 | §17 | review |
-| T-010 | `caravel-node replay` | T-005, T-006 | §16 | todo |
+| T-010 | `caravel-node replay` | T-005, T-006 | §16 | review |
 | T-011 | Local compose + `scripts/e2e-local.sh` (§19.5 steps 1–6) | T-007…T-010 | §19.5 | todo |
 | T-012 | Testnet deploy script; deploy engine + settlement; one **witness** `step` transaction on testnet with a small state, byte-equal to the executor output | T-011 | §3, §12, §13 | todo |
 | T-013 | `apps/web` (§18) against local, then testnet | T-007, T-009 | §18 | todo |
@@ -2090,6 +2090,7 @@ For lanes that need classic Stellar operations or SCP among many validators:
 | DEC-039 | Validators learn which checkpoint Stellar accepted by reading the settlement contract's instance entry with RPC `getLedgerEntries`: `LastCkpt` is the key `Vec[Symbol("LastCkpt")]`, with `seq` (`U64`) and `header_hash` (32 `Bytes`) in its map. A settlement test pins that layout. A matching checkpoint (and every earlier one) is marked accepted | Independent of the sequencer, and needs no simulation or source account. The spec asks for acceptance "polled from `last_checkpoint()`"; this reads the same value from storage | Contract storage layout changes |
 | DEC-040 | Relayer inbox and client choices: the inbox watcher's cursor is the sequencer's own count of reported messages (`/v1/status` `inbox.reported`), and it reads each message with the `inbox(index)` view by simulation, instead of paging `getEvents` from a cursor file. Contract calls use `@stellar/stellar-sdk` 17.2.0 `rpc.Server` directly with explicit `ScVal`s (`Sig` as a map with sorted symbol keys), not generated bindings. Secrets come from `CARAVEL_INTERNAL_TOKEN`, `CARAVEL_RELAYER_SECRET` and `CARAVEL_ORACLE_SECRET`; `config/relayer.*.json` holds the rest. The relayer accepts testnet and a local quickstart network ("Standalone Network ; February 2017") and refuses everything else | The sequencer's count survives relayer restarts and needs no local state, so resuming can neither skip nor repeat out of order. Views read the contract's own record, which does not age out of RPC retention the way events do. Six calls do not justify a generated client, and explicit encodings are tested | Many more contract calls (then generate bindings) |
 | DEC-041 | Oracle sources per market, in priority order (spec §17.3): Reflector's testnet "External CEXs & DEXs" feed `CCYOZJCOPG34LLQQ7N24YXBM7LL62R7ONMZ3G6WZAAYPB5OYKOMJRN63` (`lastprice(Other(symbol))`, 14 decimals, 300 s resolution, checked on-chain 2026-09-29), then Coinbase's public spot price (`GET https://api.coinbase.com/v2/prices/{pair}/spot`), or a fixed price for local lanes. A source is used only if its own timestamp is within `maxSourceAgeSecs` (900 on testnet). Whatever the source, the relayer signs with the team's oracle key and a fresh `publish_time_ms`, publishing every 2 s on a one-tick move and at least every 10 s | Follows §17.3 and the OQ-002 default. Reflector moves only every 5 minutes, so the 10 s heartbeat keeps the lane within its 30 s staleness limit; the UI must say prices are signed by the Caravel team's oracle key | A lane oracle with its own feeds (M1) |
+| DEC-042 | Replay reads everything from ledger entries and transactions: `Config`, `LastCkpt` (instance storage), `Ckpt(seq)` and `Claimed(seq, index)` (persistent entries, keys `Vec[Symbol(name), fields…]`) with `getLedgerEntries`; each checkpoint's transaction from its `ckpt` event, starting at the record's `stellar_ledger`; the `header` and `batch` from the `InvokeContract` arguments of the envelope. Every header is rebuilt with the same assembly code as the nodes and compared byte for byte, and the first differing field is named. `--genesis-config` takes the lane TOML. `--from-archive` is not built in M0: replay needs the transactions inside RPC's retention window (7 days on testnet, checked 2026-09-29), or a validator store checked with `check-store` | One byte comparison covers every commitment field. Storage reads need no simulation. A settlement test pins every key and field replay reads | Checkpoints older than RPC retention (M1: Galexie archive) |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

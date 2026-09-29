@@ -495,47 +495,106 @@ fn a_full_batch_with_3_signatures_fits_testnet_limits() {
 
 // --- Storage layout read by validators off-chain --------------------------------------------
 
-/// Validators read `LastCkpt` straight from the instance entry with
-/// `getLedgerEntries` (caravel-node `stellar_rpc`): the key is the unit
-/// variant as `Vec[Symbol("LastCkpt")]` and the value a map whose `seq` is a
-/// `U64` and `header_hash` 32 `Bytes`.
+/// Validators and replay read storage straight from ledger entries with
+/// `getLedgerEntries` (caravel-node `stellar_rpc`, `replay`). Unit variants
+/// are `Vec[Symbol(name)]`, tuple variants `Vec[Symbol(name), fields...]`,
+/// and structs maps keyed by field-name symbols.
 #[test]
-fn last_checkpoint_storage_layout() {
-    use soroban_sdk::xdr::{ScMapEntry, ScSymbol, ScVal, ScVec};
+fn storage_layout_read_off_chain() {
+    use soroban_sdk::xdr::{ScMap, ScMapEntry, ScSymbol, ScVal, ScVec};
     use soroban_sdk::TryFromVal;
     let mut h = Harness::new();
     h.deposit(A, 100 * USDC);
     h.sync_inbox();
     h.lane.block();
+    h.lane.withdraw(A, 30 * USDC);
+    h.lane.block();
     let cp = h.checkpoint();
     h.accept(&cp);
-    let env = &h.env;
-    let key: Val = DataKey::LastCkpt.into_val(env);
-    let key = ScVal::try_from_val(env, &key).unwrap();
-    let sym = |s: &str| ScVal::Symbol(ScSymbol(s.try_into().unwrap()));
-    assert_eq!(
-        key,
-        ScVal::Vec(Some(ScVec(std::vec![sym("LastCkpt")].try_into().unwrap())))
+    let who = h.user(A, 0);
+    h.c().claim_withdrawal(
+        &who,
+        &key32(&h.env, A),
+        &1,
+        &0,
+        &(30 * USDC),
+        &h.withdrawal_proof(&cp, 0),
     );
-    let stored: Val = env.as_contract(&h.id, || {
-        env.storage()
-            .instance()
-            .get::<DataKey, Val>(&DataKey::LastCkpt)
-            .unwrap()
-    });
-    let ScVal::Map(Some(map)) = ScVal::try_from_val(env, &stored).unwrap() else {
-        panic!("LastCkpt is not a map")
-    };
-    let field = |name: &str| {
-        map.0
-            .iter()
+    let env = &h.env;
+    let sym = |s: &str| ScVal::Symbol(ScSymbol(s.try_into().unwrap()));
+    let xdr_of = |v: Val| ScVal::try_from_val(env, &v).unwrap();
+    let vec_of = |items: StdVec<ScVal>| ScVal::Vec(Some(ScVec(items.try_into().unwrap())));
+    let field = |m: &ScMap, name: &str| {
+        m.0.iter()
             .find(|e: &&ScMapEntry| e.key == sym(name))
             .map(|e| e.val.clone())
             .unwrap()
     };
-    assert_eq!(field("seq"), ScVal::U64(1));
-    let ScVal::Bytes(hash) = field("header_hash") else {
-        panic!("header_hash is not bytes")
+    let map_of = |v: ScVal| match v {
+        ScVal::Map(Some(m)) => m,
+        other => panic!("not a map: {other:?}"),
     };
-    assert_eq!(hash.0.as_slice(), sha256(&cp.header.encode()).as_slice());
+
+    // Keys.
+    assert_eq!(
+        xdr_of(DataKey::LastCkpt.into_val(env)),
+        vec_of(std::vec![sym("LastCkpt")])
+    );
+    assert_eq!(
+        xdr_of(DataKey::Config.into_val(env)),
+        vec_of(std::vec![sym("Config")])
+    );
+    assert_eq!(
+        xdr_of(DataKey::Ckpt(1).into_val(env)),
+        vec_of(std::vec![sym("Ckpt"), ScVal::U64(1)])
+    );
+    assert_eq!(
+        xdr_of(DataKey::Claimed(1, 0).into_val(env)),
+        vec_of(std::vec![sym("Claimed"), ScVal::U64(1), ScVal::U32(0)])
+    );
+
+    // Values, as stored.
+    let header_hash = sha256(&cp.header.encode());
+    let last = map_of(xdr_of(env.as_contract(&h.id, || {
+        env.storage()
+            .instance()
+            .get::<DataKey, Val>(&DataKey::LastCkpt)
+            .unwrap()
+    })));
+    assert_eq!(field(&last, "seq"), ScVal::U64(1));
+    assert!(
+        matches!(field(&last, "header_hash"), ScVal::Bytes(b) if b.0.as_slice() == header_hash.as_slice())
+    );
+    let config = map_of(xdr_of(env.as_contract(&h.id, || {
+        env.storage()
+            .instance()
+            .get::<DataKey, Val>(&DataKey::Config)
+            .unwrap()
+    })));
+    for (name, want) in [
+        ("lane_id", caravel_testkit::lane::config().lane_id),
+        ("engine_wasm_hash", ENGINE_HASH),
+        ("config_hash", h.lane.config_hash),
+    ] {
+        assert!(
+            matches!(field(&config, name), ScVal::Bytes(b) if b.0.as_slice() == want.as_slice()),
+            "{name}"
+        );
+    }
+    assert!(matches!(field(&config, "genesis_state_hash"), ScVal::Bytes(b) if b.0.len() == 32));
+    let record = map_of(xdr_of(env.as_contract(&h.id, || {
+        env.storage()
+            .persistent()
+            .get::<DataKey, Val>(&DataKey::Ckpt(1))
+            .unwrap()
+    })));
+    assert!(
+        matches!(field(&record, "header_hash"), ScVal::Bytes(b) if b.0.as_slice() == header_hash.as_slice())
+    );
+    assert_eq!(field(&record, "withdrawal_count"), ScVal::U32(1));
+    assert_eq!(field(&record, "stellar_ledger"), ScVal::U32(1_000));
+    assert!(env.as_contract(&h.id, || env
+        .storage()
+        .persistent()
+        .has(&DataKey::Claimed(1, 0))));
 }
