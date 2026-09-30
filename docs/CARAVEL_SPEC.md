@@ -2053,8 +2053,8 @@ This drops the lane registry contract, the console and its web packages, hosted 
 | P-12 | `caravel-deploy`: the `[env]` schema, secret refusal, derived settlement address, and the pure plan engine with golden plans (DEC-066) | P-11 | review |
 | P-13 | `apply` on Stellar and the `local` provider: chain reader, generated node configs, the `caravel` dispatcher (DEC-067) | P-12 | review |
 | P-14 | `status` and `destroy`; `e2e-local.sh` driven by the tool for both templates (DEC-068) — **Gate P3** | P-13 | review |
-| P-15 | The `ssh` provider: prerequisites check, IAP transport, systemd, Caddy, template extras, `--preflight` | P-14 | todo |
-| P-16 | Import lane #1: its plan shows no changes, and its next release goes through `apply --preflight` | P-15 | todo |
+| P-15 | The `ssh` provider: prerequisites check, IAP transport, systemd, Caddy, template extras (DEC-069) | P-14 | review |
+| P-16 | Lane #1 under the tool: its `[env.testnet]` in its lane file, a plan with no Stellar changes, the host configs normalized by `apply` | P-15 | todo |
 | P-17 | A payments lane on testnet from its lane file, through the whole lifecycle; RESULTS; the `stellar-caravel` plugin | P-16 | todo |
 | P-18 | README, spec and landing copy (after the human approves the claims); security pass over the tool — **Gate P4** | P-17 | todo |
 
@@ -2449,6 +2449,20 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   6. escapes paid from `exit.json` at the frozen ratio;
   7. replay, whose escape proof must equal `exit.json`'s.
 - **Results on a local quickstart, 2026-09-30:** payments passed in 134 s and perps in 178 s | A lane's wind-down is part of its lifecycle. The fastest legitimate freeze is the censorship trigger the contract already has | Contract upgrades or a deletable settlement design |
+| DEC-069 | **M0.5 (P-15).** The `ssh` provider (`ssh.rs`), and one `HostProvider` over `local` and `ssh` for plan, apply, status and destroy.
+- **Transport:** `ssh` (`BatchMode`), or `gcloud compute ssh/scp --tunnel-through-iap` for a GCP VM. A dropped connection (exit 255) is retried, since every step can be repeated.
+- **Reading the host** is one script. It checks the prerequisites (systemd, passwordless sudo, a `caravel` user, the root, rsync, curl, Node 22+, and Caddy with a public URL) and reads:
+  - the release `COMMIT`;
+  - the hashes of `<root>/config/*`, `/etc/systemd/system/caravel-*.service` and `/etc/caddy/Caddyfile`;
+  - the start fingerprints;
+  - the units' states, including running validator units the lane file doesn't list;
+  - each node's `/v1/status` through `curl` on the host.
+
+  The tool installs no packages. A missing prerequisite is a plan problem that points to `provision.sh`.
+- **Writing:** the release is a tarball (binary, Wasm, relayer with `node_modules`, the template's feeds and web app, `COMMIT`), `rsync`ed into `<root>`. Configs go through `sudo install`; units go to `/etc/systemd/system` followed by `daemon-reload`; the Caddyfile goes to `/etc/caddy` followed by a reload. Keys stream over ssh stdin into mode-600 files and never touch this machine's disk. The internal token is made on the host once and kept. Nodes are the units `caravel-sequencer`, `caravel-validator@<name>` and `caravel-relayer`.
+- **Rendered host files:** units and a Caddyfile (API, validators' public APIs, `/internal/*` and `/v1/sign` closed, the web app when the release has one). For lane #1's deployment the units are byte for byte the ones its VM runs (tested).
+- **Read-only check against lane #1's VM, 2026-09-30:** `plan` with its deployment written out and the installed CI release shows no Stellar step and no problem, the same release and the same units. Only config normalization remains (the lane file is renamed to `lane.toml`, and the node configs are regenerated). The write path runs for the first time when lane #1 is brought under the tool (P-16), with the human's go-ahead.
+- **Cut:** `--preflight`. The human judged check-store and the shadow validator unnecessary for releases that don't change consensus. `import`: lane #1 is the only lane deployed before the tool, so its `[env.testnet]` is written by hand from its chain state and deploy files | A team's own Linux host is the self-hosting case. Reusing lane #1's exact units keeps the first import to config files | Several lanes per host, or hosts without systemd |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

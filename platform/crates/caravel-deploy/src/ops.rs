@@ -93,7 +93,7 @@ impl Prepared {
             "relayer_xlm": self.extra.relayer_balance.map(|b| format!("{}.{:07}", b / 10_000_000, b % 10_000_000)),
             "ttl": self.extra.ttl.iter().map(|(what, until)| json!({ "entry": what, "ledgers_left": until.saturating_sub(self.extra.latest_ledger) })).collect::<Vec<_>>(),
             "nodes": nodes,
-            "exit_file": self.host_provider.root.join("exit.json").exists().then(|| self.host_provider.root.join("exit.json").display().to_string()),
+            "exit_file": self.host_provider.exit_path().exists().then(|| self.host_provider.exit_path().display().to_string()),
             "plan": { "steps": plan.steps.len(), "problems": plan.problems.len() },
         })
     }
@@ -175,7 +175,7 @@ impl Prepared {
             );
             return self.stop_nodes(true, o.wipe);
         };
-        let exit = self.host_provider.root.join("exit.json");
+        let exit = self.host_provider.exit_path();
         if !oc.frozen {
             self.drain().await?;
             println!("→ stop the relayer and the sequencer");
@@ -270,19 +270,7 @@ impl Prepared {
             let mut last_err = None;
             for v in &self.m.env.validators {
                 let node = validator_node(&v.name);
-                let cfg = self
-                    .host_provider
-                    .root
-                    .join("config")
-                    .join(format!("{node}.toml"));
-                let out = exit.display().to_string();
-                match self.host_provider.run_node(&[
-                    "export-proofs",
-                    "--config",
-                    &cfg.display().to_string(),
-                    "--out",
-                    &out,
-                ]) {
+                match self.host_provider.export_proofs(&node, exit) {
                     Ok(_) => return Ok(()),
                     Err(e) => last_err = Some(e),
                 }
@@ -359,7 +347,7 @@ impl Prepared {
     fn stop_nodes(&self, validators: bool, wipe: bool) -> Result<()> {
         if wipe {
             println!("→ stop every node and wipe the host's lane data");
-            return self.host_provider.wipe();
+            return self.host_provider.wipe(&self.all_nodes());
         }
         self.host_provider.stop("relayer")?;
         self.host_provider.stop("sequencer")?;

@@ -14,7 +14,8 @@ use caravel_runtime::checkpoint::sha256;
 
 use crate::address::{asset_contract_id, contract_id, settlement_salt, strkey};
 use crate::chain::{self, Extra};
-use crate::local::{self, Local};
+use crate::host::HostProvider;
+use crate::local::Local;
 use crate::manifest::{Manifest, Network, Provider, Usdc};
 use crate::plan::{
     self, Chain, Desired, DesiredHost, Host, Key, NodeReport, Params, Plan, SignerSet, Step,
@@ -32,7 +33,7 @@ pub struct Prepared {
     pub files: BTreeMap<String, String>,
     pub release: Release,
     pub cli: Cli,
-    pub host_provider: Local,
+    pub host_provider: HostProvider,
     pub chain: Chain,
     pub extra: Extra,
     pub host: Host,
@@ -145,10 +146,8 @@ pub async fn prepare<A: NodeApp>(
     signers.sort();
     let sp = &m.env.settlement_params;
     let host_provider = match m.env.host.provider {
-        Provider::Local => Local::new(&m, &template)?,
-        Provider::Ssh => {
-            bail!("the ssh provider is not built yet (P-15); use provider = \"local\"")
-        }
+        Provider::Local => HostProvider::Local(Local::new(&m, &template)?),
+        Provider::Ssh => HostProvider::Ssh(crate::ssh::Ssh::new(&m, &template)?),
     };
     let mut desired = Desired {
         lane_name: m.lane.lane.name.clone(),
@@ -209,6 +208,7 @@ pub async fn prepare<A: NodeApp>(
         engine_wasm_hash,
         settlement,
         validator_keys,
+        web: release.web.is_some(),
     };
     let files = render::render(&m, &resolved, &host_provider.root_str(), epoch)?;
     desired.host.files = files
@@ -249,6 +249,18 @@ impl Prepared {
             "admin" => &self.m.env.admin,
             _ => &self.m.env.relayer.account,
         }
+    }
+
+    /// Every node of the lane, and every node the host runs for it.
+    pub fn all_nodes(&self) -> Vec<String> {
+        let mut all: Vec<String> = vec!["sequencer".into(), "relayer".into()];
+        all.extend(self.desired.validators.iter().cloned());
+        for n in self.host.nodes.keys() {
+            if !all.contains(n) {
+                all.push(n.clone());
+            }
+        }
+        all
     }
 
     fn want_report(&self, node: &str) -> NodeReport {
@@ -295,10 +307,13 @@ impl Prepared {
     }
 
     async fn start(&self, node: &str) -> Result<()> {
-        self.host_provider.start(node)?;
+        let fingerprint = plan::fingerprint(&self.desired.host.files, node);
+        self.host_provider.start(node, &fingerprint)?;
         let result = match self.port_of(node) {
             Some(port) => {
-                local::wait_healthy(port, &self.want_report(node), Duration::from_secs(90)).await
+                self.host_provider
+                    .wait_healthy(port, &self.want_report(node), Duration::from_secs(90))
+                    .await
             }
             None => {
                 tokio::time::sleep(Duration::from_secs(3)).await;
@@ -373,7 +388,7 @@ impl Prepared {
                         );
                     }
                 }
-                Step::WipeHostData => self.host_provider.wipe()?,
+                Step::WipeHostData => self.host_provider.wipe(&self.all_nodes())?,
                 Step::InstallRelease { .. } => self.host_provider.install_release(&self.release)?,
                 Step::WriteFile { path } => {
                     self.host_provider.write_file(path, &self.files[path])?

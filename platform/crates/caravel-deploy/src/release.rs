@@ -17,6 +17,8 @@ pub struct Release {
     pub relayer: PathBuf,
     /// The template's relayer feed modules, if it has any.
     pub feeds: Option<PathBuf>,
+    /// The template's web app, served at the host's public URL, if it has one.
+    pub web: Option<PathBuf>,
     pub commit: String,
 }
 
@@ -39,11 +41,13 @@ impl Release {
             .trim()
             .to_string();
         let feeds = dir.join("relayer-feeds").join(template);
+        let web = dir.join("web");
         let r = Self {
             node_binary: dir.join("bin").join(node_binary(template)),
             contracts: dir.join("contracts"),
             relayer: dir.join("relayer"),
             feeds: feeds.exists().then_some(feeds),
+            web: web.join("index.html").exists().then_some(web),
             commit: commit.chars().take(12).collect(),
         };
         r.check()?;
@@ -54,11 +58,13 @@ impl Release {
     /// `local-` and the start of H(node binary ‖ Wasm hashes).
     pub fn from_checkout(repo: &Path, template: &str) -> Result<Self> {
         let feeds = repo.join("lanes").join(template).join("relayer-feeds");
+        let web = repo.join("lanes").join(template).join("web/dist");
         let mut r = Self {
             node_binary: repo.join("target/release").join(node_binary(template)),
             contracts: repo.join("target/contracts"),
             relayer: repo.join("platform/relayer"),
             feeds: feeds.join("dist").exists().then_some(feeds),
+            web: web.join("index.html").exists().then_some(web),
             commit: String::new(),
         };
         r.check().context("build first: ./scripts/build-contracts.sh, cargo build --release, and npm ci + npm run build in platform/relayer (and the template's relayer-feeds)")?;

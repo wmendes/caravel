@@ -271,6 +271,13 @@ fn c_short(k: &Key) -> String {
 fn nodes_of(path: &str, all: &[String]) -> Vec<String> {
     match path {
         "lane.toml" => all.to_vec(),
+        "systemd/caravel-sequencer.service" => vec!["sequencer".into()],
+        "systemd/caravel-relayer.service" => vec!["relayer".into()],
+        "systemd/caravel-validator@.service" => all
+            .iter()
+            .filter(|n| n.starts_with("validator-"))
+            .cloned()
+            .collect(),
         "sequencer.toml" => vec!["sequencer".into()],
         "relayer.json" => vec!["relayer".into()],
         p => match p.strip_suffix(".toml") {
