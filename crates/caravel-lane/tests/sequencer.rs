@@ -136,6 +136,18 @@ fn restart_resumes_from_sqlite() {
 }
 
 #[test]
+fn oracle_updates_need_a_configured_key_and_a_valid_signature() {
+    let mut t = T::native();
+    let good = t.signer.oracle_update(seeds::ORACLE, BTC, BTC_PRICE, t.now);
+    let mut forged = good;
+    forged.signature[0] ^= 1;
+    let stranger = t.signer.oracle_update(seeds::A, BTC, BTC_PRICE, t.now);
+    assert!(!t.core.report_oracle(forged).unwrap());
+    assert!(!t.core.report_oracle(stranger).unwrap());
+    assert!(t.core.report_oracle(good).unwrap());
+}
+
+#[test]
 fn a_rotation_sends_old_epoch_signatures_back_for_signing() {
     let mut t = T::native();
     busy_lane(&mut t, 25);

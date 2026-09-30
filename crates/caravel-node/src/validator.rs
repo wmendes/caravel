@@ -26,6 +26,7 @@ use serde_json::{json, Value};
 use crate::api::{self, ok, ApiError, ApiResult};
 use crate::lane_toml::LaneFile;
 use crate::node_config::{check_network, parse_contract, parse_hash};
+use crate::replay::{OnChainConfig, ReplaySource, RpcSource};
 use crate::sequencer::now_ms;
 use crate::stellar_rpc::Rpc;
 
@@ -158,6 +159,15 @@ pub async fn start(cfg: ValidatorConfig) -> Result<(Arc<App>, Router)> {
     if wasm_genesis != genesis_state {
         bail!("Wasm and native genesis differ");
     }
+    if let Some(url) = &cfg.rpc_url {
+        let want = OnChainConfig {
+            lane_id: cfg.lane.lane_id(),
+            engine_wasm_hash: cfg.engine_wasm_hash,
+            genesis_state_hash: sha256(&genesis_state),
+            config_hash,
+        };
+        check_contract(url, cfg.settlement_contract, &want).await?;
+    }
     if let Some(dir) = cfg.db.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -186,6 +196,44 @@ pub async fn start(cfg: ValidatorConfig) -> Result<(Arc<App>, Router)> {
         tracing::warn!("no rpc_url: acceptance on Stellar is unknown, so /v1/proofs/escape has nothing to serve");
     }
     Ok((app, router))
+}
+
+/// Refuses to start when the settlement contract on Stellar commits to
+/// another lane, engine Wasm, genesis config or genesis state than this node
+/// runs (spec §24).
+async fn check_contract(url: &str, contract: [u8; 32], want: &OnChainConfig) -> Result<()> {
+    let source = RpcSource {
+        rpc: Rpc::new(url)?,
+        contract,
+    };
+    let got = source
+        .config()
+        .await
+        .context("reading the settlement contract's config from Stellar RPC")?;
+    for (name, got, want) in [
+        ("lane_id", got.lane_id, want.lane_id),
+        (
+            "engine_wasm_hash",
+            got.engine_wasm_hash,
+            want.engine_wasm_hash,
+        ),
+        (
+            "genesis_state_hash",
+            got.genesis_state_hash,
+            want.genesis_state_hash,
+        ),
+        ("config_hash", got.config_hash, want.config_hash),
+    ] {
+        if got != want {
+            bail!(
+                "the settlement contract's {name} is {}, but this node has {}",
+                hex(&got),
+                hex(&want)
+            );
+        }
+    }
+    tracing::info!("the settlement contract commits to this lane, engine Wasm and genesis");
+    Ok(())
 }
 
 pub async fn run(cfg: ValidatorConfig) -> Result<()> {

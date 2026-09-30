@@ -453,7 +453,7 @@ impl ReplaySource for RpcSource {
             tx["envelopeXdr"]
                 .as_str()
                 .ok_or_else(|| anyhow!("no envelopeXdr"))?,
-            Limits::none(),
+            crate::stellar_rpc::read_limits(),
         )?;
         submit_checkpoint_args(&env).with_context(|| format!("transaction {tx_hash}"))
     }

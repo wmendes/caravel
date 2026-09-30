@@ -74,13 +74,7 @@ fn common_fields(db: &str) -> String {
     )
 }
 
-async fn start_validator(
-    dir: &Path,
-    n: usize,
-    seed: u8,
-    sequencer: &str,
-    rpc: Option<&str>,
-) -> String {
+fn validator_config(dir: &Path, n: usize, seed: u8, sequencer: &str, rpc: Option<&str>) -> PathBuf {
     let key_file = dir.join(format!("v{n}.key"));
     std::fs::write(
         &key_file,
@@ -89,7 +83,6 @@ async fn start_validator(
             .as_str(),
     )
     .unwrap();
-    let (l, url) = listener().await;
     let rpc_line = rpc
         .map(|r| format!("rpc_url = \"{r}\"\nstellar_poll_secs = 1\n"))
         .unwrap_or_default();
@@ -99,45 +92,87 @@ async fn start_validator(
     );
     let path = dir.join(format!("validator-{n}.toml"));
     std::fs::write(&path, cfg).unwrap();
+    path
+}
+
+async fn start_validator(
+    dir: &Path,
+    n: usize,
+    seed: u8,
+    sequencer: &str,
+    rpc: Option<&str>,
+) -> String {
+    let (l, url) = listener().await;
+    let path = validator_config(dir, n, seed, sequencer, rpc);
     let cfg = caravel_node::validator::ValidatorConfig::load(&path).unwrap();
     let (_app, router) = caravel_node::validator::start(cfg).await.unwrap();
     serve(l, router);
     url
 }
 
+/// The settlement contract's `Config` as far as nodes read it: the lane,
+/// engine Wasm, genesis state and genesis config it commits to.
+fn contract_config(lane: &LaneFile, engine_wasm_hash: [u8; 32]) -> ScMapEntry {
+    let (_, config_bytes, genesis_state) = caravel_node::lane_toml::genesis(lane).unwrap();
+    let sym = |s: &str| ScVal::Symbol(ScSymbol(s.try_into().unwrap()));
+    let bytes = |b: [u8; 32]| ScVal::Bytes(ScBytes(b.to_vec().try_into().unwrap()));
+    let fields = [
+        ("config_hash", sha256(&config_bytes)),
+        ("engine_wasm_hash", engine_wasm_hash),
+        ("genesis_state_hash", sha256(&genesis_state)),
+        ("lane_id", lane.lane_id()),
+    ];
+    ScMapEntry {
+        key: caravel_node::replay::variant("Config", vec![]),
+        val: ScVal::Map(Some(ScMap(
+            fields
+                .iter()
+                .map(|(k, v)| ScMapEntry {
+                    key: sym(k),
+                    val: bytes(*v),
+                })
+                .collect::<Vec<_>>()
+                .try_into()
+                .unwrap(),
+        ))),
+    }
+}
+
+fn engine_hash() -> [u8; 32] {
+    unhex(&wasm_hash()).unwrap().try_into().unwrap()
+}
+
 /// A JSON-RPC stand-in for Stellar RPC that serves the settlement contract's
-/// instance storage with a settable `LastCkpt`.
-async fn mock_rpc(last: LastAccepted) -> String {
+/// instance storage: its `Config`, and a settable `LastCkpt`.
+async fn mock_rpc(last: LastAccepted, config: ScMapEntry) -> String {
     let app = Router::new().route(
         "/",
         post(move |Json(req): Json<Value>| {
-            let last = last.clone();
+            let (last, config) = (last.clone(), config.clone());
             async move {
                 assert_eq!(req["method"], "getLedgerEntries");
-                let entries = match *last.lock().unwrap() {
-                    None => vec![],
-                    Some((seq, header_hash)) => {
-                        let sym = |s: &str| ScVal::Symbol(ScSymbol(s.try_into().unwrap()));
-                        let last_ckpt = ScVal::Map(Some(ScMap(
-                            vec![
-                                ScMapEntry { key: sym("header_hash"), val: ScVal::Bytes(ScBytes(header_hash.to_vec().try_into().unwrap())) },
-                                ScMapEntry { key: sym("seq"), val: ScVal::U64(seq) },
-                            ]
-                            .try_into()
-                            .unwrap(),
-                        )));
-                        let storage = ScMap(vec![ScMapEntry { key: caravel_node::stellar_rpc::last_ckpt_key(), val: last_ckpt }].try_into().unwrap());
-                        let data = LedgerEntryData::ContractData(ContractDataEntry {
-                            ext: ExtensionPoint::V0,
-                            contract: ScAddress::Contract(ContractId(Hash(CONTRACT))),
-                            key: ScVal::LedgerKeyContractInstance,
-                            durability: ContractDataDurability::Persistent,
-                            val: ScVal::ContractInstance(ScContractInstance { executable: ContractExecutable::Wasm(Hash([9; 32])), storage: Some(storage) }),
-                        });
-                        let key = req["params"]["keys"][0].clone();
-                        vec![json!({ "key": key, "xdr": data.to_xdr_base64(Limits::none()).unwrap(), "lastModifiedLedgerSeq": 10 })]
-                    }
-                };
+                let mut storage = vec![config];
+                if let Some((seq, header_hash)) = *last.lock().unwrap() {
+                    let sym = |s: &str| ScVal::Symbol(ScSymbol(s.try_into().unwrap()));
+                    let last_ckpt = ScVal::Map(Some(ScMap(
+                        vec![
+                            ScMapEntry { key: sym("header_hash"), val: ScVal::Bytes(ScBytes(header_hash.to_vec().try_into().unwrap())) },
+                            ScMapEntry { key: sym("seq"), val: ScVal::U64(seq) },
+                        ]
+                        .try_into()
+                        .unwrap(),
+                    )));
+                    storage.push(ScMapEntry { key: caravel_node::stellar_rpc::last_ckpt_key(), val: last_ckpt });
+                }
+                let data = LedgerEntryData::ContractData(ContractDataEntry {
+                    ext: ExtensionPoint::V0,
+                    contract: ScAddress::Contract(ContractId(Hash(CONTRACT))),
+                    key: ScVal::LedgerKeyContractInstance,
+                    durability: ContractDataDurability::Persistent,
+                    val: ScVal::ContractInstance(ScContractInstance { executable: ContractExecutable::Wasm(Hash([9; 32])), storage: Some(ScMap(storage.try_into().unwrap())) }),
+                });
+                let key = req["params"]["keys"][0].clone();
+                let entries = vec![json!({ "key": key, "xdr": data.to_xdr_base64(Limits::none()).unwrap(), "lastModifiedLedgerSeq": 10 })];
                 Json(json!({ "jsonrpc": "2.0", "id": req["id"], "result": { "entries": entries, "latestLedger": 11 } }))
             }
         }),
@@ -229,7 +264,7 @@ async fn validators_follow_sign_and_refuse_a_tampered_chain() {
     // Listeners first: the sequencer and validators name each other.
     let (seq_listener, seq_url) = listener().await;
     let last_accepted = Arc::new(Mutex::new(None));
-    let rpc = mock_rpc(last_accepted.clone()).await;
+    let rpc = mock_rpc(last_accepted.clone(), contract_config(&lane, engine_hash())).await;
     let mut urls = Vec::new();
     for (i, seed) in VALIDATORS.iter().enumerate() {
         urls.push(start_validator(dir.path(), i + 1, *seed, &seq_url, Some(&rpc)).await);
@@ -404,4 +439,39 @@ async fn validators_follow_sign_and_refuse_a_tampered_chain() {
         .await;
     assert_eq!(from_sequencer["seq"], "1");
     assert_eq!(from_sequencer, proof);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_validator_refuses_a_contract_committed_to_another_engine() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::copy(
+        root().join("config/lane.caravel-perps.local.toml"),
+        dir.path().join("lane.toml"),
+    )
+    .unwrap();
+    let lane = LaneFile::load(&dir.path().join("lane.toml")).unwrap();
+    let rpc = mock_rpc(
+        Arc::new(Mutex::new(None)),
+        contract_config(&lane, [0xEE; 32]),
+    )
+    .await;
+    let path = validator_config(dir.path(), 1, 0x61, "http://127.0.0.1:9", Some(&rpc));
+    let cfg = caravel_node::validator::ValidatorConfig::load(&path).unwrap();
+    let err = caravel_node::validator::start(cfg)
+        .await
+        .err()
+        .expect("refused");
+    assert!(
+        err.to_string().contains("engine_wasm_hash"),
+        "unexpected error: {err:#}"
+    );
+    // The same contract with this node's engine is accepted.
+    let rpc = mock_rpc(
+        Arc::new(Mutex::new(None)),
+        contract_config(&lane, engine_hash()),
+    )
+    .await;
+    let path = validator_config(dir.path(), 2, 0x62, "http://127.0.0.1:9", Some(&rpc));
+    let cfg = caravel_node::validator::ValidatorConfig::load(&path).unwrap();
+    assert!(caravel_node::validator::start(cfg).await.is_ok());
 }

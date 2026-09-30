@@ -1937,7 +1937,7 @@ Status values: `todo`, `doing`, `review`, `done`. Agents update the Status cell 
 | T-013 | `apps/web` (§18) against local, then testnet | T-007, T-009 | §18 | review |
 | T-014 | Measurements (§19.6) + `docs/RESULTS.md` with dated numbers | T-012 | §19.6 | review |
 | T-015 | `docs/RUNBOOK.md`: run locally, run a validator, deploy, rotate keys, freeze drill, replay | T-012 | all | review |
-| T-016 | Security pass: walk §24 checklist, fix or file each item | T-012 | §24 | todo |
+| T-016 | Security pass: walk §24 checklist, fix or file each item | T-012 | §24 | review |
 
 Acceptance criteria:
 
@@ -2111,6 +2111,7 @@ For lanes that need classic Stellar operations or SCP among many validators:
 - host `cpu_insns` per block is sampled once a second from `/v1/status` `host_metering` (the last block's `step`), for blocks produced under load;
 - checkpoint size and fees come from the relayer's own log (`feeCharged`, simulation `minResourceFee`, transaction bytes), for checkpoints whose blocks all fall inside the load window; "per 1,000 lane tx" divides their total fee by the user transactions in those blocks | Real network fees and a user's real path to the API; no special access. One request at a time per account is how a client keeps nonces in order | A load generator next to the VM, to separate network latency from lane latency |
 | DEC-049 | Signer rotation on a running lane (T-015): when the sequencer starts with a higher `[signers] epoch`, every checkpoint signed under an older epoch and not accepted goes back to waiting for signatures, keeping its old signatures. When it collects signatures, an old signature counts for each validator of the new set whose key it verifies under (the header does not hold the epoch and ed25519 signatures are deterministic), and only the others are asked. The §15 signing rules do not change | An admin rotation makes older epochs invalid at once (§13.2), so without this the relayer would retry a stale checkpoint forever while the escape timeout runs. Validators that stay in the set would refuse to sign an older seq again once they have signed a later one (§15), so asking them again cannot work | A validator endpoint that re-signs an older seq with the same header (a §15 change) |
+| DEC-050 | Security pass (T-016): a validator with `rpc_url` reads the settlement contract's `Config` at startup and refuses to start unless `lane_id`, `engine_wasm_hash`, `config_hash` and `genesis_state_hash` match its own (§24 item 9); XDR from Stellar RPC is decoded with bounded `Limits` (depth 500, 1 MiB) instead of none; `E2E_NETWORK=testnet` runs the end-to-end script on testnet with a throwaway settlement contract, as the §24 freeze drill, so the demo lane's contract is never frozen. Filed: `stellar-xdr` GHSA-3xhm-p452-9wjh (serde only; Caravel decodes with `ReadXdr`; the Soroban 28 crates pin `=28.0.0`), `paste` unmaintained (build-time), `uuid` in the billing-cap function (not called with a buffer); details in `docs/SECURITY.md` | The sequencer has no RPC access, and a wrong engine there gives headers the contract rejects. Freezing the demo contract would end the testnet lane | Bump `stellar-xdr` when `soroban-sdk`/`soroban-env` allow 28.0.1 |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 
@@ -2133,20 +2134,22 @@ Agents append new decisions here as `DEC-018+` with the same columns.
 
 ## 24. Security checklist (T-016)
 
-- [ ] Every settlement check in §13.3 has a negative test.
-- [ ] `claim_withdrawal` and `escape_claim` only pay the owner's `G...` address (§13.5 check 1).
-- [ ] No path lets the relayer or sequencer alter a signed header or its batch.
-- [ ] Validators persist `(seq, header_hash)` before returning a signature, and refuse to sign a different header for a signed seq.
-- [ ] Inbox accumulator matches between contract, engine and relayer (vector test).
-- [ ] Integer overflow: every `checked_*` failure is a rejection or `Fatal`, never a wrap.
-- [ ] The engine rejects oracle keys not in config; the sequencer never includes an unverified signature.
-- [ ] Session keys cannot withdraw or manage keys; expiry ≤ 7 days.
-- [ ] Engine Wasm hash checked at node startup against config and on-chain `engine_wasm_hash`.
-- [ ] Admin functions emit events and are listed in the UI `/about` page as testnet powers.
-- [ ] TTL extension on all persistent entries the contract reads.
-- [ ] Freeze drill executed on testnet; replay OK after freeze.
-- [ ] Secrets only via env/files outside git; `.gitignore` covers `*.key`, `.env*`, `*.sqlite`.
-- [ ] Dependency audit (`cargo audit`, `npm audit`); soroban-sdk ≥ patched versions for known CVEs (e.g. the 2026 advisories fixed in the 22.0.x line; confirm 28.0.0 is unaffected) `[VERIFY]`.
+Walked on 2026-09-29; evidence, fixes and filed items per line in `docs/SECURITY.md`.
+
+- [x] Every settlement check in §13.3 has a negative test.
+- [x] `claim_withdrawal` and `escape_claim` only pay the owner's `G...` address (§13.5 check 1).
+- [x] No path lets the relayer or sequencer alter a signed header or its batch.
+- [x] Validators persist `(seq, header_hash)` before returning a signature, and refuse to sign a different header for a signed seq.
+- [x] Inbox accumulator matches between contract, engine and relayer (vector test).
+- [x] Integer overflow: every `checked_*` failure is a rejection or `Fatal`, never a wrap.
+- [x] The engine rejects oracle keys not in config; the sequencer never includes an unverified signature.
+- [x] Session keys cannot withdraw or manage keys; expiry ≤ 7 days.
+- [x] Engine Wasm hash checked at node startup against config and on-chain `engine_wasm_hash` (validators with `rpc_url` since T-016, DEC-050).
+- [x] Admin functions emit events and are listed in the UI `/about` page as testnet powers.
+- [x] TTL extension on all persistent entries the contract reads.
+- [x] Freeze drill executed on testnet; replay OK after freeze (on a throwaway contract with the Wasm of record, 2026-09-29, `docs/RESULTS.md`).
+- [x] Secrets only via env/files outside git; `.gitignore` covers `*.key`, `.env*`, `*.sqlite`.
+- [x] Dependency audit (`cargo audit`, `npm audit`); soroban-sdk ≥ patched versions for known CVEs. Checked 2026-09-29: `cargo audit` finds no vulnerability; the soroban-sdk advisories (GHSA-x2hw-px52-wp4m, GHSA-4chv-4c6w-w254, GHSA-96xm-fv9w-pf3f) end at 25.x, so 28.0.0 is not affected; `stellar-xdr` GHSA-3xhm-p452-9wjh (serde only) is not reachable and filed (DEC-050).
 
 ---
 

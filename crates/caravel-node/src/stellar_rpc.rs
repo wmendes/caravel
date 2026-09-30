@@ -22,6 +22,16 @@ pub struct LastCheckpoint {
     pub header_hash: [u8; 32],
 }
 
+/// Bounds for XDR that comes from Stellar RPC, which nodes do not trust: a
+/// transaction is at most 132,096 bytes on testnet, and the settlement
+/// contract's entries are far smaller.
+pub fn read_limits() -> Limits {
+    Limits {
+        depth: 500,
+        len: 1 << 20,
+    }
+}
+
 impl Rpc {
     pub fn new(url: &str) -> Result<Self> {
         Ok(Self {
@@ -63,7 +73,7 @@ impl Rpc {
         let xdr = entry["xdr"]
             .as_str()
             .ok_or_else(|| anyhow!("getLedgerEntries: entry without xdr"))?;
-        Ok(Some(LedgerEntryData::from_xdr_base64(xdr, Limits::none())?))
+        Ok(Some(LedgerEntryData::from_xdr_base64(xdr, read_limits())?))
     }
 
     /// The contract's instance storage map.
