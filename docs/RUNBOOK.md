@@ -181,6 +181,19 @@ RELEASE_DIR=/tmp/release ./scripts/deploy-vm.sh     # first time: INIT_KEYS=1
 - The stores in `/opt/caravel/data` stay. A new release must open them. Check the store schema in `platform/crates/caravel-runtime/src/store.rs` before deploying one that changes it.
 - If the release has a `web/` directory, Caddy serves it at `/`, which publishes the web app. Remove `web/` from the release directory to deploy without it.
 
+Before an upgrade that changes the node or its configs (M0.5 P-07), check the release against the live lane first. Nothing live changes:
+
+```sh
+RELEASE_DIR=/tmp/release ./scripts/vm-preflight.sh                 # stage, check-store a DB copy, start the shadow
+RELEASE_DIR=/tmp/release STEP=compare ./scripts/vm-preflight.sh    # once caught up: every header must match
+STEP=stop ./scripts/vm-preflight.sh                                  # stop the shadow before deploy-vm.sh
+```
+
+- `check-store` re-executes a copy of the live sequencer database with the release's binary and lane file.
+- The shadow is the release's validator, the transient unit `caravel-shadow` on `127.0.0.1:8094`. It follows the live sequencer from block 1 with a throwaway key that is in no signer set. At start it checks the settlement contract's config against the release's lane file (spec §24 item 9).
+- `compare` fails on any checkpoint header that differs from the sequencer's, a halt or a suspicious block. Deploy only after it passes on every checkpoint since genesis and on live ones.
+- Everything stays under `/opt/caravel/staging/<commit>`; remove it after the upgrade. To roll back, run `deploy-vm.sh` with the previous release.
+
 Status and logs:
 
 ```sh
