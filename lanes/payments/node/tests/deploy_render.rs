@@ -28,6 +28,7 @@ fn resolved(m: &Manifest) -> Resolved {
         engine_wasm_hash: m.lane.engine_wasm_hash().unwrap().unwrap(),
         settlement: [7; 32],
         validator_keys: vec![[0x61; 32], [0x62; 32], [0x63; 32]],
+        web: false,
     }
 }
 

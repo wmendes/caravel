@@ -1,0 +1,123 @@
+//! The host a deployment runs on: this machine (`local`) or a Linux host over
+//! ssh (`ssh`). Both are read back and changed with the same operations.
+
+use std::path::PathBuf;
+use std::time::Duration;
+
+use anyhow::Result;
+
+use crate::local::Local;
+use crate::manifest::Manifest;
+use crate::plan::{Host, Key, NodeReport};
+use crate::release::Release;
+use crate::ssh::Ssh;
+
+pub enum HostProvider {
+    Local(Local),
+    Ssh(Ssh),
+}
+
+impl HostProvider {
+    /// The lane's root on the host.
+    pub fn root_str(&self) -> String {
+        match self {
+            Self::Local(l) => l.root_str(),
+            Self::Ssh(s) => s.root.clone(),
+        }
+    }
+
+    /// Where the exported exits land on this machine.
+    pub fn exit_path(&self) -> PathBuf {
+        match self {
+            Self::Local(l) => l.root.join("exit.json"),
+            Self::Ssh(s) => s.local_dir.join("exit.json"),
+        }
+    }
+
+    pub async fn read(&self, m: &Manifest) -> Result<Host> {
+        match self {
+            Self::Local(l) => l.read(m).await,
+            Self::Ssh(s) => s.read(m).await,
+        }
+    }
+
+    pub fn install_release(&self, r: &Release) -> Result<()> {
+        match self {
+            Self::Local(l) => l.install_release(r),
+            Self::Ssh(s) => s.install_release(r),
+        }
+    }
+
+    pub fn write_file(&self, name: &str, text: &str) -> Result<()> {
+        match self {
+            Self::Local(l) => l.write_file(name, text),
+            Self::Ssh(s) => s.write_file(name, text),
+        }
+    }
+
+    pub fn write_keys(
+        &self,
+        validators: &[(String, String)],
+        env: &[(String, String)],
+    ) -> Result<()> {
+        match self {
+            Self::Local(l) => l.write_keys(validators, env),
+            Self::Ssh(s) => s.write_keys(validators, env),
+        }
+    }
+
+    /// Starts `node`, recording the fingerprint of the configs it reads.
+    pub fn start(&self, node: &str, fingerprint: &Key) -> Result<()> {
+        match self {
+            Self::Local(l) => l.start(node, fingerprint),
+            Self::Ssh(s) => s.start(node, fingerprint),
+        }
+    }
+
+    pub fn stop(&self, node: &str) -> Result<()> {
+        match self {
+            Self::Local(l) => l.stop(node),
+            Self::Ssh(s) => s.stop(node),
+        }
+    }
+
+    pub fn wipe(&self, nodes: &[String]) -> Result<()> {
+        match self {
+            Self::Local(l) => l.wipe(),
+            Self::Ssh(s) => s.wipe(nodes),
+        }
+    }
+
+    pub fn export_proofs(&self, node: &str, out: &std::path::Path) -> Result<()> {
+        match self {
+            Self::Local(l) => l.export_proofs(node, out),
+            Self::Ssh(s) => s.export_proofs(node, out),
+        }
+    }
+
+    pub async fn status(&self, port: u16) -> Option<serde_json::Value> {
+        match self {
+            Self::Local(l) => l.status(port).await,
+            Self::Ssh(s) => s.status(port).await,
+        }
+    }
+
+    pub fn log_tail(&self, node: &str) -> String {
+        match self {
+            Self::Local(l) => l.log_tail(node),
+            Self::Ssh(s) => s.log_tail(node),
+        }
+    }
+
+    pub async fn wait_healthy(
+        &self,
+        port: u16,
+        want: &NodeReport,
+        timeout: Duration,
+    ) -> Result<()> {
+        match self {
+            Self::Local(_) => crate::local::wait_healthy(port, want, timeout).await,
+            Self::Ssh(s) => s.wait_healthy(port, want, timeout).await,
+        }
+    }
+}

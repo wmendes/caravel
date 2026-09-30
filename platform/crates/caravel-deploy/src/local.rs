@@ -252,7 +252,7 @@ impl Local {
     }
 
     /// Starts `node` detached from this process, logging to `logs/<node>.log`.
-    pub fn start(&self, node: &str) -> Result<()> {
+    pub fn start(&self, node: &str, fingerprint: &Key) -> Result<()> {
         let config = self.root.join("config");
         let bin = self
             .root
@@ -300,8 +300,7 @@ impl Local {
             .spawn()
             .with_context(|| format!("starting {node}"))?;
         std::fs::write(self.pid_file(node), format!("{}\n", child.id()))?;
-        let f = crate::plan::fingerprint(&self.config_hashes(), node);
-        let hex: String = f.iter().map(|b| format!("{b:02x}")).collect();
+        let hex: String = fingerprint.iter().map(|b| format!("{b:02x}")).collect();
         std::fs::write(self.started_file(node), format!("{hex}\n"))?;
         Ok(())
     }
@@ -344,6 +343,19 @@ impl Local {
             std::fs::remove_dir_all(&data)?;
         }
         Ok(())
+    }
+
+    /// `export-proofs` with a validator's config, into `out`.
+    pub fn export_proofs(&self, node: &str, out: &Path) -> Result<()> {
+        let cfg = self.root.join("config").join(format!("{node}.toml"));
+        self.run_node(&[
+            "export-proofs",
+            "--config",
+            &cfg.display().to_string(),
+            "--out",
+            &out.display().to_string(),
+        ])
+        .map(|_| ())
     }
 
     /// Runs the host's node binary with `args` and returns its stdout.
