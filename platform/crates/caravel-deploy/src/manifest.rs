@@ -45,13 +45,39 @@ impl Network {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Usdc {
-    /// Circle's testnet USDC (`versions.json` `testnet.usdc_sac`).
-    Circle,
-    /// A USDC asset `apply` creates, for local networks.
-    Local,
+/// The token a lane settles in: what its settlement contract holds, and what
+/// deposits, withdrawals and escapes pay. The contract works with any token
+/// that has the SEP-41 interface (it only calls `transfer` and `balance`).
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum Token {
+    /// A token the tool knows by name: `"circle-usdc"`, Circle's testnet USDC
+    /// (`versions.json` `testnet.usdc_sac`).
+    Named(String),
+    /// A Stellar asset, `"CODE:ISSUER"`, through its Stellar Asset Contract;
+    /// `apply` deploys that contract when the network has none yet (anyone may).
+    Asset { asset: String },
+    /// A SEP-41 token contract, `"C…"`.
+    Contract { contract: String },
+    /// A local network's test asset, `CODE:<admin>`, issued by the admin.
+    Local { local: String },
+}
+
+/// Circle's testnet USDC.
+pub const CIRCLE_USDC: &str = "circle-usdc";
+
+/// An asset code: 1 to 12 letters or digits.
+pub fn asset_code_ok(code: &str) -> bool {
+    (1..=12).contains(&code.len()) && code.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
+/// `CODE:ISSUER`.
+pub fn parse_asset(asset: &str) -> Option<(String, [u8; 32])> {
+    let (code, issuer) = asset.split_once(':')?;
+    let issuer = stellar_strkey::ed25519::PublicKey::from_string(issuer)
+        .ok()?
+        .0;
+    asset_code_ok(code).then(|| (code.to_string(), issuer))
 }
 
 /// The settlement constructor's `Params` (spec §13).
@@ -221,7 +247,7 @@ pub struct EnvSpec {
     /// The identity that deploys the settlement contract and holds its admin
     /// powers. It signs on this machine, so Ledger or the secure store work.
     pub admin: String,
-    pub usdc: Usdc,
+    pub token: Token,
     /// A settlement contract deployed before this tool (lane #1); new lanes
     /// derive the address from the admin and the lane.
     #[serde(default)]
@@ -392,12 +418,24 @@ impl EnvSpec {
             }
             p.extend(key_problem(&format!("relayer.feed_keys.{var}"), id));
         }
-        match (self.network, self.usdc) {
-            (Network::Local, Usdc::Circle) => {
-                p.push("usdc = \"circle\": Circle's USDC is on testnet; a local network uses usdc = \"local\"".into())
+        match (&self.token, self.network) {
+            (Token::Named(n), _) if n != CIRCLE_USDC => p.push(format!(
+                "token = {n:?}: a known token is \"{CIRCLE_USDC}\"; otherwise use {{ asset = \"CODE:ISSUER\" }} or {{ contract = \"C…\" }}"
+            )),
+            (Token::Named(_), Network::Local) => p.push(format!(
+                "token = \"{CIRCLE_USDC}\" is on testnet; a local network uses {{ local = \"USDC\" }}"
+            )),
+            (Token::Asset { asset }, _) if parse_asset(asset).is_none() => p.push(format!(
+                "token.asset = {asset:?}: CODE:ISSUER, a 1–12 character code and a G… issuer"
+            )),
+            (Token::Contract { contract }, _) if stellar_strkey::Contract::from_string(contract).is_err() => {
+                p.push(format!("token.contract = {contract:?} is not a C… contract address"))
             }
-            (Network::Testnet, Usdc::Local) => p.push(
-                "usdc = \"local\": on testnet the lane settles in Circle's USDC (usdc = \"circle\")".into(),
+            (Token::Local { local }, _) if !asset_code_ok(local) => {
+                p.push(format!("token.local = {local:?}: an asset code of 1–12 letters or digits"))
+            }
+            (Token::Local { .. }, Network::Testnet) => p.push(
+                "token.local is for local networks; on testnet name a real token (\"circle-usdc\", an asset or a contract)".into(),
             ),
             _ => {}
         }

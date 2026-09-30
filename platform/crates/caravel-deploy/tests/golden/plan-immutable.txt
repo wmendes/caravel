@@ -1,6 +1,6 @@
 Lane demo-pay-0 · env local · network local
   lane_id 01010101…  config_hash 22222222…  engine 04040404…
-  settlement CC3UKZIZZ2LOLG6ZXQ3UNAEAP5JSCTWSSU4X33RU3VIAJMYUDZCSC6D4 (derived from the admin and the lane), admin GCQK…AGP5, USDC CADF…T54G
+  settlement CC3UKZIZZ2LOLG6ZXQ3UNAEAP5JSCTWSSU4X33RU3VIAJMYUDZCSC6D4 (derived from the admin and the lane), admin GCQK…AGP5, token CADF…T54G
   signers: 2 of 3 at epoch 1
 
 ! config_hash: the contract has 02020202…, the lane file gives 22222222…. The constructor fixed it: destroy this lane, or give the lane a new name

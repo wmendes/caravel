@@ -40,8 +40,8 @@ min_transfer = 1                           # 1 stroop
 # Keys are Stellar CLI identities: create them first with `stellar keys generate <name>`.
 [env.local]
 network = "local"
-admin = "pay-local-admin"                  # deploys the settlement contract; issues the local USDC
-usdc = "local"
+admin = "pay-local-admin"                  # deploys the settlement contract; issues the local test token
+token = { local = "USDC" }                 # the settlement token: a test asset USDC:<admin>
 threshold = 2
 
 [env.local.settlement_params]

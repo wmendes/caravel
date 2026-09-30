@@ -45,9 +45,11 @@ pub struct Desired {
     pub engine_wasm_hash: Key,
     pub admin: Key,
     pub relayer: Key,
-    /// The USDC asset contract, and whether `apply` creates it (a local lane).
-    pub usdc: Key,
-    pub usdc_local: bool,
+    /// The settlement token's contract.
+    pub token: Key,
+    /// The Stellar asset behind it (code, issuer), when it is a Stellar Asset
+    /// Contract that `apply` may deploy.
+    pub token_asset: Option<(String, Key)>,
     pub settlement: Key,
     /// Named in the lane file (deployed before this tool), not derived.
     pub settlement_pinned: bool,
@@ -73,7 +75,7 @@ pub struct DesiredHost {
 pub struct Chain {
     /// Accounts that exist.
     pub accounts: BTreeSet<Key>,
-    pub usdc_exists: bool,
+    pub token_exists: bool,
     pub settlement_wasm_uploaded: bool,
     pub settlement: Option<OnChain>,
 }
@@ -83,7 +85,7 @@ pub struct Chain {
 pub struct OnChain {
     pub code: Key,
     pub admin: Key,
-    pub usdc: Key,
+    pub token: Key,
     pub lane_id: Key,
     pub engine_wasm_hash: Key,
     pub genesis_state_hash: Key,
@@ -149,9 +151,11 @@ pub enum Step {
         who: &'static str,
         key: Key,
     },
-    /// The local USDC asset contract (issuer: the admin).
-    DeployUsdc {
+    /// The Stellar Asset Contract of the settlement token's asset.
+    DeployToken {
         contract: Key,
+        code: String,
+        issuer: Key,
     },
     UploadWasm {
         hash: Key,
@@ -206,7 +210,8 @@ pub enum Problem {
     SettlementMissing {
         contract: Key,
     },
-    UsdcMissing {
+    /// The settlement token contract isn't on the network.
+    TokenMissing {
         contract: Key,
     },
     /// The lane file's signer set was installed before, at this epoch.
@@ -298,11 +303,14 @@ pub fn diff(d: &Desired, chain: &Chain, host: &Host) -> Plan {
             steps.push(Step::Fund { who, key });
         }
     }
-    if !chain.usdc_exists {
-        if d.usdc_local {
-            steps.push(Step::DeployUsdc { contract: d.usdc });
-        } else {
-            problems.push(Problem::UsdcMissing { contract: d.usdc });
+    if !chain.token_exists {
+        match &d.token_asset {
+            Some((code, issuer)) => steps.push(Step::DeployToken {
+                contract: d.token,
+                code: code.clone(),
+                issuer: *issuer,
+            }),
+            None => problems.push(Problem::TokenMissing { contract: d.token }),
         }
     }
     let mut fresh = false;
@@ -358,7 +366,7 @@ pub fn diff(d: &Desired, chain: &Chain, host: &Host) -> Plan {
                 short(&d.engine_wasm_hash),
             );
             fixed("admin", g_short(&oc.admin), g_short(&d.admin));
-            fixed("usdc", c_short(&oc.usdc), c_short(&d.usdc));
+            fixed("token", c_short(&oc.token), c_short(&d.token));
             let (a, b) = (&oc.params, &d.params);
             fixed(
                 "settlement_params.force_inclusion_window_secs",
@@ -515,7 +523,7 @@ impl Plan {
         );
         let _ = writeln!(
             o,
-            "  settlement {} ({}), admin {}, USDC {}",
+            "  settlement {} ({}), admin {}, token {}",
             strkey(&d.settlement),
             if d.settlement_pinned {
                 "named in the lane file"
@@ -523,7 +531,7 @@ impl Plan {
                 "derived from the admin and the lane"
             },
             g_short(&d.admin),
-            c_short(&d.usdc)
+            c_short(&d.token)
         );
         let _ = writeln!(
             o,
@@ -541,9 +549,15 @@ impl Plan {
             for s in &self.steps {
                 let line = match s {
                     Step::Fund { who, key } => format!("+ fund      {who} {} (friendbot)", g_short(key)),
-                    Step::DeployUsdc { contract } => {
-                        format!("+ create    USDC asset contract {} (issuer: the admin)", c_short(contract))
-                    }
+                    Step::DeployToken {
+                        contract,
+                        code,
+                        issuer,
+                    } => format!(
+                        "+ create    token contract {} (the Stellar Asset Contract of {code}:{})",
+                        c_short(contract),
+                        g_short(issuer)
+                    ),
                     Step::UploadWasm { hash } => format!("+ upload    settlement Wasm {}", short(hash)),
                     Step::DeploySettlement { contract } => {
                         format!("+ deploy    settlement {}", strkey(contract))
@@ -597,8 +611,8 @@ impl Plan {
                         "! the network has no contract at {} (a testnet reset?)",
                         strkey(contract)
                     ),
-                    Problem::UsdcMissing { contract } => {
-                        format!("! the network has no USDC contract at {}", strkey(contract))
+                    Problem::TokenMissing { contract } => {
+                        format!("! the network has no token contract at {}", strkey(contract))
                     }
                     Problem::SignersReused { epoch } => format!(
                         "! this signer set was installed at epoch {epoch}; a set can be installed only once, so change a key"

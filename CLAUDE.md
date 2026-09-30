@@ -1,6 +1,6 @@
 # Caravel: agent instructions
 
-Caravel deploys and runs configurable appchains ("lanes") that settle to Stellar in USDC, declared in one lane file (`caravel plan / apply / status / destroy`). The first lane is Caravel Perps, an on-chain perpetual futures exchange; Payments is the second template. Current milestone: **M0.5, the platform split and declarative lanes, on testnet** (spec §20.3).
+Caravel deploys and runs configurable appchains ("lanes") that settle to Stellar in a token of their choosing (DEC-072), declared in one lane file (`caravel plan / apply / status / destroy`). The first lane is Caravel Perps, an on-chain perpetual futures exchange; Payments is the second template. Current milestone: **M0.5, the platform split and declarative lanes, on testnet** (spec §20.3).
 
 ## Read first
 

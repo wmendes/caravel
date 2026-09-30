@@ -7,9 +7,9 @@
 
 use caravel_runtime::checkpoint::{network_id, sha256};
 use stellar_xdr::{
-    AccountId, AlphaNum4, Asset, AssetCode4, ContractIdPreimage, ContractIdPreimageFromAddress,
-    Hash, HashIdPreimage, HashIdPreimageContractId, Limits, PublicKey, ScAddress, Uint256,
-    WriteXdr,
+    AccountId, AlphaNum12, AlphaNum4, Asset, AssetCode12, AssetCode4, ContractIdPreimage,
+    ContractIdPreimageFromAddress, Hash, HashIdPreimage, HashIdPreimageContractId, Limits,
+    PublicKey, ScAddress, Uint256, WriteXdr,
 };
 
 /// Tag of the settlement salt.
@@ -33,18 +33,26 @@ pub fn contract_id(passphrase: &str, deployer: &[u8; 32], salt: &[u8; 32]) -> [u
     )
 }
 
-/// The Stellar Asset Contract of `code:issuer` (a 1–4 letter code), as
-/// `stellar contract id asset` gives it. A local lane's USDC is `USDC:<admin>`.
+/// The Stellar Asset Contract of `code:issuer` (a 1–12 character code), as
+/// `stellar contract id asset` gives it. A local lane's test token is
+/// `<code>:<admin>`.
 pub fn asset_contract_id(passphrase: &str, code: &str, issuer: &[u8; 32]) -> [u8; 32] {
-    let mut c = [0u8; 4];
-    c[..code.len()].copy_from_slice(code.as_bytes());
-    id_of(
-        passphrase,
-        ContractIdPreimage::Asset(Asset::CreditAlphanum4(AlphaNum4 {
+    let asset = if code.len() <= 4 {
+        let mut c = [0u8; 4];
+        c[..code.len()].copy_from_slice(code.as_bytes());
+        Asset::CreditAlphanum4(AlphaNum4 {
             asset_code: AssetCode4(c),
             issuer: account(issuer),
-        })),
-    )
+        })
+    } else {
+        let mut c = [0u8; 12];
+        c[..code.len()].copy_from_slice(code.as_bytes());
+        Asset::CreditAlphanum12(AlphaNum12 {
+            asset_code: AssetCode12(c),
+            issuer: account(issuer),
+        })
+    };
+    id_of(passphrase, ContractIdPreimage::Asset(asset))
 }
 
 fn account(key: &[u8; 32]) -> AccountId {
@@ -117,6 +125,16 @@ mod tests {
         assert_eq!(
             strkey(&local),
             "CANCYZ63P4PU3FM34UTM74ZXJ7GMZQHMPTMHIEWE7DPVKJVQLUTI6OJG"
+        );
+        // A 5-12 character code is an AlphaNum12 asset (CLI 28.1.0 vector).
+        let long = asset_contract_id(
+            "Test SDF Network ; September 2015",
+            "LONGERCODE12",
+            &g("GCQJVJPUPJTVTABP7FK7RXBNFIKKLSM5EO7JP6DECJ77SOBUKWSPB64N"),
+        );
+        assert_eq!(
+            strkey(&long),
+            "CCOTSX4E6KOC2DTSJDIAQECEFGO6P35XDX4LKCMA7OHW6SIOU7GHPYKH"
         );
     }
 

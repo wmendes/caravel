@@ -87,6 +87,13 @@ pub trait NodeApp: LaneApp + Clone {
         receipts: Vec<Value>,
     ) -> Vec<Value>;
 
+    /// The decimals the app's arithmetic assumes of the settlement token, if
+    /// it assumes any (perps: 7, as USDC's Stellar asset has). The deploy
+    /// tool refuses a lane file whose token has others.
+    fn token_decimals(&self) -> Option<u32> {
+        None
+    }
+
     /// The error text for a subscription that does not parse.
     fn subscription_hint(&self) -> &'static str {
         "expected {blocks, account}"

@@ -112,9 +112,10 @@ This section governs README text, UI copy, pitch material generated from code, a
 
 ### 2.4 What the platform may claim (M0.5, proposed 2026-09-30, awaiting the human's approval)
 
-> Caravel deploys and runs appchains ("lanes") that settle to Stellar in USDC, from one lane file. `caravel plan` shows every change on Stellar and on the host before it is made; `caravel apply` makes it; `caravel destroy` winds a lane down to a frozen contract and gives every account its exit proof. Each lane's engine is Soroban Wasm, run through `soroban-env-host` by the sequencer and independently by each validator. Every checkpoint, with its block data, is posted to Stellar and accepted only with the validators' threshold signature. Anyone can rebuild a lane from Stellar data alone. USDC stays in the lane's settlement contract; if the lane stops checkpointing or ignores deposits and forced withdrawals sent through Stellar, anyone can freeze it, and users take their last checkpointed balance back on Stellar. This is testnet software: a lane's admin can still upgrade its contract and rotate its validators, and lane #1's three validators all run on one machine operated by the Caravel team.
+> Caravel deploys and runs appchains ("lanes") that settle to Stellar, from one lane file, each in the token it chooses: a Stellar asset (through its Stellar Asset Contract) or any SEP-41 token contract whose transfers move exact amounts. `caravel plan` shows every change on Stellar and on the host before it is made; `caravel apply` makes it; `caravel destroy` winds a lane down to a frozen contract and gives every account its exit proof. Each lane's engine is Soroban Wasm, run through `soroban-env-host` by the sequencer and independently by each validator. Every checkpoint, with its block data, is posted to Stellar and accepted only with the validators' threshold signature. Anyone can rebuild a lane from Stellar data alone. The token stays in the lane's settlement contract; if the lane stops checkpointing or ignores deposits and forced withdrawals sent through Stellar, anyone can freeze it, and users take their last checkpointed balance back on Stellar. The token's own rules still apply (an asset issuer's freeze or clawback reaches the contract's balance too). This is testnet software: a lane's admin can still upgrade its contract and rotate its validators, and lane #1's three validators all run on one machine operated by the Caravel team.
 
 It MUST NOT claim, besides §2.2:
+- that any token works: a token must move exact amounts on transfer (no transfer fees, no rebasing), and a template may need set decimals (perps: 7);
 - one-click or zero-configuration lanes: a lane needs a lane file, Stellar identities and a host;
 - hosting, cloud provisioning, or a lane registry or console: they were cut from M0.5 (§20.3);
 - any comparison naming the well-known infrastructure-as-code tool: the human's copy rule, which CI enforces.
@@ -2023,7 +2024,7 @@ Never cut replay, validator re-execution or the escape contract path: they are t
 
 ### 20.3 Milestone M0.5: the platform split, then declarative lanes
 
-**Decided with the human on 2026-09-30.** Caravel is the platform that lets any team launch a lane settling to Stellar. Caravel Perps is the first lane built with it, not the product. M0 built the two as one. M0.5 splits them in one repository:
+**Decided with the human on 2026-09-30.** Caravel is the platform that lets any team launch a lane settling to Stellar, in the token the lane chooses (DEC-072). Caravel Perps is the first lane built with it, not the product. M0 built the two as one. M0.5 splits them in one repository:
 - `platform/` holds the app-agnostic runtime, nodes, settlement, relayer core and the deploy tool;
 - `lanes/perps/` holds Caravel Perps;
 - `lanes/payments/` holds a small second template.
@@ -2066,6 +2067,8 @@ This drops the lane registry contract, the console and its web packages, hosted 
 | P-16 | Lane #1 under the tool: its `[env.testnet]` in its lane file, a plan with no Stellar changes, the host configs normalized by `apply` (DEC-070) | P-15 | review |
 | P-17 | A payments lane on testnet from its lane file, through the whole lifecycle; RESULTS (DEC-071) | P-16 | review |
 | P-18 | README, §2.4 claims (proposed), security pass over the tool; the landing copy after the human approves §2.4 — **Gate P4** | P-17 | review |
+| P-19 | A configurable settlement token: Stellar assets, SEP-41 contracts, Circle's USDC; template decimals (DEC-072) | P-18 | review |
+| P-20 | Landing page for declarative lanes, from the approved §2.4 (a preview first) | P-19 | todo |
 
 ### 20.4 Phase 2 consensus formats (approved by the human 2026-09-30, DEC-060)
 
@@ -2501,6 +2504,18 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - both users escaped from `exit.json` at 1:1;
   - replay from Stellar covered 11 checkpoints.
 - **An e2e race, found and fixed:** a relayer given SIGINT finishes the step it is in, which can be a submission. So step 4b now waits for the relayer to exit before choosing the stale checkpoint. The first attempt left its throwaway test contract `CAKOSGUC…` unfrozen, holding only test funds | The same file-driven lifecycle works on the real network | — |
+| DEC-072 | **M0.5 (P-19).** The settlement token is configurable (asked for by the human, 2026-09-30).
+- **The contract already allowed it.** The settlement contract holds any SEP-41 token: it only calls `transfer` and `balance`, and the constructor argument named `usdc` in the M0 ABI is simply its address. No contract, engine or frozen-format change was needed; the name stays in the ABI.
+- **The lane file's `[env.<name>]` names its `token`:**
+  - `"circle-usdc"`: Circle's testnet USDC;
+  - `{ asset = "CODE:ISSUER" }`: a Stellar asset through its Stellar Asset Contract, which `apply` deploys when missing, since anyone may;
+  - `{ contract = "C…" }`: any SEP-41 contract;
+  - `{ local = "CODE" }`: a test asset issued by the admin, on local networks.
+
+  The plan shows the token's address and a `create token contract` step. 1–12 character codes are supported (a vector for a 12-character code is in `address.rs`).
+- **Decimals guard:** `NodeApp::token_decimals` lets a template require the token's decimals. Perps requires 7, because its collateral, prices and margins are in 10^-7 units. A Stellar Asset Contract always has 7; for another contract, the tool reads `decimals()` by simulation and refuses a mismatch. Payments takes any token.
+- **Lane #1** is now `token = "circle-usdc"`, and its plan still shows no changes. The local payments lane uses `{ local = "USDC" }`. `E2E_TOKEN_CODE=EURC E2E_TEMPLATE=payments ./scripts/e2e-local.sh` passed in 157 s with a EURC lane.
+- **What the tool can't check:** a contract token that takes a fee on transfer, or that rebases, would break the vault's accounting. The claims (§2.4) and the README say so | A lane's economics shouldn't be tied to one stablecoin, and the contract never was | A token interface beyond SEP-41 |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

@@ -129,6 +129,11 @@ impl NodeApp for PerpsApp {
             refused: "unknown oracle key or bad signature",
         })
     }
+
+    /// Collateral, prices and margins are in units of 10^-7 (USDC stroops, §10).
+    fn token_decimals(&self) -> Option<u32> {
+        Some(7)
+    }
 }
 
 async fn markets(State(node): Node) -> ApiResult {

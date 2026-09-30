@@ -111,7 +111,7 @@ impact_lots = 1000                         # 10,000 XLM
 [env.testnet]
 network = "testnet"
 admin = "caravel-admin"
-usdc = "circle"
+token = "circle-usdc"                      # the settlement token: Circle's testnet USDC
 settlement = "CBIHBEUZYFZQZEQPBJH2ID6CDRDZFEDI6XHAXVOCHG6FO5XWUIGPONWO"   # deployed before the tool, with a random salt
 settlement_wasm = "8a2fafbd1ad48d53333ab79d73afa1c50d5f790f39a97fafb88b5443b383d503"   # lane #1's build (DEC-061)
 threshold = 2

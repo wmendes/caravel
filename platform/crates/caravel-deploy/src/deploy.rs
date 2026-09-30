@@ -16,7 +16,7 @@ use crate::address::{asset_contract_id, contract_id, settlement_salt, strkey};
 use crate::chain::{self, Extra};
 use crate::host::HostProvider;
 use crate::local::Local;
-use crate::manifest::{Manifest, Network, Provider, Usdc};
+use crate::manifest::{Manifest, Network, Provider, Token};
 use crate::plan::{
     self, Chain, Desired, DesiredHost, Host, Key, NodeReport, Params, Plan, SignerSet, Step,
 };
@@ -121,14 +121,49 @@ pub async fn prepare<A: NodeApp>(
         .collect::<Result<Vec<_>>>()?;
     let passphrase = m.env.network.passphrase();
     let lane_id = m.lane.lane_id();
-    let usdc = match m.env.usdc {
-        Usdc::Circle => {
+    // The settlement token, and the asset behind it when it is a Stellar
+    // Asset Contract that apply may deploy.
+    let (token, token_asset) = match &m.env.token {
+        Token::Named(_) => (
             stellar_strkey::Contract::from_string(crate::versions::testnet_usdc())
                 .map_err(|_| anyhow!("versions.json testnet.usdc_sac"))?
-                .0
+                .0,
+            None,
+        ),
+        Token::Asset { asset } => {
+            let (code, issuer) = crate::manifest::parse_asset(asset)
+                .ok_or_else(|| anyhow!("token.asset {asset:?}"))?;
+            (
+                asset_contract_id(passphrase, &code, &issuer),
+                Some((code, issuer)),
+            )
         }
-        Usdc::Local => asset_contract_id(passphrase, "USDC", &admin),
+        Token::Contract { contract } => (
+            stellar_strkey::Contract::from_string(contract)
+                .map_err(|_| anyhow!("token.contract {contract:?}"))?
+                .0,
+            None,
+        ),
+        Token::Local { local } => (
+            asset_contract_id(passphrase, local, &admin),
+            Some((local.clone(), admin)),
+        ),
     };
+    // A template may need a token with a set number of decimals (perps: 7).
+    // A Stellar Asset Contract always has 7; another contract is asked.
+    if let Some(want) = app.token_decimals() {
+        let have = match &m.env.token {
+            Token::Contract { .. } => Cli::new(&m).token_decimals(&m.env.admin, &token)?,
+            _ => 7,
+        };
+        if have != want {
+            bail!(
+                "the {} template needs a token with {want} decimals; {} has {have}",
+                template,
+                crate::address::strkey(&token)
+            );
+        }
+    }
     let (settlement, pinned) = match &m.env.settlement {
         Some(c) => (
             stellar_strkey::Contract::from_string(c)
@@ -162,8 +197,8 @@ pub async fn prepare<A: NodeApp>(
         engine_wasm_hash,
         admin,
         relayer,
-        usdc,
-        usdc_local: m.env.usdc == Usdc::Local,
+        token,
+        token_asset,
         settlement,
         settlement_pinned: pinned,
         settlement_wasm,
@@ -355,7 +390,9 @@ impl Prepared {
             println!("→ {}", step_line(step));
             match step {
                 Step::Fund { who, .. } => self.cli.fund(self.identity_of(who))?,
-                Step::DeployUsdc { .. } => self.cli.deploy_asset(admin, "USDC", &d.admin)?,
+                Step::DeployToken { code, issuer, .. } => {
+                    self.cli.deploy_asset(admin, code, issuer)?
+                }
                 Step::UploadWasm { hash } => {
                     let got = self
                         .cli
@@ -373,7 +410,7 @@ impl Prepared {
                         &d.settlement_wasm,
                         &settlement_salt(&d.lane_id),
                         &d.admin,
-                        &d.usdc,
+                        &d.token,
                         [
                             &d.lane_id,
                             &d.engine_wasm_hash,
@@ -451,7 +488,7 @@ impl Prepared {
 fn step_line(s: &Step) -> String {
     match s {
         Step::Fund { who, .. } => format!("fund {who}"),
-        Step::DeployUsdc { contract } => format!("create USDC {}", strkey(contract)),
+        Step::DeployToken { contract, .. } => format!("create token contract {}", strkey(contract)),
         Step::UploadWasm { .. } => "upload the settlement Wasm".into(),
         Step::DeploySettlement { contract } => format!("deploy settlement {}", strkey(contract)),
         Step::WipeHostData => "wipe the host's lane data".into(),
