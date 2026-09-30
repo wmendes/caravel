@@ -28,6 +28,7 @@ caravel-perps = { path = "lanes/perps/engine/crates/caravel-perps" }
 caravel-runtime = { path = "platform/crates/caravel-runtime" }
 caravel-core = { path = "platform/crates/caravel-core" }
 caravel-node = { path = "platform/crates/caravel-node" }
+caravel-app-sdk = { path = "platform/crates/caravel-app-sdk" }
 caravel-perps-node = { path = "lanes/perps/node" }
 caravel-testkit = { path = "lanes/perps/engine/crates/caravel-testkit" }
 

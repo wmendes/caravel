@@ -2041,7 +2041,7 @@ The plan of record is `~/.claude/plans/ok-but-now-i-lucky-hoare.md` (architectur
 | P-07 | Live VM upgrade to `caravel-perps-node` (check-store, shadow validator, replay) — **Gate P1** | P-06 | review |
 | P-07a | Perps oracle: Coinbase's public WebSocket ticker as the first source, once per 1 s block (DEC-058) | P-07 | review |
 | P-07b | Stellar Wallets Kit replaces Freighter in the perps web app, with a local SEP-53 check (DEC-059) | P-07a | review |
-| P-08 | `caravel-app-sdk` + `testapp`, conformance with perps' standard kinds | P-07 | todo |
+| P-08 | `caravel-app-sdk` + `testapp`, conformance with perps' standard kinds | P-07 | review |
 | P-08b | Pyth Pro feed verified in-engine in the SDK (needs format approval and a Pyth Pro subscription) | P-08 | todo |
 | P-09 | `caravel-harness`; settlement tests move off perps; new settlement build of record | P-08 | todo |
 | P-10 | Payments template: engine, vectors, scenarios, INV-PAY1, parity, node, e2e — **Gate P2** | P-09 | todo |
@@ -2056,6 +2056,96 @@ The plan of record is `~/.claude/plans/ok-but-now-i-lucky-hoare.md` (architectur
 | P-19 | Landing page and platform §2 claims (after the human approves them) | P-16 | todo |
 | P-20 | Testnet e2e through the console, self-hosted and trial; RESULTS | P-18 | todo |
 | P-21 | Security pass over registry, host manager, console and SDK — **Gate P4** | P-20 | todo |
+
+### 20.4 Phase 2 consensus formats (approved by the human 2026-09-30, DEC-060)
+
+The human approved this section as proposed on 2026-09-30. These formats freeze like §9 once their vectors land: a change needs a version bump, regenerated vectors and a DEC. They reuse the M0 conventions: little-endian, no padding, an 8-byte magic, the §9.2 transaction envelope, the §9.4 inbox, the §9.10 `CommitmentV1`, the §11.10 receipts container and the §11.8 commitment rules. The perps engine stays on its own frozen formats (DEC-051).
+
+#### 20.4.1 `AppGenesisV1` (genesis config for SDK apps)
+
+```text
+magic "CVAPPGN1" (8) · lane_id (32)
+template [16] (ASCII, zero-padded, e.g. "payments") · template_version u16
+system_key_count u8 (1..=4) · system_keys[] (32 each)   # accounts 0..n-1, flag SYSTEM; key 0 is the treasury (fees)
+access_mode u8 (0 OPEN, 1 ALLOWLIST) · allowlist_count u16 · allowlist[] (32 each, sorted)
+min_deposit i128 · min_withdrawal i128
+max_accounts u32 · max_session_keys u8 · max_txs_per_account_per_block u16
+max_entries_per_block u32 · max_block_bytes u32 · max_pending_withdrawals u32
+exec_cpu_limit u64 · exec_mem_limit u64
+app_params_len u32 · app_params[app_params_len]          # the app's own; the app decodes it strictly
+```
+
+- `config_hash = H(AppGenesisV1 bytes)`, as for `GenesisConfigV1`. The lane file's generic sections (DEC-054) map one to one onto the generic fields, and the app section onto `app_params`.
+- `genesis()` returns `Fatal(BAD_CONFIG)` unless:
+  - `template` is the engine's own and `template_version` is one it runs;
+  - the system keys are distinct and none is in the allowlist;
+  - the allowlist is strictly ascending;
+  - `min_deposit ≥ 1`, `min_withdrawal ≥ 1`, and every `max_*` is > 0;
+  - `max_accounts ≥ system_key_count + 1`;
+  - the block and exec limits are within §10.2's bounds;
+  - `app_params` decodes, to exactly `app_params_len` bytes.
+- There are no feeds in V1. An app with feeds puts its feed configuration in `app_params`; P-08b proposes the Pyth Pro one.
+
+#### 20.4.2 SDK state layout
+
+```text
+StateFrameV1 prefix (209, DEC-052)          # magic = the app's, e.g. "CVSTPAY1"; app_word and app_flags are the app's
+config AppGenesisV1 (embedded)
+account_count u32 · accounts[] AppAccountV1  # index = position; 0..system_key_count-1 are system accounts
+app_globals_len u32 · app_globals[]          # the app's
+pending_count u32 · pending[] (key 32 · amount i128)
+last_commitment CommitmentV1 (160)
+```
+
+`AppAccountV1`:
+
+```text
+key (32) · flags u8 (bit0 SYSTEM) · next_nonce u64 · balance i128
+session_key_count u8 · session_keys[] (key 32 · expires_at_ms u64 · permissions u8)   # sorted by key
+txs_this_block u16
+ext_len u16 · ext[]                          # the app's per-account data
+```
+
+#### 20.4.3 The SDK's standard pipeline
+
+`step` runs the perps order (§11.2), with the app's hooks in place of funding, oracle and liquidations:
+1. Decode and block checks.
+2. Reset `txs_this_block`.
+3. App `begin_block`.
+4. INBOX entries.
+5. FEED entries: fatal for an app without feeds.
+6. USER entries.
+7. App `end_block`.
+8. The commitment on `CHECKPOINT_END`.
+9. Update the frame.
+
+- **INBOX (§11.4).** A deposit credits `balance`, and creates or reuses an empty slot like perps: new accounts start at `next_nonce = block.timestamp_ms`. Otherwise it bounces. A forced withdrawal pushes `min(amount, balance, app free balance, liquidity_left)`.
+- **USER (§11.3), steps 1 to 9 unchanged.** Then:
+  - WITHDRAW (kind 4): §11.3.2, with `balance` and the app's free balance in place of collateral and margin, and no oracle check;
+  - session keys (kinds 5 and 6): §11.3.3, except that the allowed permission bits are the app's mask instead of `0x03`;
+  - any other kind: the app.
+- **Codes.** The platform's are M0's codes 0 to 6 and 40 to 51 (`INSUFFICIENT_FREE_COLLATERAL` reads as insufficient free balance). Apps use 10 to 39 and 60 and up. Fatal codes 1 to 31 are the platform's.
+- **Receipts.** `CVRCPT01`. The platform events are 6 DEPOSIT, 7 FORCED_WITHDRAWAL_PROCESSED and 10 COMMITMENT; the app's events use types 16 and up.
+- **Commitment (§11.8).** `escape_equity_j` is the app's escape equity for account `j`.
+- **Invariants for every SDK app.** SDK-INV1, conservation: `Σ app-held value + Σ pending.amount == deposits_credited_total − withdrawals_committed_total`. INV-P4, INV-P5, INV-P7 and INV-P8 hold unchanged. Each app states what its held value is.
+
+#### 20.4.4 Payments (template `payments` 0.1.0, state magic `CVSTPAY1`)
+
+- **`app_params`** (32 bytes): `transfer_fee i128` (≥ 0, flat per transfer, paid to the treasury; 0 means free) · `min_transfer i128` (≥ 1).
+- **Kind 16, TRANSFER.**
+  - Body: `to 32 · amount i128 · memo u64` (56).
+  - Signer: the owner, or a session key with `PERM_TRANSFER = 0x01` (the app's only permission bit).
+  - Checks, in order, each a rejection that still consumes the nonce:
+    1. `amount ≥ min_transfer` → 12 `BELOW_MIN_TRANSFER`;
+    2. `to != account` → 13 `SELF_TRANSFER`;
+    3. `to` is an existing account → 11 `UNKNOWN_RECIPIENT` (a recipient must have deposited once, so transfers can't fill account slots);
+    4. `balance ≥ amount + transfer_fee` → 10 `INSUFFICIENT_BALANCE`.
+  - Effect: `balance −= amount + fee`; `to.balance += amount`; `treasury.balance += fee`.
+  - Event 16 TRANSFER: `from_idx u32 · to_idx u32 · amount i128 · fee i128 · memo u64`.
+- **Free balance and escape equity** are both the balance. There is no `ext`, no `app_globals`, and `app_word` and `app_flags` are 0.
+- **Feeds:** none. A FEED entry is fatal.
+- **INV-PAY1:** `Σ balances + Σ pending.amount == deposits_credited_total − withdrawals_committed_total`.
+- **Engine and version:** the `payments-engine` contract, `version()` = `payments/0.1.0`, a 64 KB Wasm budget, and its hash in `versions.json` `lanes.payments`.
 
 ---
 
@@ -2254,6 +2344,17 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 - **Message signatures:** wallets return them in different encodings, and some can't sign messages at all: in 2.7.0, Albedo, Rabet and Ledger throw on `signMessage`. So the app checks each one locally against the SEP-53 hash (`@noble/ed25519`) before posting it. A wallet that fails can still deposit, claim and escape, and is told trading needs a SEP-53 wallet. The engine's check is the same one; this only moves the failure out of the block.
 - **Tests:** the frozen `add_session_key_sep53_owner` vector passes the check, and a tampered, wrong-key or wrong-message signature does not; base64 and hex are both decoded; a raw-message signature and a wallet that can't sign messages are refused. Headless Chrome opened the picker against the live lane.
 - **Not yet tested:** manual testnet flows with Freighter and xBull (RESULTS) | Users bring the Stellar wallet they have. The kit covers the wallets the ecosystem uses and is the one developers.stellar.org lists | A wallet the kit lacks, or SEP-53 support changing in a wallet (the local check shows it) |
+| DEC-060 | **M0.5 Phase 2 formats, approved by the human on 2026-09-30 as proposed in §20.4:** `AppGenesisV1` (`CVAPPGN1`), the SDK state layout (`StateFrameV1` · embedded config · `AppAccountV1`s · app globals · pending · `CommitmentV1`), the SDK's standard pipeline, and Payments 0.1.0 (`CVSTPAY1`, kind 16 `TRANSFER`, codes 10–13, flat `transfer_fee` to the treasury, recipients must exist, INV-PAY1). They freeze when their vectors land (P-08, P-10) | One genesis format and one state layout for every SDK app, so the platform, the console and the registry treat templates alike. Payments is the smallest app that exercises every standard path | A template that needs feeds (P-08b), or state that doesn't fit the layout (a V2) |
+| DEC-061 | **Settlement build of record for new lanes, approved by the human on 2026-09-30:** new lanes use the platform's settlement build `8280828f…`, the Linux build since the P-03 moves (`artifacts.settlement_wasm_sha256`). Lane #1 keeps its deployed `8a2fafbd…`, reproducible from tag `perps-m0` (`lanes.perps.settlement_deployed_wasm_sha256`). The registry (P-11) approves both | The source is lane #1's; only the build paths changed. Freezing settlement as well was not worth the churn | A settlement code change, which gets its own build and DEC |
+| DEC-062 | **M0.5 (P-08).** `platform/crates/caravel-app-sdk` implements §20.4. It is `no_std`, depends only on `caravel-core`, and builds for `wasm32v1-none`.
+- **App interface:** an app is an `AppEngine`, with static dispatch (`step::<App, _>(state, block, crypto)`). It declares its template, versions, state magic and permission bits. Its hooks are `params`, `body_len` and `session_permission` per kind, `apply`, `begin_block`/`end_block`, `free_balance`, `escape_equity`, `is_empty` (slot reuse) and `before_forced_withdrawal`. It gets an `AppCtx`: the state, its params, the account index, the time, the entry and its events. Apps can't create accounts in V1.
+- **Crypto:** the SDK's own `Crypto` trait, the same as the perps engine's (`native` feature: `NativeCrypto` traps, `DiagnosticCrypto` names the entry).
+- **Decoding:** strict, as M0's. A user entry whose kind is unknown or reserved (7 to 15), or whose body has the wrong length, is `BAD_ENTRY_ENCODING` for that entry, checked before anything else. A FEED entry is `UNKNOWN_FEED_KEY`.
+- **Test app** (`testapp` feature): kind 16 `COUNT`, a per-account counter in `ext`, a lane total in `app_globals`, and a block-end event. It exercises every hook.
+- **Tests:**
+  - `tests/pipeline.rs`: genesis rules, accounts, signer rules, nonces, rate limits, session keys, withdrawals, forced withdrawals, the commitment and its roots, slot reuse, allowlist bounces, every fatal case, strict state decoding, and a SDK-INV1 property test.
+  - `lanes/perps/node/tests/sdk_conformance.rs`: ten scripted blocks run through the frozen perps engine and the test app with the same limits and keys. It requires identical codes, platform events, frame, commitment (both roots) and every account's nonce, balance and session keys, and it reaches every standard code. Mutating the SDK's new-account nonce or its session-key limit makes it fail.
+- **Vectors:** `platform/test-vectors/app_genesis.json` and `sdk_state.json` (genesis, then two blocks with their receipts) freeze the formats | The standard paths are code the SDK owns once, so every app gets M0's rules without copying them, and the frozen perps engine remains the reference they are checked against | An app that must create accounts or needs feeds (P-08b) |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

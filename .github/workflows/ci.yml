@@ -88,7 +88,7 @@ jobs:
       - name: Consensus crates build without std
         run: |
           cargo build --locked --manifest-path lanes/perps/engine/Cargo.toml -p caravel-types -p caravel-merkle -p caravel-perps --target wasm32v1-none
-          cargo build --locked -p caravel-core --target wasm32v1-none
+          cargo build --locked -p caravel-core -p caravel-app-sdk --target wasm32v1-none
 
   apps:
     runs-on: ubuntu-latest
