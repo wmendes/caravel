@@ -136,9 +136,11 @@ jobs:
       - run: ./scripts/build-contracts.sh
       - run: cargo build --release --locked -p caravel-node
       - run: npm --prefix apps/relayer ci && npm --prefix apps/relayer run build
+      - run: npm --prefix apps/web ci && npm --prefix apps/web run build
       - name: Assemble the release
         run: |
-          mkdir -p release/bin release/contracts release/relayer
+          mkdir -p release/bin release/contracts release/relayer release/web
+          cp -r apps/web/dist/. release/web/
           cp target/release/caravel-node release/bin/
           cp target/contracts/*.wasm release/contracts/
           cp -r apps/relayer/dist apps/relayer/package.json apps/relayer/package-lock.json release/relayer/

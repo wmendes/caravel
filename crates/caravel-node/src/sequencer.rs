@@ -456,6 +456,7 @@ async fn status(State(app): AppState) -> ApiResult {
     let metering = json!({ "height": mh.to_string(), "cpu_insns": m.cpu_insns.to_string(), "mem_bytes": m.mem_bytes.to_string(), "note": "soroban-env-host metering of the last step call, not network fees" });
     let body = json!({
         "lane_id": hex(&st.lane_id),
+        "config_hash": hex(&core.config_hash()),
         "lane_name": app.lane_name,
         "height": st.height.to_string(),
         "state_hash": hex(&core.state_hash()),
