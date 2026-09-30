@@ -444,6 +444,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "caravel-app-sdk"
+version = "0.1.0"
+dependencies = [
+ "caravel-app-sdk",
+ "caravel-core",
+ "ed25519-dalek",
+ "proptest",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "caravel-core"
 version = "0.1.0"
 dependencies = [
@@ -501,6 +513,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "caravel-app-sdk",
  "caravel-core",
  "caravel-merkle",
  "caravel-node",

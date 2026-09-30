@@ -1,0 +1,27 @@
+[package]
+name = "caravel-app-sdk"
+description = "Caravel app SDK: AppGenesisV1, the SDK state layout and the standard lane pipeline (inbox, withdrawals, session keys, commitments) for any app engine (no_std)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# Native crypto (ed25519-dalek verify_strict, sha2) for nodes and tests.
+native = ["dep:ed25519-dalek", "dep:sha2", "caravel-core/native"]
+# The SDK's test app, for conformance tests (spec §20.4, P-08).
+testapp = []
+
+[dependencies]
+caravel-core = { workspace = true }
+ed25519-dalek = { workspace = true, optional = true }
+sha2 = { workspace = true, optional = true }
+
+[dev-dependencies]
+caravel-app-sdk = { path = ".", features = ["native", "testapp"] }
+caravel-core = { workspace = true, features = ["native"] }
+ed25519-dalek = { workspace = true }
+proptest = "1.11.0"
+serde_json = "1.0.151"
+sha2 = { workspace = true }
