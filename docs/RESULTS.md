@@ -119,3 +119,20 @@ The spec §24 freeze drill, run with `E2E_NETWORK=testnet SETTLEMENT_WASM=<CI se
 | 6. `caravel-node replay` from testnet data only, after the freeze | `OK seq=1..6 final_state_hash=b1e696c6…aa87` |
 
 Each escape paid the account's equity in the last accepted checkpoint times the payout ratio, and the payouts did not exceed the vault. The escape proofs came from validator 1, and replay's proof for A matched it.
+
+## Lane #1 upgraded to the platform node (M0.5 P-07, 2026-09-30)
+
+The testnet VM moved from the M0 `caravel-node` (release `6c1224d`) to `caravel-perps-node` (CI release `3f3248f`, P-06). The lane file changed to the platform layout (DEC-054), and the oracle now runs as the relayer's perps feed module (DEC-053). The engine Wasm (`4571cd25…`), the settlement contract and the stores did not change. Before the swap, `scripts/vm-preflight.sh` checked the release against the live lane without changing it:
+
+| Check | Result |
+|---|---|
+| `check-store`: the release binary and lane file re-execute a copy of the live sequencer database through the engine Wasm | `ok`: 39,856 blocks, all 759 checkpoint headers rebuilt byte for byte |
+| The shadow validator's startup check against the settlement contract's on-chain config (lane_id, engine hash, config_hash, genesis_state_hash) | passed |
+| Shadow validator from block 1 (stopped at height 30,140, as the human chose) | 597 checkpoint headers compared with the sequencer's, 0 differing, no halt, no suspicious block |
+
+The swap (`deploy-vm.sh`) was at height 45,256 with checkpoint 849 accepted. It took a few seconds of downtime. After the swap:
+- the sequencer and all 3 validators report `template: perps`, with the Wasm executor and no halt;
+- oracle prices were 3 s old, from the relayer's perps feed module;
+- the web app is served;
+- checkpoint 852 (blocks 45,324–45,383) was sealed and signed entirely by the new nodes and accepted on Stellar ([`3de4f6b5…`](https://stellar.expert/explorer/testnet/tx/3de4f6b50a52980f1d9f0e94269162254858308aee97a26cafdb29a03473575f), ledger 4,948,567, `getTransaction` status SUCCESS).
+- `caravel-perps-node replay` from testnet data only, after the swap, with the platform-layout lane file: `OK seq=1..852 final_state_hash=744af89e…4b93`. That covers every M0 checkpoint and the first ones the new nodes produced. The first attempt got an RPC-side error (`getLedgerEntries: could not query captive core … 404`); the rerun, with RPC reporting healthy, passed.
