@@ -35,6 +35,22 @@ The spec §24 checklist, walked on 2026-09-29 against the M0 code. Each item nam
 - XDR read from Stellar RPC (`getLedgerEntries`, `getTransaction`) is decoded with bounded limits (depth 500, 1 MiB) instead of none, since nodes do not trust their RPC.
 - After a signer rotation, the sequencer has checkpoints signed by the old set signed again by the new one (found while writing the rotation runbook; `a_rotation_sends_old_epoch_signatures_back_for_signing`, and step 4b of the end-to-end run).
 
+## The deploy tool (M0.5 P-18, 2026-09-30)
+
+A pass over `platform/crates/caravel-deploy` (plan, apply, status, destroy and the local and ssh providers), with the same rule: evidence, or what was fixed.
+
+| # | Item | Result | Evidence |
+|---|---|---|---|
+| D1 | No secret in a lane file | ✅ | Key fields must name Stellar CLI identities; a secret key or a seed phrase anywhere in `[env.*]` is refused without being echoed (`tests/manifest.rs` `secrets_are_refused_wherever_they_are`, `key_fields_name_identities_not_keys`) |
+| D2 | No secret in a generated file | ✅ | Rendered configs, units and the Caddyfile hold none (`deploy_render.rs` `the_nodes_read_every_rendered_file`); validator keys are separate files, and the sequencer's token and the relayer's keys come from `keys/env` |
+| D3 | Secrets never touch this machine's disk or a command line (ssh hosts) | ✅ | `Cli::secret` reads `stellar keys secret` through a pipe; `Ssh::write_keys` sends each key on the connection's stdin to `sudo install -m 600 /dev/stdin`; `CARAVEL_DEBUG` prints commands, which never carry a secret. A local host keeps its keys under `.caravel/<lane>/<env>/keys` (mode 600 in a mode-700 directory, gitignored) |
+| D4 | Nothing from the lane file is run as shell code on the host | ✅ fixed | Validator names and identities are checked names; every value in a remote script is single-quoted; units, the Caddyfile and configs travel on stdin. **Fixed:** `host.root` was only required to be absolute, and it is used in `rm -rf <root>/data/*` during wipe. It is now a plain absolute path (letters, digits, `/ _ - .`), with no `..`, and never `/` itself (`every_rule_is_checked`) |
+| D5 | Mainnet is refused | ✅ | `network` is `local` or `testnet`; `mainnet`, `pubnet` and `public` are refused by name; the nodes refuse the mainnet passphrase (`check_network`) |
+| D6 | Irreversible steps are guarded | ✅ | Freezing happens only in `destroy`, which without `--yes` makes the operator type the lane's name; apply refuses a plan with problems; a change the constructor fixed is a problem, never a redeploy; a signer set that was ever installed is refused before the contract would (`plan-signers-reused.txt`) |
+| D7 | What apply does is what the plan said | ✅ | Apply runs the plan it just printed; each Stellar result is checked against it (the uploaded Wasm hash, the deployed address), and apply ends by reading everything back; an interrupted apply converges (P-13, `kill -9` twice) |
+| D8 | A plan can't be fooled by another process answering on a node's port | ✅ fixed in P-13 | Health checks compare the validator's key as well as lane, config, settlement and engine |
+| D9 | `destroy --pay-out` can pay only owners | ✅ | The contract pays `escape_claim` and `claim_withdrawal` only to the lane account's owner (item 2); the tool passes the owner and never a recipient of its choice |
+
 ## Known limits of M0 (by design, spec §2 and §4)
 
 - The Caravel team runs the sequencer and all three validators, so a collusion of the team can sign a bad checkpoint; the escape hatch and public replay are the recourse.

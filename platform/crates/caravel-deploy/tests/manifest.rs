@@ -220,6 +220,22 @@ fn every_rule_is_checked() {
         ),
         ("public_url", "root = \"opt\"\npublic_url", "absolute path"),
         (
+            "public_url",
+            "root = \"/opt/caravel /\"\npublic_url",
+            "absolute path",
+        ),
+        ("public_url", "root = \"/\"\npublic_url", "absolute path"),
+        (
+            "public_url",
+            "root = \"/opt/../etc\"\npublic_url",
+            "absolute path",
+        ),
+        (
+            "public_url",
+            "root = \"/opt/x;rm\"\npublic_url",
+            "absolute path",
+        ),
+        (
             "admin = \"demo-admin\"",
             "admin = \"demo-admin\"\nsettlement = \"CXYZ\"",
             "not a C... contract",

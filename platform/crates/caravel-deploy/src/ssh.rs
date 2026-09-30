@@ -394,7 +394,8 @@ impl Ssh {
         for n in nodes {
             self.stop(n)?;
         }
-        self.exec(&format!("sudo rm -rf {r}/data/*", r = self.root), b"")
+        // The root is a plain absolute path (the manifest checks it).
+        self.exec(&format!("sudo sh -c 'rm -rf -- {}/data/*'", self.root), b"")
             .map(|_| ())
     }
 
