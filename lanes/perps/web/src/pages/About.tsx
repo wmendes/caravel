@@ -13,7 +13,7 @@ export function About() {
       </p>
       <h3>Who runs it</h3>
       <p>
-        The Caravel team runs the sequencer and all three validators, on one machine. Prices are signed by the Caravel team's oracle key, from Reflector's testnet feed with a public spot price as fallback.
+        The Caravel team runs the sequencer and all three validators, on one machine. Prices are signed by the Caravel team's oracle key. They come from Coinbase's public market data (its live trade stream, with its spot price and Reflector's testnet feed as fallbacks), at most once per block.
       </p>
       <h3>What it does not claim</h3>
       <ul>
