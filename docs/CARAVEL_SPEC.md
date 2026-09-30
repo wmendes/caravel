@@ -53,10 +53,11 @@ Stop and ask (in the PR description or chat) when:
 
 ### 1.1 What Caravel is
 
-Caravel is a framework for configurable appchains on Stellar. Each appchain is called a **lane**.
+Caravel is infrastructure as code for appchains on Stellar. Each appchain is called a **lane**.
 
+- A **lane file** declares a lane and its deployments. `caravel plan` shows every change on Stellar and on the host before it is made, `caravel apply` makes it, and `caravel destroy` winds the lane down to a frozen contract and an exit proof for every account (§20.3).
 - A lane runs Soroban contracts with its own settings: block time, fee model, validator set, access rules and execution limits.
-- A lane settles to Stellar. User funds (USDC) are held by a **settlement contract** on Stellar.
+- A lane settles to Stellar. User funds, in the lane's settlement token (a Stellar asset or a SEP-41 token, DEC-072), are held by a **settlement contract** on Stellar.
 - The lane posts **checkpoints** to that contract. Each checkpoint:
   - carries the lane's full block data;
   - carries a state commitment;
@@ -2068,7 +2069,7 @@ This drops the lane registry contract, the console and its web packages, hosted 
 | P-17 | A payments lane on testnet from its lane file, through the whole lifecycle; RESULTS (DEC-071) | P-16 | review |
 | P-18 | README, §2.4 claims (proposed), security pass over the tool; the landing copy after the human approves §2.4 — **Gate P4** | P-17 | review |
 | P-19 | A configurable settlement token: Stellar assets, SEP-41 contracts, Circle's USDC; template decimals (DEC-072) | P-18 | review |
-| P-20 | Landing page for declarative lanes, from the approved §2.4 (a preview first) | P-19 | todo |
+| P-20 | Landing page for declarative lanes, from the approved §2.4 (a preview first; deployed only after the human's OK) | P-19 | review |
 
 ### 20.4 Phase 2 consensus formats (approved by the human 2026-09-30, DEC-060)
 
