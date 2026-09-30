@@ -12,15 +12,15 @@ extern crate std;
 
 use std::vec::Vec as StdVec;
 
-use caravel_merkle::{MerkleTree, NativeSha256};
-use caravel_testkit::lane::{config, T0};
-use caravel_testkit::Lane;
-use caravel_types::batch::BatchV1;
-use caravel_types::block::BlockInputV1;
-use caravel_types::checkpoint::CheckpointHeaderV1;
-use caravel_types::inbox::{InboxKind, InboxMsgV1};
-use caravel_types::preimage::{account_leaf_preimage, withdrawal_leaf_preimage};
-use caravel_types::vectors::sha256;
+use caravel_core::batch::BatchV1;
+use caravel_core::block::BlockInputV1;
+use caravel_core::checkpoint::CheckpointHeaderV1;
+use caravel_core::inbox::{InboxKind, InboxMsgV1};
+use caravel_core::merkle::{MerkleTree, NativeSha256};
+use caravel_core::preimage::{account_leaf_preimage, withdrawal_leaf_preimage};
+use caravel_harness::sha256;
+use caravel_harness::Lane;
+use caravel_harness::{config, T0};
 use ed25519_dalek::{Signer, SigningKey};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::token::{StellarAssetClient, TokenClient};
@@ -58,7 +58,7 @@ pub fn settlement_wasm() -> StdVec<u8> {
 }
 
 pub fn key32(env: &Env, seed: u8) -> BytesN<32> {
-    BytesN::from_array(env, &caravel_types::vectors::pk(seed))
+    BytesN::from_array(env, &caravel_harness::pk(seed))
 }
 
 pub fn contract_error(e: Error) -> soroban_sdk::Error {
@@ -281,7 +281,7 @@ impl Harness {
 
     /// The `G...` address of lane user `seed`, with an account, a trustline and `usdc` minted.
     pub fn user(&self, seed: u8, usdc: i128) -> Address {
-        let who = account_address(&self.env, &caravel_types::vectors::pk(seed));
+        let who = account_address(&self.env, &caravel_harness::pk(seed));
         if self.accounts.borrow_mut().insert(seed) {
             create_account_with_trustline(&self.env, &who, &self.asset);
         }
@@ -304,7 +304,7 @@ impl Harness {
         self.c().deposit(
             &who,
             &amount,
-            &BytesN::from_array(&self.env, &caravel_types::vectors::pk(seed)),
+            &BytesN::from_array(&self.env, &caravel_harness::pk(seed)),
         )
     }
 
@@ -357,12 +357,7 @@ impl Harness {
         }
         .encode()
         .unwrap();
-        let accounts = st
-            .accounts
-            .iter()
-            .enumerate()
-            .map(|(j, a)| (a.key, caravel_perps::margin::equity(&st, j).unwrap().max(0)))
-            .collect();
+        let accounts = self.lane.escape_leaves();
         let header = CheckpointHeaderV1 {
             lane_id: st.lane_id,
             network_id: self.env.ledger().network_id().to_array(),
@@ -524,10 +519,10 @@ impl Harness {
                 ))
             })
             .collect();
-        cp.header.accounts_root = caravel_merkle::root(&NativeSha256, &acc).unwrap();
+        cp.header.accounts_root = caravel_core::merkle::root(&NativeSha256, &acc).unwrap();
         cp.header.account_count = accounts.len() as u32;
         cp.header.escape_total = accounts.iter().map(|(_, e)| *e).sum();
-        cp.header.withdrawals_root = caravel_merkle::root(&NativeSha256, &wdl).unwrap();
+        cp.header.withdrawals_root = caravel_core::merkle::root(&NativeSha256, &wdl).unwrap();
         cp.header.withdrawal_count = withdrawals.len() as u32;
         cp.header.withdrawals_total = withdrawals.iter().map(|(_, a)| *a).sum();
         cp.accounts = accounts;

@@ -2043,7 +2043,7 @@ The plan of record is `~/.claude/plans/ok-but-now-i-lucky-hoare.md` (architectur
 | P-07b | Stellar Wallets Kit replaces Freighter in the perps web app, with a local SEP-53 check (DEC-059) | P-07a | review |
 | P-08 | `caravel-app-sdk` + `testapp`, conformance with perps' standard kinds | P-07 | review |
 | P-08b | Pyth Pro feed verified in-engine in the SDK (needs format approval and a Pyth Pro subscription) | P-08 | todo |
-| P-09 | `caravel-harness`; settlement tests move off perps; new settlement build of record | P-08 | todo |
+| P-09 | `caravel-harness`; settlement tests move off perps; new settlement build of record | P-08 | review |
 | P-10 | Payments template: engine, vectors, scenarios, INV-PAY1, parity, node, e2e — **Gate P2** | P-09 | todo |
 | P-11 | Lane registry contract + tests | P-10 | todo |
 | P-12 | `caravel-lane-config` + browser Wasm build (same hashes as the CLI and lane #1) | P-10 | todo |
@@ -2355,6 +2355,10 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - `tests/pipeline.rs`: genesis rules, accounts, signer rules, nonces, rate limits, session keys, withdrawals, forced withdrawals, the commitment and its roots, slot reuse, allowlist bounces, every fatal case, strict state decoding, and a SDK-INV1 property test.
   - `lanes/perps/node/tests/sdk_conformance.rs`: ten scripted blocks run through the frozen perps engine and the test app with the same limits and keys. It requires identical codes, platform events, frame, commitment (both roots) and every account's nonce, balance and session keys, and it reaches every standard code. Mutating the SDK's new-account nonce or its session-key limit makes it fail.
 - **Vectors:** `platform/test-vectors/app_genesis.json` and `sdk_state.json` (genesis, then two blocks with their receipts) freeze the formats | The standard paths are code the SDK owns once, so every app gets M0's rules without copying them, and the frozen perps engine remains the reference they are checked against | An app that must create accounts or needs feeds (P-08b) |
+| DEC-063 | **M0.5 (P-09).** The platform no longer depends on any lane: `scripts/check-deps.mjs` has no exceptions left.
+- **`platform/crates/caravel-harness`** (test-only) is a native lane on the app SDK, driven block by block like the testkit's: queues, blocks, checkpoints, records, the previous block hash, `escape_leaves` and `pending`. It runs the SDK's test app by default and checks SDK-INV1 after every block.
+- **The settlement contract** takes its codecs from `caravel-core` instead of `caravel-types` and `caravel-merkle`; they are byte-identical copies (DEC-052). Its 74 tests run on the harness instead of the perps testkit, unchanged apart from the imports and where the escape leaves come from.
+- **New settlement build of record:** `d2c67d28…`, the same 42,900 bytes as `8280828f…`. The 902 bytes that differ are the order of the function-type and function-index tables the compiler emitted after the crate switch; the code is the same. It replaces `8280828f…` (DEC-061), which no lane ever deployed. Lane #1 keeps `8a2fafbd…`. The human is told at Gate P2 | The platform's contract is tested with the platform's own lane, so no app's engine is part of its test surface. A build identity change on a contract nobody deployed costs nothing | A settlement code change, which gets its own build and DEC |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

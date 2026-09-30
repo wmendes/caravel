@@ -1,7 +1,7 @@
 //! Signer sets and rotation (spec §13.4), including the testnet-only admin
 //! rotation (spec §4.3).
 
-use caravel_types::preimage::{
+use caravel_core::preimage::{
     rotate_message_preimage, signers_hash_preimage, WeightedSigner as RawSigner,
 };
 use soroban_sdk::testutils::Events as _;
@@ -32,7 +32,7 @@ fn rotate_msg(h: &Harness, new_epoch: u64, new: &WeightedSigners) -> StdVec<u8> 
     let addr_hash = sha256(&h.id.clone().to_xdr(&h.env).to_alloc_vec());
     let network = h.env.ledger().network_id().to_array();
     rotate_message_preimage(
-        &caravel_testkit::lane::config().lane_id,
+        &caravel_harness::config().lane_id,
         &network,
         &addr_hash,
         new_epoch,

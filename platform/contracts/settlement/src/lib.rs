@@ -17,11 +17,11 @@ pub mod types;
 
 use alloc::vec::Vec as AllocVec;
 
-use caravel_merkle::SorobanSha256;
-use caravel_types::checkpoint::{CheckpointHeaderV1, CHECKPOINT_HEADER_LEN};
-use caravel_types::fixed::mul_div_floor;
-use caravel_types::inbox::{inbox_acc_preimage, InboxKind, InboxMsgV1};
-use caravel_types::preimage::{
+use caravel_core::checkpoint::{CheckpointHeaderV1, CHECKPOINT_HEADER_LEN};
+use caravel_core::fixed::mul_div_floor;
+use caravel_core::inbox::{inbox_acc_preimage, InboxKind, InboxMsgV1};
+use caravel_core::merkle::SorobanSha256;
+use caravel_core::preimage::{
     account_leaf_preimage, rotate_message_preimage, withdrawal_leaf_preimage,
 };
 use soroban_sdk::token::TokenClient;
@@ -38,7 +38,7 @@ use types::*;
 /// `ScVal::Address(ScAddress::Account(PublicKey::Ed25519(key)))` XDR without the key (spec §13.5).
 pub const ACCOUNT_XDR_PREFIX: [u8; 12] = [0, 0, 0, 0x12, 0, 0, 0, 0, 0, 0, 0, 0];
 /// Batch size cap (spec §3.3), the same one the lane's codec enforces.
-pub const MAX_BATCH_BYTES: u32 = caravel_types::batch::MAX_BATCH_BYTES as u32;
+pub const MAX_BATCH_BYTES: u32 = caravel_core::batch::MAX_BATCH_BYTES as u32;
 
 fn sha256(env: &Env, data: &Bytes) -> BytesN<32> {
     env.crypto().sha256(data).into()
@@ -451,7 +451,7 @@ impl Settlement {
             amount,
         );
         let leaf = sha256(&env, &Bytes::from_slice(&env, &leaf_pre)).to_array();
-        if !caravel_merkle::verify(
+        if !caravel_core::merkle::verify(
             &SorobanSha256(&env),
             &leaf,
             index,
@@ -614,7 +614,7 @@ impl Settlement {
             equity,
         );
         let leaf = sha256(&env, &Bytes::from_slice(&env, &leaf_pre)).to_array();
-        if !caravel_merkle::verify(
+        if !caravel_core::merkle::verify(
             &SorobanSha256(&env),
             &leaf,
             index,

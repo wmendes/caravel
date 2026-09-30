@@ -6,7 +6,7 @@ use soroban_sdk::Event as _;
 use super::*;
 
 fn pk(seed: u8) -> [u8; 32] {
-    caravel_types::vectors::pk(seed)
+    caravel_harness::pk(seed)
 }
 
 /// A (100 USDC) and B (50 USDC) are in the lane. Checkpoint 1 says A has 120

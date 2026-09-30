@@ -39,7 +39,7 @@ fn happy_path_deposit_checkpoint_claim() {
     assert_eq!(cp.header.seq, 1);
     assert_eq!(
         cp.withdrawals,
-        std::vec![(caravel_types::vectors::pk(A), 30 * USDC)]
+        std::vec![(caravel_harness::pk(A), 30 * USDC)]
     );
     h.accept(&cp);
     let header_hash = BytesN::from_array(&h.env, &sha256(&cp.header.encode()));
@@ -73,9 +73,7 @@ fn happy_path_deposit_checkpoint_claim() {
         last.escape_total,
         cp.accounts.iter().map(|(_, e)| e).sum::<i128>()
     );
-    assert!(cp
-        .accounts
-        .contains(&(caravel_types::vectors::pk(A), 70 * USDC)));
+    assert!(cp.accounts.contains(&(caravel_harness::pk(A), 70 * USDC)));
     assert_eq!(last.inbox_through, 1);
     assert_eq!(last.accepted_at, START);
     let record = h.c().checkpoint(&1).expect("stored");
@@ -403,7 +401,7 @@ fn check_8_rejects_withdrawals_above_the_vault() {
     let mut h = Harness::new();
     h.deposit(A, 100 * USDC);
     h.sync_inbox();
-    let a = caravel_types::vectors::pk(A);
+    let a = caravel_harness::pk(A);
     let cp = h.crafted(std::vec![(a, 0)], std::vec![(a, 100 * USDC + 1)]);
     rejects(&h, &cp, Error::Insolvent);
     let cp = h.crafted(std::vec![(a, 0)], std::vec![(a, 100 * USDC)]);
@@ -418,7 +416,7 @@ fn check_8_excludes_deposits_the_lane_has_not_processed() {
     h.lane.block();
     // B's deposit is on Stellar but not in the lane: it cannot fund withdrawals.
     h.deposit(B, 50 * USDC);
-    let a = caravel_types::vectors::pk(A);
+    let a = caravel_harness::pk(A);
     let cp = h.crafted(std::vec![(a, 0)], std::vec![(a, 100 * USDC + 1)]);
     assert_eq!(cp.header.inbox_through, 1);
     rejects(&h, &cp, Error::Insolvent);
@@ -431,7 +429,7 @@ fn check_8_counts_withdrawals_not_yet_claimed() {
     let mut h = Harness::new();
     h.deposit(A, 100 * USDC);
     h.sync_inbox();
-    let a = caravel_types::vectors::pk(A);
+    let a = caravel_harness::pk(A);
     let cp = h.crafted(std::vec![(a, 40 * USDC)], std::vec![(a, 60 * USDC)]);
     h.accept(&cp);
     // 60 USDC is owed: only 40 USDC is left for new withdrawals, claimed or not.
