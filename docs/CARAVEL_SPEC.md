@@ -2026,7 +2026,7 @@ The plan of record is `~/.claude/plans/ok-but-now-i-lucky-hoare.md` (architectur
 | P-01 | Baseline: tag `perps-m0`; golden sequencer trace, fixture store, API and genesis snapshots | T-016 | review |
 | P-02 | Frozen perps engine workspace `lanes/perps/engine/` (byte-identical Wasm, tree-hash check) | P-01 | review |
 | P-03 | Moves into `platform/` and `lanes/perps/` (runtime, node, settlement, configs, web, relayer) | P-02 | review |
-| P-04 | `caravel-core`: generic codecs over the same bytes (opaque bodies, feeds, receipts, state frame) + compatibility tests | P-03 | todo |
+| P-04 | `caravel-core`: generic codecs over the same bytes (opaque bodies, feeds, receipts, state frame) + compatibility tests | P-03 | review |
 | P-05 | Runtime on `LaneApp` + `PerpsApp`: golden trace byte for byte, parity gate, fixture store opens | P-04 | todo |
 | P-06 | Node on `NodeApp`, lane-file split, `caravel-perps-node`, relayer feed module: API snapshots identical, dependency guard | P-05 | todo |
 | P-07 | Live VM upgrade to `caravel-perps-node` (check-store, shadow validator, replay) — **Gate P1** | P-06 | todo |
@@ -2162,6 +2162,21 @@ For lanes that need classic Stellar operations or SCP among many validators:
 Checked on 2026-09-30:
 - **Engine:** after the move it builds to `4571cd25…`, byte-identical, and all 109 compilation units have the same `-C metadata`.
 - **Settlement contract** (root workspace): the paths of its `caravel-types` and `caravel-merkle` dependencies changed relative to the workspace root, and with them three units' `-C metadata`. On x86_64 Linux (CI) it now builds to `8280828f…`, which becomes the settlement build of record for new lanes (`versions.json artifacts.settlement_wasm_sha256`). On macOS arm64 the two variants swapped: `8a2fafbd…`, where it was `8280828f…`. The source is unchanged. Lane #1's deployed contract keeps running `8a2fafbd…` (`lanes.perps.settlement_deployed_wasm_sha256`, reproducible from tag `perps-m0`), and every settlement move re-records the build (plan item 2, flagged at Gate P1) | The deployed lane #1 settlement contract stores `engine_wasm_hash = 4571cd25…` and rejects any other engine (§13.3 check 3), so the platform split must not change one byte of the engine. Cargo's `-C metadata`, and through it the Wasm, depend on package paths relative to the workspace root; a nested workspace with the same layout keeps every one of them | A perps engine change (then a new lane, or a migration to the app SDK) |
+| DEC-052 | **M0.5 (P-04).** The platform reads the M0 formats without knowing the app. `platform/crates/caravel-core` holds them. It is `no_std` and depends on no lane.
+
+Copied verbatim from the frozen crates (a test compares the files): codec, tags, fixed, inbox, checkpoint, step, preimage, Merkle.
+
+Reinterpreted, **bytes unchanged**:
+- **Blocks (§9.6):** entries are `Inbox | Feed | User`. Entry type 2, "oracle" in M0, is a generic signed **feed** with an opaque payload. A user entry is a `TxEnvelopeV1`: the `LaneTxV1` header with an opaque body of `body_len` bytes.
+- **Transaction kinds (§9.3):** 4 `WITHDRAW`, 5 `ADD_SESSION_KEY` and 6 `REVOKE_SESSION_KEY` are platform-standard, with the M0 bodies. 7 to 15 are reserved; 1 to 3 and 16 and up are app kinds.
+- **Receipts (§11.10):** the container is generic, and each event is `type · len · fields`. The platform events are 6 `DEPOSIT`, 7 `FORCED_WITHDRAWAL_PROCESSED` and 10 `COMMITMENT`.
+- **Code ranges:** receipt codes 0–9 and 40–59 are the platform's; 10–39 and 60+ an app's. Fatal codes 1–31 are the platform's (13 and 14 become "unknown feed key" and "duplicate feed slot"); 32+ an app's.
+- **State (§9.10):** every lane's state starts with the 209-byte frame and ends with the 160-byte `CommitmentV1`. `StateFrameV1` reads both. The perps `next_order_id` (offset 168) and `flags` (offset 208) are the app-reserved `app_word` and `app_flags`, and the magic is the app's.
+- **Vectors:** the generic ones get byte-identical copies in `platform/test-vectors/`.
+
+**Consensus is unchanged.** The engine Wasm still decodes strictly, the app's mempool check stays strict, and the generic decoder accepts everything the strict one does. `lanes/perps/node/tests/format_compat.rs` checks it on every frozen vector, the 70-block golden trace, the fixture store's states, and a 512-case byte-flip property test.
+
+`scripts/check-deps.mjs` (CI) fails if a platform package reaches `lanes/`. It lists the three remaining M0 couplings as exceptions that must shrink: `caravel-runtime` (P-05), `caravel-node` (P-06), `settlement` (P-09) | A platform that runs any app has to read blocks, receipts and states without the app's types. Reading the same bytes, instead of new formats, keeps lane #1 and its history valid | An app whose state does not fit the frame (it would need a new frame version) |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

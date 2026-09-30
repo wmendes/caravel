@@ -1,0 +1,23 @@
+[package]
+name = "caravel-core"
+description = "Caravel platform formats for any lane: codecs, block, transaction and receipt framing, checkpoint header, inbox, state frame, Merkle (no_std)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+# SHA-256 via `sha2`, for nodes and tests.
+native = ["dep:sha2"]
+# SHA-256 via the Soroban host (`env.crypto().sha256`), for contracts.
+soroban = ["dep:soroban-sdk"]
+
+[dependencies]
+sha2 = { workspace = true, optional = true }
+soroban-sdk = { workspace = true, optional = true }
+
+[dev-dependencies]
+caravel-core = { path = ".", features = ["native"] }
+proptest = "1.11.0"
+serde_json = "1.0.151"

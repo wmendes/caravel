@@ -1,0 +1,20 @@
+[package]
+name = "caravel-perps-node"
+description = "Caravel Perps node plugin: the perps app on the platform runtime (M0.5; format compatibility tests for now)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+caravel-core = { workspace = true, features = ["native"] }
+
+[dev-dependencies]
+caravel-types = { workspace = true }
+caravel-merkle = { workspace = true, features = ["alloc", "native"] }
+caravel-runtime = { workspace = true }
+caravel-testkit = { workspace = true }
+proptest = "1.11.0"
+serde_json = "1.0.151"
+tempfile = "3.27.0"
