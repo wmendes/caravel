@@ -2041,7 +2041,7 @@ The plan of record is `~/.claude/plans/ok-but-now-i-lucky-hoare.md` (architectur
 | P-07 | Live VM upgrade to `caravel-perps-node` (check-store, shadow validator, replay) — **Gate P1** | P-06 | review |
 | P-07a | Perps oracle: Coinbase's public WebSocket ticker as the first source, once per 1 s block (DEC-058) | P-07 | review |
 | P-07b | Stellar Wallets Kit replaces Freighter in the perps web app, with a local SEP-53 check (DEC-059) | P-07a | review |
-| P-08 | `caravel-app-sdk` + `testapp`, conformance with perps' standard kinds | P-07 | todo |
+| P-08 | `caravel-app-sdk` + `testapp`, conformance with perps' standard kinds | P-07 | doing |
 | P-08b | Pyth Pro feed verified in-engine in the SDK (needs format approval and a Pyth Pro subscription) | P-08 | todo |
 | P-09 | `caravel-harness`; settlement tests move off perps; new settlement build of record | P-08 | todo |
 | P-10 | Payments template: engine, vectors, scenarios, INV-PAY1, parity, node, e2e — **Gate P2** | P-09 | todo |
@@ -2057,9 +2057,9 @@ The plan of record is `~/.claude/plans/ok-but-now-i-lucky-hoare.md` (architectur
 | P-20 | Testnet e2e through the console, self-hosted and trial; RESULTS | P-18 | todo |
 | P-21 | Security pass over registry, host manager, console and SDK — **Gate P4** | P-20 | todo |
 
-### 20.4 Phase 2 consensus formats — PROPOSED, needs the human's approval (§0.4)
+### 20.4 Phase 2 consensus formats (approved by the human 2026-09-30, DEC-060)
 
-Nothing in P-08 to P-10 is built until the human approves this section. After approval these formats freeze like §9: a change needs a version bump, regenerated vectors and a DEC. They reuse the M0 conventions: little-endian, no padding, an 8-byte magic, the §9.2 transaction envelope, the §9.4 inbox, the §9.10 `CommitmentV1`, the §11.10 receipts container and the §11.8 commitment rules. The perps engine stays on its own frozen formats (DEC-051).
+The human approved this section as proposed on 2026-09-30. These formats freeze like §9 once their vectors land: a change needs a version bump, regenerated vectors and a DEC. They reuse the M0 conventions: little-endian, no padding, an 8-byte magic, the §9.2 transaction envelope, the §9.4 inbox, the §9.10 `CommitmentV1`, the §11.10 receipts container and the §11.8 commitment rules. The perps engine stays on its own frozen formats (DEC-051).
 
 #### 20.4.1 `AppGenesisV1` (genesis config for SDK apps)
 
@@ -2344,6 +2344,8 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 - **Message signatures:** wallets return them in different encodings, and some can't sign messages at all: in 2.7.0, Albedo, Rabet and Ledger throw on `signMessage`. So the app checks each one locally against the SEP-53 hash (`@noble/ed25519`) before posting it. A wallet that fails can still deposit, claim and escape, and is told trading needs a SEP-53 wallet. The engine's check is the same one; this only moves the failure out of the block.
 - **Tests:** the frozen `add_session_key_sep53_owner` vector passes the check, and a tampered, wrong-key or wrong-message signature does not; base64 and hex are both decoded; a raw-message signature and a wallet that can't sign messages are refused. Headless Chrome opened the picker against the live lane.
 - **Not yet tested:** manual testnet flows with Freighter and xBull (RESULTS) | Users bring the Stellar wallet they have. The kit covers the wallets the ecosystem uses and is the one developers.stellar.org lists | A wallet the kit lacks, or SEP-53 support changing in a wallet (the local check shows it) |
+| DEC-060 | **M0.5 Phase 2 formats, approved by the human on 2026-09-30 as proposed in §20.4:** `AppGenesisV1` (`CVAPPGN1`), the SDK state layout (`StateFrameV1` · embedded config · `AppAccountV1`s · app globals · pending · `CommitmentV1`), the SDK's standard pipeline, and Payments 0.1.0 (`CVSTPAY1`, kind 16 `TRANSFER`, codes 10–13, flat `transfer_fee` to the treasury, recipients must exist, INV-PAY1). They freeze when their vectors land (P-08, P-10) | One genesis format and one state layout for every SDK app, so the platform, the console and the registry treat templates alike. Payments is the smallest app that exercises every standard path | A template that needs feeds (P-08b), or state that doesn't fit the layout (a V2) |
+| DEC-061 | **Settlement build of record for new lanes, approved by the human on 2026-09-30:** new lanes use the platform's settlement build `8280828f…`, the Linux build since the P-03 moves (`artifacts.settlement_wasm_sha256`). Lane #1 keeps its deployed `8a2fafbd…`, reproducible from tag `perps-m0` (`lanes.perps.settlement_deployed_wasm_sha256`). The registry (P-11) approves both | The source is lane #1's; only the build paths changed. Freezing settlement as well was not worth the churn | A settlement code change, which gets its own build and DEC |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 
