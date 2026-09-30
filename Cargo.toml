@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["platform/crates/*", "platform/contracts/*"]
+members = ["platform/crates/*", "platform/contracts/*", "lanes/perps/node"]
 # The frozen Caravel Perps engine is its own workspace (DEC-051); the crates
 # here use it by path only.
 exclude = ["lanes/perps/engine"]
@@ -26,6 +26,7 @@ caravel-types = { path = "lanes/perps/engine/crates/caravel-types" }
 caravel-merkle = { path = "lanes/perps/engine/crates/caravel-merkle" }
 caravel-perps = { path = "lanes/perps/engine/crates/caravel-perps" }
 caravel-runtime = { path = "platform/crates/caravel-runtime" }
+caravel-core = { path = "platform/crates/caravel-core" }
 caravel-testkit = { path = "lanes/perps/engine/crates/caravel-testkit" }
 
 # §12.3: reproducible contract builds. opt-level 2, not "z": the engine runs

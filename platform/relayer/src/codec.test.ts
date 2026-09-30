@@ -7,8 +7,10 @@ import { describe, expect, it } from "vitest";
 import { encodeInboxMsg, encodeOracleUpdate, fromHex, inboxAccAfter, oracleSigningPreimage, sha256, toHex } from "./codec.js";
 
 type Vector = { name: string; fields: Record<string, string>; hex: string; hash: string };
-const vectors = (file: string) =>
-  JSON.parse(readFileSync(fileURLToPath(new URL(`../../../lanes/perps/engine/test-vectors/${file}`, import.meta.url)), "utf8")) as { context?: Record<string, string>; vectors: Vector[] };
+// Platform formats come from platform/test-vectors; the oracle update is the
+// perps lane's feed format (it moves to lanes/perps with the feeder, P-06).
+const vectors = (file: string, dir = "platform/test-vectors") =>
+  JSON.parse(readFileSync(fileURLToPath(new URL(`../../../${dir}/${file}`, import.meta.url)), "utf8")) as { context?: Record<string, string>; vectors: Vector[] };
 
 describe("InboxMsgV1 (test-vectors/inbox_msg.json)", () => {
   for (const v of vectors("inbox_msg.json").vectors) {
@@ -24,7 +26,7 @@ describe("InboxMsgV1 (test-vectors/inbox_msg.json)", () => {
 });
 
 describe("OracleUpdateV1 (test-vectors/oracle_update.json)", () => {
-  const file = vectors("oracle_update.json");
+  const file = vectors("oracle_update.json", "lanes/perps/engine/test-vectors");
   for (const v of file.vectors) {
     it(v.name, () => {
       const f = v.fields;

@@ -31,6 +31,8 @@ jobs:
       - run: node scripts/check-versions.mjs
       # DEC-051: the perps engine of record is frozen under lanes/perps/engine.
       - run: ./scripts/check-frozen.sh
+      # M0.5: nothing under platform/ may depend on a lane (listed exceptions shrink to none).
+      - run: node scripts/check-deps.mjs
 
   rust:
     runs-on: ubuntu-latest
@@ -73,7 +75,9 @@ jobs:
       - name: Parity gate, 10,000 random blocks (INV-P5)
         run: cargo test --locked -p caravel-runtime --test parity -- --ignored
       - name: Consensus crates build without std
-        run: cargo build --locked --manifest-path lanes/perps/engine/Cargo.toml -p caravel-types -p caravel-merkle -p caravel-perps --target wasm32v1-none
+        run: |
+          cargo build --locked --manifest-path lanes/perps/engine/Cargo.toml -p caravel-types -p caravel-merkle -p caravel-perps --target wasm32v1-none
+          cargo build --locked -p caravel-core --target wasm32v1-none
 
   apps:
     runs-on: ubuntu-latest

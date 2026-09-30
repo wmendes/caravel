@@ -29,7 +29,7 @@ fn bytes_n<const N: usize>(env: &Env, s: &str) -> BytesN<N> {
 #[test]
 fn golden_header_vector_verifies_in_the_contract() {
     let file: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../../../lanes/perps/engine/test-vectors/checkpoint_header.json"
+        "../../../../test-vectors/checkpoint_header.json"
     ))
     .unwrap();
     let v = &file["vectors"][0];
