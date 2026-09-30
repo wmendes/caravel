@@ -40,6 +40,12 @@
       "engine_tree": "9bee71fb218f6e5c4c23cf7407dded9747e8a501",
       "note": "DEC-051: the frozen Caravel Perps engine of record; its Wasm is artifacts.engine_wasm_sha256, stored by the deployed lane #1 settlement contract. Lane #1 runs settlement code settlement_deployed_wasm_sha256 (the M0 build, reproducible from tag perps-m0); new lanes use artifacts.settlement_wasm_sha256",
       "settlement_deployed_wasm_sha256": "8a2fafbd1ad48d53333ab79d73afa1c50d5f790f39a97fafb88b5443b383d503"
+    },
+    "payments": {
+      "template": "payments",
+      "engine_version": "payments/0.1.0",
+      "engine_wasm_sha256": "f83849633a65b63104673359fca2643b1e5ca5d4208b58d88aedccb01a72b29d",
+      "note": "DEC-060, DEC-064: the Payments template's engine Wasm on the app SDK (64 KB budget). Recorded from the x86_64 Linux CI build (DEC-033)."
     }
   }
 }

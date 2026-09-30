@@ -14,6 +14,7 @@ cd "$ROOT"
 
 OUT_DIR="target/contracts"
 ENGINE_BUDGET=120000   # §12.2: budget for the engine
+PAYMENTS_BUDGET=65536  # §20.4.4: budget for the payments engine
 WASM_LIMIT=131072      # §3.3: max deployable contract Wasm
 
 want_cli="$(node -p 'require("./versions.json").stellar_cli')"
@@ -26,17 +27,18 @@ fi
 rm -rf "$OUT_DIR"
 # Only the contracts of record (engine-profile is a profiling tool). The perps
 # engine builds from its frozen workspace (DEC-051), the settlement contract
-# from the root workspace.
+# and the payments engine (P-10) from the root workspace.
 stellar contract build --locked --manifest-path lanes/perps/engine/Cargo.toml --package perps-engine --out-dir "$OUT_DIR" --quiet
 stellar contract build --locked --package settlement --out-dir "$OUT_DIR" --quiet
+stellar contract build --locked --package payments-engine --out-dir "$OUT_DIR" --quiet
 
 sha256() { shasum -a 256 "$1" | awk '{print $1}'; }
-# The recorded hash, or empty while versions.json still has a placeholder.
-recorded() { node -p "const v = require('./versions.json').artifacts['$1']; v.startsWith('FILLED_BY_') ? '' : v"; }
+# The recorded hash (a versions.json path), or empty while it still has a placeholder.
+recorded() { node -p "const v = '$1'.split('.').reduce((o, k) => o[k], require('./versions.json')); v.startsWith('FILLED_BY_') ? '' : v"; }
 canonical_host=0
 [[ "$(uname -s)" == "Linux" && "$(uname -m)" == "x86_64" ]] && canonical_host=1
 status=0
-for name in perps_engine settlement; do
+for name in perps_engine settlement payments_engine; do
   wasm="$OUT_DIR/$name.wasm"
   if [[ ! -f "$wasm" ]]; then
     echo "error: $wasm was not built" >&2
@@ -45,6 +47,7 @@ for name in perps_engine settlement; do
   size=$(wc -c < "$wasm" | tr -d ' ')
   limit=$WASM_LIMIT
   [[ "$name" == "perps_engine" ]] && limit=$ENGINE_BUDGET
+  [[ "$name" == "payments_engine" ]] && limit=$PAYMENTS_BUDGET
   hash="$(sha256 "$wasm")"
   printf '%-14s %7d bytes (limit %d)  sha256 %s\n' "$name" "$size" "$limit" "$hash"
   if (( size > limit )); then
@@ -52,7 +55,11 @@ for name in perps_engine settlement; do
     status=1
   fi
   # INV-D7: the Wasm of record must reproduce exactly.
-  key="${name/perps_engine/engine}_wasm_sha256"
+  case "$name" in
+    perps_engine) key="artifacts.engine_wasm_sha256" ;;
+    settlement) key="artifacts.settlement_wasm_sha256" ;;
+    payments_engine) key="lanes.payments.engine_wasm_sha256" ;;
+  esac
   want="$(recorded "$key")"
   if [[ -n "$want" && "$want" != "$hash" ]]; then
     if (( canonical_host )); then

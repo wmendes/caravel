@@ -38,17 +38,20 @@ node scripts/check-versions.mjs         # versions.json pins, Cargo.lock/package
 ./scripts/build-contracts.sh            # builds Wasm with the pinned CLI, checks size and recorded hashes (DEC-020; hashes of record are x86_64 Linux builds from CI, DEC-033); run before the tests
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace --locked
 cargo test --locked -p caravel-perps-node --test parity -- --ignored      # 10,000-block native/Wasm parity gate (INV-P5)
+cargo test --locked -p caravel-payments-node --test parity -- --ignored   # the same gate for the payments engine (DEC-064)
 ./scripts/check-frozen.sh               # the perps engine of record is frozen under lanes/perps/engine (DEC-051)
 node scripts/check-deps.mjs             # platform/ never depends on lanes/ (M0.5; listed exceptions shrink to none)
 cargo test --workspace --locked --manifest-path lanes/perps/engine/Cargo.toml   # its vectors, scenarios and properties
 cargo build --locked --manifest-path lanes/perps/engine/Cargo.toml -p caravel-types -p caravel-merkle -p caravel-perps --target wasm32v1-none   # consensus crates stay no_std
+cargo build --locked -p caravel-core -p caravel-app-sdk -p caravel-payments --target wasm32v1-none   # and the platform's and payments'
 BENCH_ACCOUNTS=256 BENCH_ORDERS_PER_SIDE=128 BENCH_BLOCK_BYTES=12000 cargo run --release -p caravel-perps-node --example bench_full_caps   # docs/BENCHMARKS.md
 CARAVEL_INTERNAL_TOKEN=$(openssl rand -hex 16) cargo run --release -p caravel-perps-node -- sequencer --config lanes/perps/config/sequencer.local.toml   # local sequencer (local lane, DEC-037)
 cargo run --release -p caravel-perps-node -- validator --config lanes/perps/config/validator-1.local.toml   # a validator (key in keys/, never in git)
 cargo run --release -p caravel-perps-node -- check-store --config lanes/perps/config/sequencer.local.toml   # replay a node's store through the Wasm
 DURATION=3600 TPS=50 ./scripts/soak-sequencer.sh   # T-007 soak: 1 s blocks, 50 tx/s, restart halfway
 cargo run --release -p caravel-perps-node -- replay --rpc <url> --network-passphrase <p> --settlement C... --genesis-config lanes/perps/config/lane.<lane>.toml --engine-wasm target/contracts/perps_engine.wasm [--prove-escape G...]   # replay from Stellar only
-./scripts/e2e-local.sh                  # quickstart + sequencer + 3 validators + relayer (after T-011)
+./scripts/e2e-local.sh                  # quickstart + sequencer + 3 validators + relayer (after T-011); E2E_TEMPLATE=payments for the payments lane
+cargo run --release -p caravel-payments-node -- genesis --config lanes/payments/config/lane.caravel-payments.local.toml   # any template's genesis hashes
 TPS=20 DURATION=600 ./scripts/measure-testnet.sh   # §19.6 numbers on the live testnet lane (docs/RESULTS.md)
 npm --prefix platform/relayer ci && npm --prefix platform/relayer test
 npm --prefix lanes/perps/relayer-feeds ci && npm --prefix lanes/perps/relayer-feeds test   # the perps oracle feed module (DEC-053)
@@ -63,7 +66,7 @@ Git: one branch and PR per task (`t-0xx-short-name`, and `p-0x-short-name` for M
 
 ## Layout
 
-M0.5 is splitting the repo into the platform (Caravel) and its first lane (Caravel Perps), spec §20.3. Current state:
+M0.5 is splitting the repo into the platform (Caravel) and its lanes (Caravel Perps first, then the Payments template), spec §20.3. Current state:
 - `lanes/perps/engine/`: **frozen** nested workspace, the perps engine of record (DEC-051). Never edit it. It holds caravel-types, caravel-merkle, caravel-perps (engine logic), caravel-testkit (test-only: lane simulator, scenarios, `cargo gen-vectors`), contracts/perps-engine and test-vectors/.
 - `platform/` (Caravel, app-agnostic; `scripts/check-deps.mjs` keeps it off `lanes/`):
   - `crates/caravel-core` (the formats every lane shares, read without the app, DEC-052);
@@ -75,5 +78,6 @@ M0.5 is splitting the repo into the platform (Caravel) and its first lane (Carav
   - `relayer/` (TS: inbox, checkpoints, metrics, and the host for an app's feed modules, DEC-053);
   - `test-vectors/` (the platform formats' golden vectors).
 - `lanes/perps/` (Caravel Perps, lane #1): `engine/` (frozen, above), `node/` (caravel-perps-node, the lane #1 binary: `PerpsApp` and its `NodeApp`, the perps lane file, views, `tx`, `loadgen`, the golden trace and fixture store, the sequencer/validator/parity tests, format compatibility tests, `bench_full_caps`), `config/` (lane TOML files and local node configs), `deploy/testnet/` (the VM), `relayer-feeds/` (the oracle feed module the relayer loads), `web/` (the trading app).
+- `lanes/payments/` (the Payments template, on the app SDK, DEC-064): `app/` (caravel-payments, no_std), `contracts/payments-engine`, `node/` (caravel-payments-node: `PaymentsApp`, the `[payments]` lane file, `tx`, scenarios, parity, API and vector tests), `config/` (the local lane file), `test-vectors/`.
 - `scripts/`: shared build, check, deploy and e2e scripts; `infra/gcp/`: the billing cap.
 - `site/`: the landing page (Vercel project `caravel`, https://caravel-tau.vercel.app).

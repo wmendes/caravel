@@ -84,11 +84,13 @@ jobs:
       - name: Frozen perps engine tests (vectors, scenarios, properties)
         run: cargo test --workspace --locked --manifest-path lanes/perps/engine/Cargo.toml
       - name: Parity gate, 10,000 random blocks (INV-P5)
-        run: cargo test --locked -p caravel-perps-node --test parity -- --ignored
+        run: |
+          cargo test --locked -p caravel-perps-node --test parity -- --ignored
+          cargo test --locked -p caravel-payments-node --test parity -- --ignored
       - name: Consensus crates build without std
         run: |
           cargo build --locked --manifest-path lanes/perps/engine/Cargo.toml -p caravel-types -p caravel-merkle -p caravel-perps --target wasm32v1-none
-          cargo build --locked -p caravel-core -p caravel-app-sdk --target wasm32v1-none
+          cargo build --locked -p caravel-core -p caravel-app-sdk -p caravel-payments --target wasm32v1-none
 
   apps:
     runs-on: ubuntu-latest
@@ -109,12 +111,17 @@ jobs:
         run: npm --prefix lanes/perps/web run build
 
   # The local end-to-end (spec §19.5, T-011): quickstart in Docker, the lane
-  # processes, steps 1-6. It needs a release build and a 2 GB image, so it runs
-  # on main and on demand only, not on every pull request.
+  # processes, steps 1-6, for each template (P-10). It needs a release build
+  # and a 2 GB image, so it runs on main and on demand only, not on every pull
+  # request.
   e2e:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        template: [perps, payments]
     steps:
       - uses: actions/checkout@v4
       - name: Install toolchain from rust-toolchain.toml
@@ -132,6 +139,8 @@ jobs:
           tar xzf stellar-cli.tar.gz -C "$HOME/.local/bin" stellar
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: ./scripts/e2e-local.sh
+        env:
+          E2E_TEMPLATE: ${{ matrix.template }}
 
   # What the testnet VM runs (T-012, DEC-046): the node binary, the Wasm of
   # record (x86_64 Linux, DEC-033) and the relayer build, from one commit on
