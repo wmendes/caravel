@@ -15,7 +15,7 @@ Reproduce with:
 ```sh
 ./scripts/build-contracts.sh
 BENCH_ACCOUNTS=256 BENCH_ORDERS_PER_SIDE=128 BENCH_BLOCK_BYTES=12000 \
-  cargo run --release -p caravel-lane --example bench_full_caps
+  cargo run --release -p caravel-runtime --example bench_full_caps
 ```
 
 ## Full caps of the testnet lane (DEC-028)
@@ -60,7 +60,7 @@ The host's budget table showed where the cost went: `WasmInsnExec` was 585M of t
 
 ### 2. Profiling the phases
 
-A profiling contract (`contracts/engine-profile`, never deployed) meters each phase at 1,024 / 256.
+A profiling contract (`lanes/perps/engine/contracts/engine-profile`, never deployed) meters each phase at 1,024 / 256.
 
 | Phase | `opt-level = "z"` | `"s"` | `2` | `3` |
 |---|---:|---:|---:|---:|
@@ -102,7 +102,7 @@ What is left scales with state size, at about 70M for decoding and encoding 1,02
 
 ## Random workloads
 
-`cargo test -p caravel-lane --test parity -- --ignored` runs 10,050 random blocks across 50 seeded lanes. On them:
+`cargo test -p caravel-runtime --test parity -- --ignored` runs 10,050 random blocks across 50 seeded lanes. On them:
 - the Wasm and native paths produced identical state and receipt bytes at every block;
 - the heaviest block used 18.5M host CPU instructions, since these states are small.
 
@@ -127,7 +127,7 @@ The SDK's fee estimate is 7,699,033 stroops, almost all of it rent (7,682,542) f
 
 ## Sequencer soak: 1 hour at 50 tx/s (T-007)
 
-`DURATION=3600 TPS=50 ./scripts/soak-sequencer.sh` on 2026-09-29, same machine. The sequencer ran the local lane (DEC-037) with 1 s blocks through the engine Wasm of record. The load generator (`crates/caravel-node/examples/loadgen.rs`) sent 24 accounts' orders, IOC takers, cancels and small withdrawals, plus signed oracle updates every 2 s. There was no Stellar and there were no validators, so checkpoints were sealed but not signed. Halfway through, the sequencer was stopped and started again.
+`DURATION=3600 TPS=50 ./scripts/soak-sequencer.sh` on 2026-09-29, same machine. The sequencer ran the local lane (DEC-037) with 1 s blocks through the engine Wasm of record. The load generator (`platform/crates/caravel-node/examples/loadgen.rs`) sent 24 accounts' orders, IOC takers, cancels and small withdrawals, plus signed oracle updates every 2 s. There was no Stellar and there were no validators, so checkpoints were sealed but not signed. Halfway through, the sequencer was stopped and started again.
 
 | Measure | Result |
 |---|---:|

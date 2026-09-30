@@ -52,15 +52,15 @@ For engine or API work. Checkpoints are sealed but never signed or submitted.
 
 ```sh
 CARAVEL_INTERNAL_TOKEN=$(openssl rand -hex 16) \
-  ./target/release/caravel-node sequencer --config config/sequencer.local.toml
+  ./target/release/caravel-node sequencer --config lanes/perps/config/sequencer.local.toml
 # in another shell: accounts funded through the internal API, prices, orders
 CARAVEL_INTERNAL_TOKEN=<same> cargo run --release -p caravel-node --example loadgen -- \
-  --url http://127.0.0.1:8080 --lane config/lane.caravel-perps.local.toml --tps 20 --duration-secs 60
+  --url http://127.0.0.1:8080 --lane lanes/perps/config/lane.caravel-perps.local.toml --tps 20 --duration-secs 60
 ```
 
-State goes to `data/sequencer.sqlite`; delete it to start again from genesis. `caravel-node check-store --config config/sequencer.local.toml` re-executes the whole store through the engine Wasm and checks every block and checkpoint header.
+State goes to `data/sequencer.sqlite`; delete it to start again from genesis. `caravel-node check-store --config lanes/perps/config/sequencer.local.toml` re-executes the whole store through the engine Wasm and checks every block and checkpoint header.
 
-The web app runs against it with `npm --prefix apps/web run dev` (see `apps/web/env.local.example`).
+The web app runs against it with `npm --prefix lanes/perps/web run dev` (see `lanes/perps/web/env.local.example`).
 
 ## 2. Run a validator
 
@@ -91,7 +91,7 @@ stellar keys secret my-validator > keys/my-validator.key && chmod 600 keys/my-va
 
 ### 2.3 Config
 
-`config/my-validator.toml` (paths relative to the file):
+`lanes/perps/config/my-validator.toml` (paths relative to the file):
 
 ```toml
 [validator]
@@ -113,7 +113,7 @@ The node refuses a mainnet passphrase. Take `engine_wasm_sha256` and the contrac
 ### 2.4 Run and check
 
 ```sh
-RUST_LOG=info ./target/release/caravel-node validator --config config/my-validator.toml
+RUST_LOG=info ./target/release/caravel-node validator --config lanes/perps/config/my-validator.toml
 ```
 
 It catches up from block 1, then follows live. On 2026-09-29, a laptop following the testnet lane with this exact config caught up about 6,150 blocks in 14 minutes. Compare with the sequencer at the same height:
@@ -131,7 +131,7 @@ curl -s https://35-224-76-64.sslip.io/v1/blocks/<height> | jq -r .state_hash_aft
 - **Suspicious blocks** (`suspicious_blocks` is not empty): a live block failed a policy check (its timestamp is too far from the validator's clock, or an oracle entry is too old). The validator keeps following but refuses to sign a checkpoint that contains it (`SUSPICIOUS_BLOCK`). After looking at the reason, clear it and restart:
 
   ```sh
-  ./target/release/caravel-node validator-clear --config config/my-validator.toml --through <height>
+  ./target/release/caravel-node validator-clear --config lanes/perps/config/my-validator.toml --through <height>
   ```
 
 - **Never two headers for one seq.** Every signed `(seq, header_hash)` is stored before the reply, and the validator refuses a different header for a seq it signed (`EQUIVOCATION`). Never delete a signing validator's database to "fix" this; it is what makes signing safe.
@@ -163,7 +163,7 @@ One e2-small VM (`caravel-1`, `us-central1-a`, project `caravel-testnet`) runs e
 First time:
 
 ```sh
-gcloud compute scp deploy/testnet/provision.sh caravel-1:/tmp/ --zone us-central1-a --project caravel-testnet --tunnel-through-iap
+gcloud compute scp lanes/perps/deploy/testnet/provision.sh caravel-1:/tmp/ --zone us-central1-a --project caravel-testnet --tunnel-through-iap
 gcloud compute ssh caravel-1 --zone us-central1-a --project caravel-testnet --tunnel-through-iap --command 'sudo bash /tmp/provision.sh'
 ```
 
@@ -176,9 +176,9 @@ gh run download <run id> -n caravel-release-linux-x86_64 -D /tmp/release
 RELEASE_DIR=/tmp/release ./scripts/deploy-vm.sh     # first time: INIT_KEYS=1
 ```
 
-- It checks the release's `SHA256SUMS` and both Wasm hashes, copies the binaries, contracts, relayer, configs (`deploy/testnet/`), systemd units and Caddyfile, and restarts the services.
+- It checks the release's `SHA256SUMS` and both Wasm hashes, copies the binaries, contracts, relayer, configs (`lanes/perps/deploy/testnet/`), systemd units and Caddyfile, and restarts the services.
 - `INIT_KEYS=1` copies the validator, relayer and oracle secrets from your keystore to `/opt/caravel/keys` (mode 600, owner `caravel`) and creates the internal API token. Secrets never enter git or the release.
-- The stores in `/opt/caravel/data` stay. A new release must open them. Check the store schema in `crates/caravel-lane/src/store.rs` before deploying one that changes it.
+- The stores in `/opt/caravel/data` stay. A new release must open them. Check the store schema in `platform/crates/caravel-runtime/src/store.rs` before deploying one that changes it.
 - If the release has a `web/` directory, Caddy serves it at `/`, which publishes the web app. Remove `web/` from the release directory to deploy without it.
 
 Status and logs:
@@ -207,7 +207,7 @@ The project has a monthly budget of R$100 with alerts at 50%, 90% and 100%. At 1
    NEW=$(for g in G..1 G..2 G..NEW; do raw "$g"; done | sort | jq -R '{key: ., weight: 1}' | jq -sc '{signers: ., threshold: 2}')
    ```
 
-   (Run it where `@stellar/stellar-sdk` resolves, e.g. `apps/relayer`.)
+   (Run it where `@stellar/stellar-sdk` resolves, e.g. `platform/relayer`.)
 3. Rotate:
 
    ```sh
@@ -215,7 +215,7 @@ The project has a monthly budget of R$100 with alerts at 50%, 90% and 100%. At 1
    stellar contract invoke --id <settlement> --source-account caravel-admin --network testnet --send=no -- epoch
    ```
 
-4. Update the sequencer's `[signers]`: `epoch` = the new epoch, and the validator list (key and URL). On the VM that is `deploy/testnet/sequencer.toml`, deployed with `deploy-vm.sh`. Restart the sequencer.
+4. Update the sequencer's `[signers]`: `epoch` = the new epoch, and the validator list (key and URL). On the VM that is `lanes/perps/deploy/testnet/sequencer.toml`, deployed with `deploy-vm.sh`. Restart the sequencer.
 5. On start, the sequencer sends every checkpoint that was signed by the old set and not accepted yet back for signatures (log: `checkpoints signed under an older epoch go back for signatures`). The header does not hold the epoch, so the old signatures of validators that stay in the set still count; only the new validator is asked. The relayer then submits them with the new epoch.
 6. Check that the next checkpoints are accepted: `curl -s <api>/v1/checkpoints/<seq> | jq '{status, epoch}'`.
 
@@ -268,7 +268,7 @@ Rebuilds the lane from Stellar data only and checks every hash (spec §16):
 ./target/release/caravel-node replay --rpc https://soroban-testnet.stellar.org \
   --network-passphrase "Test SDF Network ; September 2015" \
   --settlement CBIHBEUZYFZQZEQPBJH2ID6CDRDZFEDI6XHAXVOCHG6FO5XWUIGPONWO \
-  --genesis-config config/lane.caravel-perps.testnet.toml \
+  --genesis-config lanes/perps/config/lane.caravel-perps.testnet.toml \
   --engine-wasm target/contracts/perps_engine.wasm \
   [--prove-escape G...] [--prove-withdrawals G...]
 ```

@@ -22,7 +22,7 @@ echo "work dir: $WORK"
 cargo build --release --locked -p caravel-node --bin caravel-node --example loadgen
 BIN="$ROOT/target/release/caravel-node"
 LOADGEN="$ROOT/target/release/examples/loadgen"
-LANE="$ROOT/config/lane.caravel-perps.local.toml"
+LANE="$ROOT/lanes/perps/config/lane.caravel-perps.local.toml"
 HASH="$(node -p 'require("./versions.json").artifacts.engine_wasm_sha256')"
 
 cat > "$WORK/sequencer.toml" <<EOF

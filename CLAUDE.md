@@ -37,34 +37,37 @@ Toolchain: Rust 1.93.0 + `wasm32v1-none` (from `rust-toolchain.toml`), Stellar C
 node scripts/check-versions.mjs         # versions.json pins, Cargo.lock/package-lock, placeholders (§7)
 ./scripts/build-contracts.sh            # builds Wasm with the pinned CLI, checks size and recorded hashes (DEC-020; hashes of record are x86_64 Linux builds from CI, DEC-033); run before the tests
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace --locked
-cargo test --locked -p caravel-lane --test parity -- --ignored      # 10,000-block native/Wasm parity gate (INV-P5)
+cargo test --locked -p caravel-runtime --test parity -- --ignored      # 10,000-block native/Wasm parity gate (INV-P5)
 ./scripts/check-frozen.sh               # the perps engine of record is frozen under lanes/perps/engine (DEC-051)
 cargo test --workspace --locked --manifest-path lanes/perps/engine/Cargo.toml   # its vectors, scenarios and properties
 cargo build --locked --manifest-path lanes/perps/engine/Cargo.toml -p caravel-types -p caravel-merkle -p caravel-perps --target wasm32v1-none   # consensus crates stay no_std
-BENCH_ACCOUNTS=256 BENCH_ORDERS_PER_SIDE=128 BENCH_BLOCK_BYTES=12000 cargo run --release -p caravel-lane --example bench_full_caps   # docs/BENCHMARKS.md
-CARAVEL_INTERNAL_TOKEN=$(openssl rand -hex 16) cargo run --release -p caravel-node -- sequencer --config config/sequencer.local.toml   # local sequencer (local lane, DEC-037)
-cargo run --release -p caravel-node -- validator --config config/validator-1.local.toml   # a validator (key in keys/, never in git)
-cargo run --release -p caravel-node -- check-store --config config/sequencer.local.toml   # replay a node's store through the Wasm
+BENCH_ACCOUNTS=256 BENCH_ORDERS_PER_SIDE=128 BENCH_BLOCK_BYTES=12000 cargo run --release -p caravel-runtime --example bench_full_caps   # docs/BENCHMARKS.md
+CARAVEL_INTERNAL_TOKEN=$(openssl rand -hex 16) cargo run --release -p caravel-node -- sequencer --config lanes/perps/config/sequencer.local.toml   # local sequencer (local lane, DEC-037)
+cargo run --release -p caravel-node -- validator --config lanes/perps/config/validator-1.local.toml   # a validator (key in keys/, never in git)
+cargo run --release -p caravel-node -- check-store --config lanes/perps/config/sequencer.local.toml   # replay a node's store through the Wasm
 DURATION=3600 TPS=50 ./scripts/soak-sequencer.sh   # T-007 soak: 1 s blocks, 50 tx/s, restart halfway
-cargo run --release -p caravel-node -- replay --rpc <url> --network-passphrase <p> --settlement C... --genesis-config config/lane.<lane>.toml --engine-wasm target/contracts/perps_engine.wasm [--prove-escape G...]   # replay from Stellar only
+cargo run --release -p caravel-node -- replay --rpc <url> --network-passphrase <p> --settlement C... --genesis-config lanes/perps/config/lane.<lane>.toml --engine-wasm target/contracts/perps_engine.wasm [--prove-escape G...]   # replay from Stellar only
 ./scripts/e2e-local.sh                  # quickstart + sequencer + 3 validators + relayer (after T-011)
 TPS=20 DURATION=600 ./scripts/measure-testnet.sh   # §19.6 numbers on the live testnet lane (docs/RESULTS.md)
-npm --prefix apps/relayer ci && npm --prefix apps/relayer test
-npm --prefix apps/relayer run build && node apps/relayer/dist/main.js --config config/relayer.local.json   # needs CARAVEL_INTERNAL_TOKEN, CARAVEL_RELAYER_SECRET, CARAVEL_ORACLE_SECRET
-npm --prefix apps/web ci && npm --prefix apps/web test && npm --prefix apps/web run build
+npm --prefix platform/relayer ci && npm --prefix platform/relayer test
+npm --prefix platform/relayer run build && node platform/relayer/dist/main.js --config lanes/perps/config/relayer.local.json   # needs CARAVEL_INTERNAL_TOKEN, CARAVEL_RELAYER_SECRET, CARAVEL_ORACLE_SECRET
+npm --prefix lanes/perps/web ci && npm --prefix lanes/perps/web test && npm --prefix lanes/perps/web run build
 WASM_DIR=<CI contracts-wasm artifact> ./scripts/deploy-testnet.sh   # T-012: deploy contracts + witness (refuses to redeploy)
 RELEASE_DIR=<CI release artifact> ./scripts/deploy-vm.sh            # install on the testnet VM (INIT_KEYS=1 the first time)
 (cd site && vercel deploy --prod)       # landing page only, never from the repo root (DEC-019)
 ```
 
-Git: one branch and PR per task (`t-0xx-short-name`). Inside a phase, PRs stack on the previous task's branch, and the human reviews at the phase gates (T-003, T-006, T-011, T-016).
+Git: one branch and PR per task (`t-0xx-short-name`, and `p-0x-short-name` for M0.5). Inside a phase, PRs stack on the previous task's branch, and the human reviews at the phase gates (M0: T-003, T-006, T-011, T-016; M0.5: P-07, P-10, P-16, P-21).
 
 ## Layout
 
 M0.5 is splitting the repo into the platform (Caravel) and its first lane (Caravel Perps), spec §20.3. Current state:
 - `lanes/perps/engine/`: **frozen** nested workspace, the perps engine of record (DEC-051). Never edit it. It holds caravel-types, caravel-merkle, caravel-perps (engine logic), caravel-testkit (test-only: lane simulator, scenarios, `cargo gen-vectors`), contracts/perps-engine and test-vectors/.
-- `crates/`: caravel-lane (executor, store), caravel-node (sequencer / validator / replay / genesis).
-- `contracts/`: settlement.
-- `apps/`: relayer (TS), web (React).
-- `config/`: lane TOML files.
+- `platform/` (Caravel, app-agnostic; still perps-coupled until P-04 to P-06):
+  - `crates/caravel-runtime` (executor, store, sequencer and validator cores, checkpoints; formerly caravel-lane);
+  - `crates/caravel-node` (sequencer / validator / replay / genesis);
+  - `contracts/settlement`;
+  - `relayer/` (TS).
+- `lanes/perps/` (Caravel Perps, lane #1): `engine/` (frozen, above), `config/` (lane TOML files and local node configs), `deploy/testnet/` (the VM), `web/` (the trading app).
+- `scripts/`: shared build, check, deploy and e2e scripts; `infra/gcp/`: the billing cap.
 - `site/`: the landing page (Vercel project `caravel`, https://caravel-tau.vercel.app).

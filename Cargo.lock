@@ -429,24 +429,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "caravel-lane"
-version = "0.1.0"
-dependencies = [
- "caravel-merkle",
- "caravel-perps",
- "caravel-testkit",
- "caravel-types",
- "ed25519-dalek",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "soroban-env-host",
- "stellar-strkey 0.0.16",
- "tempfile",
-]
-
-[[package]]
 name = "caravel-merkle"
 version = "0.1.0"
 dependencies = [
@@ -460,9 +442,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
- "caravel-lane",
  "caravel-merkle",
  "caravel-perps",
+ "caravel-runtime",
  "caravel-testkit",
  "caravel-types",
  "clap",
@@ -490,6 +472,24 @@ dependencies = [
  "caravel-types",
  "ed25519-dalek",
  "sha2",
+]
+
+[[package]]
+name = "caravel-runtime"
+version = "0.1.0"
+dependencies = [
+ "caravel-merkle",
+ "caravel-perps",
+ "caravel-testkit",
+ "caravel-types",
+ "ed25519-dalek",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "soroban-env-host",
+ "stellar-strkey 0.0.16",
+ "tempfile",
 ]
 
 [[package]]

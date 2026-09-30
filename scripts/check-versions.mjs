@@ -30,7 +30,7 @@ function depVersion(line) {
 
 // Two workspaces: the root and the frozen perps engine (DEC-051). Both pin
 // the same crates, and their locks resolve them to the same versions.
-function checkWorkspace(ws) {
+function checkWorkspace(ws, memberRoots) {
   const at = (p) => (ws === "." ? p : join(ws, p));
   const cargoToml = read(at("Cargo.toml"));
   const wsDeps = new Map();
@@ -46,7 +46,7 @@ function checkWorkspace(ws) {
   }
 
   // Members must inherit pinned crates from the workspace, never restate a version.
-  const memberDirs = ["crates", "contracts"].flatMap((d) =>
+  const memberDirs = memberRoots.flatMap((d) =>
     existsSync(join(root, at(d))) ? readdirSync(join(root, at(d))).map((m) => join(at(d), m)) : [],
   );
   for (const dir of memberDirs) {
@@ -73,8 +73,8 @@ function checkWorkspace(ws) {
     if (have.length > 1 && !ALLOWED_DUPLICATES.has(name)) fail(`${at("Cargo.lock")} has several versions of ${name}: ${have.join(", ")}`);
   }
 }
-checkWorkspace(".");
-checkWorkspace("lanes/perps/engine");
+checkWorkspace(".", ["platform/crates", "platform/contracts"]);
+checkWorkspace("lanes/perps/engine", ["crates", "contracts"]);
 
 // --- Toolchain ---------------------------------------------------------------
 const toolchain = read("rust-toolchain.toml").match(/channel\s*=\s*"([^"]+)"/)?.[1];
@@ -82,12 +82,13 @@ if (toolchain !== versions.rust_toolchain) fail(`rust-toolchain.toml channel ${t
 if (!read("rust-toolchain.toml").includes(`"${versions.wasm_target}"`)) fail(`rust-toolchain.toml does not list target ${versions.wasm_target}`);
 
 // --- npm: exact pins in package.json and package-lock.json ------------------
-const apps = existsSync(join(root, "apps")) ? readdirSync(join(root, "apps")) : [];
+// npm apps: the platform relayer and the perps web app (M0.5 layout).
+const apps = ["platform/relayer", "lanes/perps/web"].filter((d) => existsSync(join(root, d, "package.json")));
 for (const app of apps) {
-  const pkgPath = join("apps", app, "package.json");
+  const pkgPath = join(app, "package.json");
   if (!existsSync(join(root, pkgPath))) continue;
   const pkg = JSON.parse(read(pkgPath));
-  const lockPath = join("apps", app, "package-lock.json");
+  const lockPath = join(app, "package-lock.json");
   const pkgLock = existsSync(join(root, lockPath)) ? JSON.parse(read(lockPath)) : null;
   if (!pkgLock) fail(`${lockPath} is missing`);
   const deps = { ...pkg.dependencies, ...pkg.devDependencies };
