@@ -95,7 +95,7 @@ export function txHash(tx: LaneTx, configHash: Uint8Array): Uint8Array {
   return sha256(concat(TAG_TX, configHash, signingBytes(tx)));
 }
 
-/** The text a SEP-53 wallet (Freighter `signMessage`) signs for scheme 1. */
+/** The text a SEP-53 wallet (`signMessage` through Stellar Wallets Kit) signs for scheme 1. */
 export function sep53Message(hash: Uint8Array): string {
   let hex = "";
   for (const x of hash) hex += x.toString(16).padStart(2, "0");

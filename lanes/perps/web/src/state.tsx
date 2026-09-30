@@ -97,7 +97,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const disconnect = useCallback(() => setAddress(null), []);
+  const disconnect = useCallback(() => {
+    setAddress(null);
+    void wallet.disconnect();
+  }, []);
 
   return <Ctx.Provider value={{ status, statusError, markets, onChain, frozen, address, connecting, walletError, key, connect, disconnect, setKey }}>{children}</Ctx.Provider>;
 }

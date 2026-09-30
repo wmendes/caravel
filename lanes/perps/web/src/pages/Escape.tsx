@@ -88,7 +88,7 @@ export function Escape() {
       </div>
       {!address ? (
         <button className="btn harbor" onClick={() => void connect()}>
-          Connect Freighter
+          Connect a wallet
         </button>
       ) : (
         <div className="two">
@@ -142,7 +142,7 @@ export function Escape() {
                     }
                   }}
                 >
-                  {busy ? "Waiting for Freighter…" : "Claim on Stellar"}
+                  {busy ? "Waiting for your wallet…" : "Claim on Stellar"}
                 </button>
               </>
             )}

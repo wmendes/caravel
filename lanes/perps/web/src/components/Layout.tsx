@@ -31,7 +31,7 @@ export function Layout({ children }: { children: ReactNode }) {
           </button>
         ) : (
           <button className="btn small harbor" onClick={() => void connect()} disabled={connecting}>
-            {connecting ? "Connecting…" : "Connect Freighter"}
+            {connecting ? "Connecting…" : "Connect wallet"}
           </button>
         )}
       </header>

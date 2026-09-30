@@ -79,7 +79,7 @@ A public **testnet** demo of Caravel Perps. It has:
 - one sequencer and three independent validators. The validators re-execute every block and co-sign checkpoints, with a 2-of-3 weighted threshold;
 - a relayer that bridges Stellar events and transactions;
 - a replay CLI that rebuilds the lane from Stellar data alone and checks every checkpoint;
-- a web app: connect Freighter, deposit testnet USDC, trade 3 markets, withdraw, and use the escape hatch.
+- a web app: connect a Stellar wallet (Stellar Wallets Kit since M0.5), deposit testnet USDC, trade 3 markets, withdraw, and use the escape hatch.
 
 ### 1.3 Non-goals for M0
 
@@ -140,7 +140,7 @@ All values below were checked on 2026-09-29 unless dated otherwise. Anything mar
 | `stellar-strkey` | Caravel pins **0.0.16** (`soroban-sdk 28.0.0` requires it). `soroban-env-host 28.0.2` also pulls 0.0.13, an upstream duplicate (DEC-018) | crates.io dependency API |
 | Stellar CLI | 28.1.0 (2026-09-26); builds contracts for `wasm32v1-none` | crates.io, GitHub releases |
 | `@stellar/stellar-sdk` | 17.2.0 | npm |
-| `@stellar/freighter-api` | 6.0.1 | npm |
+| `@creit.tech/stellar-wallets-kit` | 2.7.0 | npm (replaced `@stellar/freighter-api` 6.0.1 in M0.5, DEC-059) |
 | Rust | 1.93.0 (MSRV of stellar-cli 28.1.0; soroban-sdk 28.0.0 needs ≥ 1.91). Contracts target `wasm32v1-none`: checked 2026-09-29 with `stellar contract build --print-commands-only` | crates.io `rust_version`, stellar-cli |
 | Testnet passphrase | `Test SDF Network ; September 2015` | Stellar docs |
 | Testnet RPC | `https://soroban-testnet.stellar.org` | Stellar docs |
@@ -206,7 +206,7 @@ Consequences, used throughout this spec:
 ```text
                         ┌──────────────────────────── LANE (Caravel Perps, 1s blocks) ─────────────────────────────┐
  Browser (web app)      │                                                                                          │
-  ├ Freighter (owner) ──┼─► Sequencer (caravel-perps-node sequencer)                                               │
+  ├ Wallet (owner) ─────┼─► Sequencer (caravel-perps-node sequencer)                                               │
   └ session key ────────┼─►  ├ mempool → BlockInputV1 every block_time_ms                                         │
                         │    ├ executes engine Wasm via soroban-env-host  (StateV1 → StateV1)                     │
                         │    ├ persists block + state (SQLite) before broadcasting                                │
@@ -280,7 +280,7 @@ Consequences, used throughout this spec:
    - The engine computes commitments, the sequencer builds header and batch, and validators verify and sign.
    - The relayer submits `submit_checkpoint(header, batch, epoch, signatures)`.
 4. **Withdraw:**
-   - The user signs `WITHDRAW` with Freighter (SEP-53), and the engine debits collateral into the pending withdrawal list.
+   - The user signs `WITHDRAW` with their wallet (SEP-53), and the engine debits collateral into the pending withdrawal list.
    - At the checkpoint, the list becomes `withdrawals_root`.
    - After the checkpoint is accepted, the web app fetches a proof and calls `claim_withdrawal` on Stellar.
 5. **Forced withdrawal (anti-censorship):**
@@ -400,7 +400,7 @@ Create this file in T-000 and keep it current. CI fails if a `Cargo.toml` or `pa
   },
   "npm": {
     "@stellar/stellar-sdk": "17.2.0",
-    "@stellar/freighter-api": "6.0.1",
+    "@creit.tech/stellar-wallets-kit": "2.7.0",
     "lightweight-charts": "5.2.1",
     "@noble/ed25519": "3.2.0",
     "@noble/hashes": "2.4.0"
@@ -1793,7 +1793,7 @@ The perps lane's feed module, `lanes/perps/relayer-feeds` (DEC-053). The relayer
 
 ### 18.1 Stack and brand
 
-- React + Vite + TypeScript, with `@stellar/stellar-sdk` 17.2.0, `@stellar/freighter-api` 6.0.1, `@noble/ed25519` 3.2.0 and `@noble/hashes` 2.4.0. Use `lightweight-charts` 5.2.1 for the price chart (versions pinned in `versions.json` and `lanes/perps/web/package.json`).
+- React + Vite + TypeScript, with `@stellar/stellar-sdk` 17.2.0, `@creit.tech/stellar-wallets-kit` 2.7.0 (DEC-059; `@stellar/freighter-api` 6.0.1 in M0), `@noble/ed25519` 3.2.0 and `@noble/hashes` 2.4.0. Use `lightweight-charts` 5.2.1 for the price chart (versions pinned in `versions.json` and `lanes/perps/web/package.json`).
 - Brand: the Caravel design system.
   - Font: Schibsted Grotesk 400/700.
   - Dark theme ("Stage") by default. Tokens:
@@ -1819,18 +1819,19 @@ The perps lane's feed module, `lanes/perps/relayer-feeds` (DEC-053). The relayer
 
 ### 18.3 Flows
 
-- **Connect:** `requestAccess` → `getAddress`. Require the testnet network via `getNetworkDetails`, otherwise show instructions. Check the USDC trustline and link to the Circle testnet faucet.
-- **Deposit:** contract client `deposit({from, amount, lane_account: raw key of from})`, then `signTransaction` via Freighter, then send. Wait for the lane to credit it (poll `/v1/accounts`).
+All wallet calls go through Stellar Wallets Kit 2.7.0 (DEC-059), loaded on first use: `StellarWalletsKit.init({modules: defaultModules(), network, theme})`, `authModal()`, `getAddress()`, `getNetwork()`, `signTransaction(xdr, {networkPassphrase, address})` → `{signedTxXdr}` and `signMessage(message, {networkPassphrase, address})` → `{signedMessage}` (checked in its typings, 2026-09-30).
+- **Connect:** the kit's wallet picker (`authModal`). Refuse a wallet whose `getNetwork()` is another network; a wallet that can't report its network is trusted with the passphrase sent on every signature. Check the USDC trustline and link to the Circle testnet faucet.
+- **Deposit:** contract client `deposit({from, amount, lane_account: raw key of from})`, then `signTransaction` in the wallet, then send. Wait for the lane to credit it (poll `/v1/accounts`).
 - **Enable fast trading:**
   1. Generate an ed25519 session key (`@noble/ed25519`) and store it in IndexedDB. This is acceptable on testnet; label it "trading key on this device".
-  2. Sign `ADD_SESSION_KEY` (`PERM_TRADE|PERM_CANCEL`, 24h expiry) with Freighter `signMessage` (scheme 1, message format §9.2).
-  3. POST it.
-  - freighter-api 6.0.1 (checked 2026-09-29 in its typings): `signMessage(message, {networkPassphrase, address})` returns `{signedMessage, signerAddress, error?}`, where `signedMessage` is a `Buffer` (v3 response) or a base64 string (v4); `signTransaction(xdr, {networkPassphrase, address})` returns `{signedTxXdr, signerAddress}`; `getNetworkDetails()` returns `{network, networkUrl, networkPassphrase, sorobanRpcUrl?}`.
+  2. Sign `ADD_SESSION_KEY` (`PERM_TRADE|PERM_CANCEL`, 24h expiry) with the wallet's `signMessage` (scheme 1, message format §9.2).
+  3. Check the signature before using it: decode it (base64 or hex, 64 bytes) and verify it against the SEP-53 hash with the account's key. A wallet that fails, or can't sign messages (Albedo, Rabet and Ledger in the kit), is told that trading needs a SEP-53 wallet; deposits, claims and escape still work with it.
+  4. POST it.
 - **Order:** build `PLACE_ORDER` with the next nonce (from `/v1/accounts`, then tracked locally), sign with the session key (scheme 0), POST, and show the receipt from the WS stream.
 - **Withdraw:**
-  1. Sign `WITHDRAW` with Freighter (scheme 1).
+  1. Sign `WITHDRAW` with the wallet (scheme 1, checked as above).
   2. After the next accepted checkpoint, fetch `/v1/proofs/withdrawals`.
-  3. Call `claim_withdrawal` via Freighter.
+  3. Call `claim_withdrawal` through the wallet.
 - **Nonce handling:** on `BAD_NONCE`, refetch the account and retry once.
 
 ### 18.4 TS codec
@@ -2039,7 +2040,7 @@ The plan of record is `~/.claude/plans/ok-but-now-i-lucky-hoare.md` (architectur
 | P-06 | Node on `NodeApp`, lane-file split, `caravel-perps-node`, relayer feed module: API snapshots identical, dependency guard | P-05 | review |
 | P-07 | Live VM upgrade to `caravel-perps-node` (check-store, shadow validator, replay) — **Gate P1** | P-06 | review |
 | P-07a | Perps oracle: Coinbase's public WebSocket ticker as the first source, once per 1 s block (DEC-058) | P-07 | doing |
-| P-07b | Stellar Wallets Kit replaces Freighter in the perps web app, with a local SEP-53 check (DEC-059) | P-07a | todo |
+| P-07b | Stellar Wallets Kit replaces Freighter in the perps web app, with a local SEP-53 check (DEC-059) | P-07a | doing |
 | P-08 | `caravel-app-sdk` + `testapp`, conformance with perps' standard kinds | P-07 | todo |
 | P-08b | Pyth Pro feed verified in-engine in the SDK (needs format approval and a Pyth Pro subscription) | P-08 | todo |
 | P-09 | `caravel-harness`; settlement tests move off perps; new settlement build of record | P-08 | todo |
@@ -2247,6 +2248,12 @@ The lane file is a node input, not a consensus format. The bytes it produces are
 - **Trust:** prices are still signed by the team's oracle key, and the web app says they come from Coinbase.
 
 Pyth was the first choice. Hermes has required a Pyth Terminal API key since 2026-08-26 (it answered 401 when checked), and Pyth Pro needs a subscription. Both are paid after a trial, so the human chose Coinbase. Pyth Pro verified in-engine stays planned for new lanes (P-08b) | Free and sub-second, with no key and no new paid resource. The fallbacks keep a price when the stream drops | A subscription to a signed oracle (Pyth Pro, P-08b), or sub-second blocks, since one price per market per block caps what a faster feed can add |
+| DEC-059 | **M0.5 (P-07b).** The perps web app connects any Stellar wallet through Stellar Wallets Kit 2.7.0 (`@creit.tech/stellar-wallets-kit`, MIT), instead of Freighter only.
+- **Wallet layer:** `src/api/wallet.ts` keeps its functions (connect, current, the network check, `signSep53`, `signTx`), so the pages are unchanged apart from saying "wallet" instead of "Freighter".
+- **Loading:** the kit loads on first use, with `defaultModules()` (the wallets that need no extra setup; WalletConnect, Ledger and Trezor need configuration and are left out) and its dark theme. The main bundle did not grow (1,003,601 bytes against 1,012,212).
+- **Message signatures:** wallets return them in different encodings, and some can't sign messages at all: in 2.7.0, Albedo, Rabet and Ledger throw on `signMessage`. So the app checks each one locally against the SEP-53 hash (`@noble/ed25519`) before posting it. A wallet that fails can still deposit, claim and escape, and is told trading needs a SEP-53 wallet. The engine's check is the same one; this only moves the failure out of the block.
+- **Tests:** the frozen `add_session_key_sep53_owner` vector passes the check, and a tampered, wrong-key or wrong-message signature does not; base64 and hex are both decoded; a raw-message signature and a wallet that can't sign messages are refused. Headless Chrome opened the picker against the live lane.
+- **Not yet tested:** manual testnet flows with Freighter and xBull (RESULTS) | Users bring the Stellar wallet they have. The kit covers the wallets the ecosystem uses and is the one developers.stellar.org lists | A wallet the kit lacks, or SEP-53 support changing in a wallet (the local check shows it) |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

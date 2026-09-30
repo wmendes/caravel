@@ -1,7 +1,7 @@
 /**
  * Building, signing and sending lane transactions (spec §18.3). Trades and
  * cancels use the device's session key when one is enabled; everything else
- * (withdrawals, enabling the key) is signed in Freighter with SEP-53.
+ * (withdrawals, enabling the key) is signed in your wallet with SEP-53.
  */
 import { StrKey } from "@stellar/stellar-sdk";
 
@@ -62,7 +62,7 @@ export async function send(ids: LaneIds, g: string, body: TxBody, key: session.S
   }
 }
 
-/** Creates a trading key and registers it with a Freighter-signed ADD_SESSION_KEY. */
+/** Creates a trading key and registers it with a wallet-signed ADD_SESSION_KEY. */
 export async function enableSessionKey(ids: LaneIds, g: string): Promise<session.SessionKey> {
   const key = await session.create(g);
   await send(ids, g, { kind: "add_session_key", sessionKey: fromHex(key.publicHex), expiresAtMs: BigInt(key.expiresAtMs), permissions: PERM_TRADE | PERM_CANCEL }, null);

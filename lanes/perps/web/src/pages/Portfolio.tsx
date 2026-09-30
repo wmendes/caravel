@@ -26,10 +26,10 @@ export function Portfolio() {
     return (
       <div className="prose">
         <h1>Portfolio</h1>
-        <p className="muted">Connect Freighter to see your USDC on Stellar and your lane account.</p>
+        <p className="muted">Connect a wallet to see your USDC on Stellar and your lane account.</p>
         <div>
           <button className="btn harbor" onClick={() => void connect()}>
-            Connect Freighter
+            Connect a wallet
           </button>
         </div>
       </div>
@@ -69,7 +69,7 @@ export function Portfolio() {
         <section className="panel" style={{ marginBottom: 16 }}>
           <h3>Get testnet USDC</h3>
           <p>
-            Add the USDC asset (<span className="mono">{config.usdcAsset}</span>) in Freighter, then get testnet USDC from the{" "}
+            Add the USDC asset (<span className="mono">{config.usdcAsset}</span>) in your wallet, then get testnet USDC from the{" "}
             <a href={config.faucetUrl} target="_blank" rel="noreferrer">
               Circle faucet
             </a>{" "}
@@ -126,7 +126,7 @@ function Deposit({ address }: { address: string }) {
           })
         }
       >
-        {busy ? "Waiting for Freighter…" : "Deposit on Stellar"}
+        {busy ? "Waiting for your wallet…" : "Deposit on Stellar"}
       </button>
       {msg && <p className={msg.ok ? "ok" : "error"}>{msg.text}</p>}
     </section>
@@ -140,7 +140,7 @@ function Withdraw({ address, ids, account }: { address: string; ids: ReturnType<
   return (
     <section className="panel stack">
       <h3>Withdraw</h3>
-      <p className="note">Signed in Freighter. The amount leaves your lane collateral now and becomes claimable on Stellar after the next accepted checkpoint (about a minute).</p>
+      <p className="note">Signed in your wallet. The amount leaves your lane collateral now and becomes claimable on Stellar after the next accepted checkpoint (about a minute).</p>
       <div className="field">
         <label htmlFor="wd">Amount (USDC)</label>
         <input id="wd" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={account ? usdc(account.free_collateral).replace(/,/g, "") : "0"} />
@@ -155,7 +155,7 @@ function Withdraw({ address, ids, account }: { address: string; ids: ReturnType<
           }, explainReject)
         }
       >
-        {busy ? "Waiting for Freighter…" : "Withdraw from the lane"}
+        {busy ? "Waiting for your wallet…" : "Withdraw from the lane"}
       </button>
       {msg && <p className={msg.ok ? "ok" : "error"}>{msg.text}</p>}
     </section>

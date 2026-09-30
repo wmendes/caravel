@@ -1,4 +1,4 @@
-// The Stellar SDK and Freighter pass bytes as Node Buffers; browsers have none.
+// The Stellar SDK and wallet libraries pass bytes as Node Buffers; browsers have none.
 import { Buffer } from "buffer";
 (globalThis as { Buffer?: typeof Buffer }).Buffer ??= Buffer;
 
