@@ -21,6 +21,7 @@ pub mod cli;
 pub mod deploy;
 pub mod local;
 pub mod manifest;
+pub mod ops;
 pub mod plan;
 pub mod release;
 pub mod render;

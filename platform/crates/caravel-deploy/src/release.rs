@@ -103,16 +103,23 @@ impl Release {
     }
 }
 
-/// The checkout this binary runs from: the first directory up from the
-/// current one that has `versions.json` and `platform/`.
+/// The checkout: the first directory, up from the current one or else up
+/// from this binary's, that has `versions.json` and `platform/`.
 pub fn find_repo() -> Result<PathBuf> {
-    let mut dir = std::env::current_dir()?;
-    loop {
-        if dir.join("versions.json").exists() && dir.join("platform").is_dir() {
-            return Ok(dir);
-        }
-        if !dir.pop() {
-            bail!("no Caravel checkout here; pass --release-dir <CI release>");
+    let is_repo = |d: &Path| d.join("versions.json").exists() && d.join("platform").is_dir();
+    let exe = std::env::current_exe()
+        .ok()
+        .and_then(|e| std::fs::canonicalize(e).ok());
+    for start in [std::env::current_dir().ok(), exe].into_iter().flatten() {
+        let mut dir = start;
+        loop {
+            if is_repo(&dir) {
+                return Ok(dir);
+            }
+            if !dir.pop() {
+                break;
+            }
         }
     }
+    bail!("no Caravel checkout here or around this binary; pass --release-dir <CI release>")
 }

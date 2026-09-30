@@ -8,10 +8,12 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const USAGE: &str = "usage: caravel <plan|apply> <lane file> --env <name> [options]
+const USAGE: &str = "usage: caravel <plan|apply|status|destroy> <lane file> --env <name> [options]
 
-  plan    show what apply would change on Stellar and on the host
-  apply   make them match the lane file's [env.<name>] deployment
+  plan     show what apply would change on Stellar and on the host
+  apply    make them match the lane file's [env.<name>] deployment
+  status   health, checkpoints, when a freeze would be possible, drift
+  destroy  drain, export every exit to exit.json, freeze (for good)
 
 Run `caravel-<template>-node <command> --help` for a command's options.";
 

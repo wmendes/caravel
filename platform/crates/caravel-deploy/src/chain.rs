@@ -20,7 +20,13 @@ pub struct Extra {
     pub latest_ledger: u32,
     /// `LastCkpt`: seq and the ledger time it was accepted.
     pub last_checkpoint: Option<(u64, u64)>,
+    /// `LastCkpt.inbox_through`: inbox messages the lane has processed.
+    pub inbox_through: u64,
     pub inbox_count: u64,
+    /// When the oldest inbox message the lane hasn't processed was enqueued.
+    pub oldest_unprocessed_at: Option<u64>,
+    /// The relayer account's XLM, in stroops.
+    pub relayer_balance: Option<i64>,
     /// Entries and the last ledger each lives until.
     pub ttl: Vec<(&'static str, u32)>,
 }
@@ -89,6 +95,9 @@ pub async fn read(rpc: &Rpc, d: &Desired) -> Result<(Chain, Extra)> {
             chain.accounts.insert(*key);
         }
     }
+    if let Some(LedgerEntryData::Account(a)) = e[1].as_ref().map(|e| &e.data) {
+        extra.relayer_balance = Some(a.balance);
+    }
     chain.usdc_exists = e[2].is_some();
     chain.settlement_wasm_uploaded = e[3].is_some();
     if let Some(entry) = &e[3] {
@@ -128,11 +137,22 @@ pub async fn read(rpc: &Rpc, d: &Desired) -> Result<(Chain, Extra)> {
             u64_of(field(lc, "seq")?, "seq")?,
             u64_of(field(lc, "accepted_at")?, "accepted_at")?,
         ));
+        extra.inbox_through = u64_of(field(lc, "inbox_through")?, "inbox_through")?;
     }
     extra.inbox_count = get("InboxCount")
         .map(|v| u64_of(v, "InboxCount"))
         .transpose()?
         .unwrap_or(0);
+    if extra.inbox_count > extra.inbox_through {
+        let key = variant("Inbox", vec![ScVal::U64(extra.inbox_through)]);
+        let (m, _) = rpc
+            .ledger_entries(&[persistent_key(&d.settlement, key)])
+            .await?;
+        if let Some(v) = contract_data(&m[0]) {
+            let msg = map(v, "InboxMsg")?;
+            extra.oldest_unprocessed_at = Some(u64_of(field(msg, "enqueued_at")?, "enqueued_at")?);
+        }
+    }
     // The current signer set, a second read.
     let (s, _) = rpc
         .ledger_entries(&[persistent_key(

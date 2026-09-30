@@ -149,3 +149,11 @@ CI release `c6f9b48` was deployed at height 49,926, with checkpoint 927 accepted
 - **Wallets (DEC-059):**
   - The web app now connects through Stellar Wallets Kit. The new bundle is served, and headless Chrome opened the kit's picker against the live lane.
   - Manual flows with real wallets are pending: connect, deposit, enable trading (SEP-53), trade, withdraw and claim, with Freighter and xBull.
+
+## Node groundwork on lane #1 (M0.5 P-11, 2026-09-30)
+
+CI release `2159e7a` (DEC-065) was installed with `deploy-vm.sh` at height about 77,800. The release adds status fields, `export-proofs` and vendored relayer dependencies, and changes nothing in consensus. The human judged the full preflight unnecessary for it, so `check-store` and the shadow validator were stopped before they finished.
+
+- The sequencer and validator 1 report `release.commit` `2159e7ad…`, with `config_hash` `f4b9db09…`, engine `4571cd25…` and settlement `CBIHBEUZ…` as before.
+- Checkpoints 1393 and 1394 were accepted within a minute of the restart, with signed equal to accepted, and no node halted.
+- `COMMIT` and `SHA256SUMS` are now in `/opt/caravel`, and the relayer ran from its vendored `node_modules`, with no `npm` on the VM.

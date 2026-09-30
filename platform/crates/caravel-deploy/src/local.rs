@@ -346,6 +346,42 @@ impl Local {
         Ok(())
     }
 
+    /// Runs the host's node binary with `args` and returns its stdout.
+    pub fn run_node(&self, args: &[&str]) -> Result<String> {
+        let bin = self
+            .root
+            .join("bin")
+            .join(crate::release::node_binary(&self.template));
+        let out = Command::new(&bin)
+            .args(args)
+            .output()
+            .with_context(|| format!("running {}", bin.display()))?;
+        if !out.status.success() {
+            bail!(
+                "{} {}: {}",
+                bin.display(),
+                args.first().unwrap_or(&""),
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
+        }
+        Ok(String::from_utf8(out.stdout)?)
+    }
+
+    /// A node's `/v1/status`, if it answers.
+    pub async fn status(&self, port: u16) -> Option<serde_json::Value> {
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(3))
+            .build()
+            .ok()?;
+        http.get(format!("http://127.0.0.1:{port}/v1/status"))
+            .send()
+            .await
+            .ok()?
+            .json()
+            .await
+            .ok()
+    }
+
     pub fn log_tail(&self, node: &str) -> String {
         std::fs::read_to_string(self.root.join("logs").join(format!("{node}.log")))
             .map(|t| {
