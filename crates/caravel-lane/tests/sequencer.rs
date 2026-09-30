@@ -136,6 +136,33 @@ fn restart_resumes_from_sqlite() {
 }
 
 #[test]
+fn a_rotation_sends_old_epoch_signatures_back_for_signing() {
+    let mut t = T::native();
+    busy_lane(&mut t, 25);
+    let store = t.core.store_mut();
+    store.set_signed(1, 1, "[]").unwrap();
+    store.set_accepted(1, "tx1", 7).unwrap();
+    store.set_signed(2, 1, "[\"old\"]").unwrap();
+    // The same epoch changes nothing.
+    assert!(store.unsign_before_epoch(1).unwrap().is_empty());
+    // Epoch 2: the signed-but-not-accepted checkpoint waits for signatures
+    // again, keeping the old ones for reuse; the accepted one stays accepted.
+    assert_eq!(store.unsign_before_epoch(2).unwrap(), vec![2]);
+    let row = store.checkpoint(2).unwrap().unwrap();
+    assert_eq!(
+        (row.status, row.epoch, row.sigs.as_deref()),
+        (CheckpointStatus::Sequenced, None, Some("[\"old\"]"))
+    );
+    assert_eq!(
+        store.checkpoint(1).unwrap().unwrap().status,
+        CheckpointStatus::Accepted
+    );
+    store.set_signed(2, 2, "[\"new\"]").unwrap();
+    assert!(store.unsign_before_epoch(2).unwrap().is_empty());
+    assert_eq!(store.checkpoint(2).unwrap().unwrap().epoch, Some(2));
+}
+
+#[test]
 fn a_different_lane_database_is_refused() {
     let (state, _) = genesis();
     let dir = tempfile::tempdir().unwrap();
