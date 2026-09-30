@@ -49,6 +49,8 @@ cargo run --release -p caravel-node -- replay --rpc <url> --network-passphrase <
 npm --prefix apps/relayer ci && npm --prefix apps/relayer test
 npm --prefix apps/relayer run build && node apps/relayer/dist/main.js --config config/relayer.local.json   # needs CARAVEL_INTERNAL_TOKEN, CARAVEL_RELAYER_SECRET, CARAVEL_ORACLE_SECRET
 npm --prefix apps/web ci && npm --prefix apps/web test && npm --prefix apps/web run build
+WASM_DIR=<CI contracts-wasm artifact> ./scripts/deploy-testnet.sh   # T-012: deploy contracts + witness (refuses to redeploy)
+RELEASE_DIR=<CI release artifact> ./scripts/deploy-vm.sh            # install on the testnet VM (INIT_KEYS=1 the first time)
 (cd site && vercel deploy --prod)       # landing page only, never from the repo root (DEC-019)
 ```
 

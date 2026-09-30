@@ -10,3 +10,4 @@ pub mod sequencer;
 pub mod stellar_rpc;
 pub mod txcli;
 pub mod validator;
+pub mod witness;

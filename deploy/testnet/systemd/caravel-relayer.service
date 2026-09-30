@@ -1,0 +1,21 @@
+[Unit]
+Description=Caravel relayer (testnet)
+After=network-online.target caravel-sequencer.service
+Wants=network-online.target
+
+[Service]
+User=caravel
+Group=caravel
+EnvironmentFile=/opt/caravel/keys/env
+WorkingDirectory=/opt/caravel/relayer
+ExecStart=/usr/bin/node /opt/caravel/relayer/dist/main.js --config /opt/caravel/config/relayer.json
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/caravel/data
+
+[Install]
+WantedBy=multi-user.target

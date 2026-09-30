@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { FixedPrice, firstFresh, parseDecimal, pricePerLot, roundHalfEven, snapToTick, type PriceSource } from "./prices.js";
+import { FixedPrice, ReflectorPrice, firstFresh, parseDecimal, pricePerLot, roundHalfEven, snapToTick, type PriceSource } from "./prices.js";
 
 // The testnet lane's markets (config/lane.caravel-perps.testnet.toml).
 const BTC = { lot: 10_000n, decimals: 8, tick: 1_000n };
@@ -56,5 +56,23 @@ describe("source priority", () => {
 
   it("fails when nothing is fresh", async () => {
     await expect(firstFresh([stale, broken], 900, 10_000)).rejects.toThrow(/stale: 10000s old; Error: down/);
+  });
+});
+
+describe("Reflector source", () => {
+  it("reuses a quote for 30 s instead of asking RPC every tick", async () => {
+    let calls = 0;
+    let now = 1_000_000;
+    const reader = { lastPrice: async () => (calls++, { price: 8_358_052_750_414_796_421n, timestamp: 1_790_714_100n }) };
+    const src = new ReflectorPrice(reader, "BTC", 14, 30, () => now);
+    const q = await src.quote();
+    expect(q.usd).toEqual({ num: 8_358_052_750_414_796_421n, den: 10n ** 14n });
+    expect(q.observedAt).toBe(1_790_714_100);
+    now += 29_000;
+    await src.quote();
+    expect(calls).toBe(1);
+    now += 2_000;
+    await src.quote();
+    expect(calls).toBe(2);
   });
 });

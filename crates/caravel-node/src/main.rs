@@ -49,6 +49,22 @@ enum Command {
         #[arg(long)]
         prove_withdrawals: Option<String>,
     },
+    /// Print the witness `step` input (T-012) and the exact output the
+    /// executor gives for it, as JSON.
+    Witness {
+        /// The lane TOML.
+        #[arg(long)]
+        lane: PathBuf,
+        /// The engine Wasm of record.
+        #[arg(long)]
+        engine_wasm: PathBuf,
+        /// The G... account the block deposits to.
+        #[arg(long)]
+        depositor: String,
+        /// Block timestamp (ms); defaults to now.
+        #[arg(long)]
+        timestamp_ms: Option<u64>,
+    },
     /// Sign a lane transaction with an account's key file and submit it.
     Tx(caravel_node::txcli::TxArgs),
     /// Run a validator (spec §15): follow, re-execute, sign, serve proofs.
@@ -183,6 +199,29 @@ fn main() -> Result<()> {
                 }
                 anyhow::Ok(())
             })?;
+        }
+        Command::Witness {
+            lane,
+            engine_wasm,
+            depositor,
+            timestamp_ms,
+        } => {
+            let lane = caravel_node::lane_toml::LaneFile::load(&lane)?;
+            let (_, config_bytes, _) = caravel_node::lane_toml::genesis(&lane)?;
+            let g = caravel_types::config::GenesisConfigV1::decode(&config_bytes)
+                .map_err(|_| anyhow::anyhow!("config"))?;
+            let wasm = std::fs::read(&engine_wasm)?;
+            let hash = caravel_lane::checkpoint::sha256(&wasm);
+            let exec =
+                caravel_lane::WasmExecutor::new(wasm, hash, g.exec_cpu_limit, g.exec_mem_limit)?;
+            let key = caravel_node::lane_toml::parse_account(&depositor)?;
+            let ts = timestamp_ms.unwrap_or_else(caravel_node::sequencer::now_ms);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&caravel_node::witness::witness(
+                    &lane, &exec, key, ts
+                )?)?
+            );
         }
         Command::Tx(args) => {
             tokio::runtime::Builder::new_current_thread()
