@@ -2039,8 +2039,8 @@ The plan of record is `~/.claude/plans/ok-but-now-i-lucky-hoare.md` (architectur
 | P-05 | Runtime on `LaneApp` + `PerpsApp`: golden trace byte for byte, parity gate, fixture store opens | P-04 | review |
 | P-06 | Node on `NodeApp`, lane-file split, `caravel-perps-node`, relayer feed module: API snapshots identical, dependency guard | P-05 | review |
 | P-07 | Live VM upgrade to `caravel-perps-node` (check-store, shadow validator, replay) — **Gate P1** | P-06 | review |
-| P-07a | Perps oracle: Coinbase's public WebSocket ticker as the first source, once per 1 s block (DEC-058) | P-07 | doing |
-| P-07b | Stellar Wallets Kit replaces Freighter in the perps web app, with a local SEP-53 check (DEC-059) | P-07a | doing |
+| P-07a | Perps oracle: Coinbase's public WebSocket ticker as the first source, once per 1 s block (DEC-058) | P-07 | review |
+| P-07b | Stellar Wallets Kit replaces Freighter in the perps web app, with a local SEP-53 check (DEC-059) | P-07a | review |
 | P-08 | `caravel-app-sdk` + `testapp`, conformance with perps' standard kinds | P-07 | todo |
 | P-08b | Pyth Pro feed verified in-engine in the SDK (needs format approval and a Pyth Pro subscription) | P-08 | todo |
 | P-09 | `caravel-harness`; settlement tests move off perps; new settlement build of record | P-08 | todo |
