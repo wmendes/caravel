@@ -145,7 +145,7 @@ The SDK's fee estimate is 7,699,033 stroops, almost all of it rent (7,682,542) f
 
 ## Payments engine: the costliest block (P-10, 2026-09-30)
 
-Same machine. The payments engine Wasm (`f8384963…b29d`, 48,434 bytes, the macOS build; DEC-064) at the local payments lane's limits: 256 accounts, 512 pending withdrawals, 12,000-byte blocks, a 200M CPU limit. The block is a checkpoint over all 256 accounts and a full withdrawal queue, filled with SEP-53-signed transfers. That makes it the costliest block the limits allow: both commitment trees at their largest, and the extra hash of each SEP-53 signature.
+Same machine. The payments engine Wasm (`f8384963…b29d`, 48,434 bytes; the macOS build and the x86_64 Linux build of record agree, DEC-064) at the local payments lane's limits: 256 accounts, 512 pending withdrawals, 12,000-byte blocks, a 200M CPU limit. The block is a checkpoint over all 256 accounts and a full withdrawal queue, filled with SEP-53-signed transfers. That makes it the costliest block the limits allow: both commitment trees at their largest, and the extra hash of each SEP-53 signature.
 
 Reproduce with `cargo test -p caravel-payments-node --test parity a_full_block -- --nocapture` after `./scripts/build-contracts.sh`.
 

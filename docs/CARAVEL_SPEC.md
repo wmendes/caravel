@@ -2363,7 +2363,7 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 | DEC-064 | **M0.5 (P-10).** Caravel Payments, the second template (§20.4.4), is built on the app SDK and runs on the generic node with no payments code in `platform/`.
 - **Crates:**
   - `lanes/payments/app` (`caravel-payments`, no_std): the `AppEngine`;
-  - `lanes/payments/contracts/payments-engine`: the contract, 48,434 bytes of its 65,536 budget. Its sha256 `f8384963…` is from a macOS arm64 build; the x86_64 Linux build from CI is the one of record (DEC-033), checked at Gate P2;
+  - `lanes/payments/contracts/payments-engine`: the contract, 48,434 bytes of its 65,536 budget, sha256 `f8384963…`. The x86_64 Linux build of record from CI (DEC-033, run 36738100913) and the macOS build agree;
   - `lanes/payments/node` (`caravel-payments-node`): `PaymentsApp` as `LaneApp` and `NodeApp`, the account view (`balance`, `next_nonce`, `session_keys`), the `[payments]` lane-file section, and `tx transfer|withdraw`.
 - **Local lane:** `lanes/payments/config/lane.caravel-payments.local.toml`, with the public fixture treasury key (seed `0x22`). lane_id `5528e7c7…`, config_hash `8c16d400…`, genesis_state_hash `589cb7a6…`.
 - **Tests** (`lanes/payments/node/tests/`):
