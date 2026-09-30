@@ -2055,7 +2055,7 @@ This drops the lane registry contract, the console and its web packages, hosted 
 | P-14 | `status` and `destroy`; `e2e-local.sh` driven by the tool for both templates (DEC-068) — **Gate P3** | P-13 | review |
 | P-15 | The `ssh` provider: prerequisites check, IAP transport, systemd, Caddy, template extras (DEC-069) | P-14 | review |
 | P-16 | Lane #1 under the tool: its `[env.testnet]` in its lane file, a plan with no Stellar changes, the host configs normalized by `apply` (DEC-070) | P-15 | review |
-| P-17 | A payments lane on testnet from its lane file, through the whole lifecycle; RESULTS; the `stellar-caravel` plugin | P-16 | todo |
+| P-17 | A payments lane on testnet from its lane file, through the whole lifecycle; RESULTS (DEC-071) | P-16 | review |
 | P-18 | README, spec and landing copy (after the human approves the claims); security pass over the tool — **Gate P4** | P-17 | todo |
 
 ### 20.4 Phase 2 consensus formats (approved by the human 2026-09-30, DEC-060)
@@ -2480,6 +2480,18 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - the 5 nodes restarted over ssh in about 4 minutes;
   - afterwards the plan reports "No changes", checkpoints keep being accepted with signed equal to accepted, oracle prices stay under 9 s old, and the web app answers.
 - **The imperative VM path is gone:** `scripts/deploy-vm.sh`, `scripts/vm-preflight.sh` and the hand-written node configs in `lanes/perps/deploy/testnet/`. `provision.sh` stays for a new host. The units and the Caddyfile stay as exact copies of what lane #1 runs, and a test checks them against the renderer. The RUNBOOK now upgrades and rotates through `caravel apply` | One way to change a lane: the lane file | — |
+| DEC-071 | **M0.5 (P-17).** A payments lane on Stellar testnet from its lane file, through its whole lifecycle.
+- **`--wasm-dir`** (plan, apply, status, destroy) takes the contracts from CI's `contracts-wasm` artifact (the x86_64 Linux builds of record, DEC-033) while the binaries come from this checkout. A macOS machine can then deploy the settlement build of record `fb68ee32…` instead of pinning its own build.
+- **The run:** `E2E_NETWORK=testnet E2E_TEMPLATE=payments E2E_WASM_DIR=<CI artifact> ./scripts/e2e-local.sh` on 2026-09-30, using the `local` provider against testnet, passed in 215 s:
+  - `caravel apply` deployed `CDVVLXV6T5LBIQUS2KHYD7C6UMUBMIOLG4O27G6UMMQXYGJTTPXO47PX` at its derived address;
+  - Circle's USDC came from the testnet DEX;
+  - deposits, a transfer with its fee, and a withdrawal claimed on Stellar;
+  - the lane file's validator swap was applied as a rotation, with checkpoints 6 and 7 accepted under epoch 2;
+  - a forced withdrawal was claimed;
+  - `caravel destroy` froze the lane 10 s after its trigger;
+  - both users escaped from `exit.json` at 1:1;
+  - replay from Stellar covered 11 checkpoints.
+- **An e2e race, found and fixed:** a relayer given SIGINT finishes the step it is in, which can be a submission. So step 4b now waits for the relayer to exit before choosing the stale checkpoint. The first attempt left its throwaway test contract `CAKOSGUC…` unfrozen, holding only test funds | The same file-driven lifecycle works on the real network | — |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

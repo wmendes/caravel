@@ -8,8 +8,9 @@
 #
 # With E2E_NETWORK=testnet the lane gets a settlement contract of its own (the
 # demo lane's is never touched) and Circle's testnet USDC, bought with
-# friendbot XLM on the testnet DEX. It deploys this machine's settlement build
-# (pinned in the lane file) unless E2E_RELEASE_DIR names a CI release.
+# friendbot XLM on the testnet DEX. E2E_WASM_DIR=<CI contracts-wasm artifact>
+# deploys the Wasm of record (DEC-033); without it (or E2E_RELEASE_DIR), the
+# lane file pins this machine's settlement build.
 #
 #   0. `caravel apply`: accounts, USDC, the settlement contract at its derived
 #      address, node configs, 3 validators, the sequencer, the relayer;
@@ -60,6 +61,7 @@ V1="http://127.0.0.1:$((SEQ_PORT + 1))"
 USDC=10000000
 RELEASE=()
 [[ -n "${E2E_RELEASE_DIR:-}" ]] && RELEASE=(--release-dir "$E2E_RELEASE_DIR")
+[[ -n "${E2E_WASM_DIR:-}" ]] && RELEASE+=(--wasm-dir "$E2E_WASM_DIR")
 
 log() { printf '\n== %s\n' "$*"; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -131,7 +133,7 @@ log "lane file"
 # The template's lane file with an [env.e2e] deployment: short timeouts, so the
 # freeze in step 5 comes within a minute (spec §24's drill uses the same idea).
 PIN=""
-[[ "$E2E_NETWORK" == testnet && -z "${E2E_RELEASE_DIR:-}" ]] && PIN="settlement_wasm = \"$(shasum -a 256 target/contracts/settlement.wasm | awk '{print $1}')\""
+[[ "$E2E_NETWORK" == testnet && -z "${E2E_RELEASE_DIR:-}${E2E_WASM_DIR:-}" ]] && PIN="settlement_wasm = \"$(shasum -a 256 target/contracts/settlement.wasm | awk '{print $1}')\""
 {
   cat "$LANE_SRC"
   cat <<EOF
@@ -263,7 +265,10 @@ log "4b. validator 3 replaced by validator 4 in the lane file; caravel apply rot
 # submitted: after the rotation, the sequencer must have it signed again by the
 # new set (older epochs are invalid at once).
 RUN="$WORK/.caravel/$(awk -F'"' '/^name/ {print $2; exit}' "$LANE")/e2e"
-kill -INT "$(cat "$RUN/run/relayer.pid")"
+RELAYER_PID="$(cat "$RUN/run/relayer.pid")"
+kill -INT "$RELAYER_PID"
+# It finishes the step it is in first, which can be a submission: wait until it exits.
+until_ok "the relayer to stop" sh -c "! kill -0 $RELAYER_PID"
 until_ok "a checkpoint signed but not submitted" sh -c "curl -sf $SEQ/v1/status | jq -e '(.checkpoints.signed // \"0\" | tonumber) > (.checkpoints.accepted // \"0\" | tonumber)'"
 stale="$(lane_get /v1/status | jq -r .checkpoints.signed)"
 sed -i.bak 's/^name = "3"$/name = "4"/; s/^key = "validator-3"$/key = "validator-4"/' "$LANE"
