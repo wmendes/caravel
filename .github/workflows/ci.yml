@@ -36,7 +36,18 @@ jobs:
 
   rust:
     runs-on: ubuntu-latest
+    # Two workspaces (root and the frozen engine) build debug targets here, and
+    # the runner's disk ran out linking caravel-perps-node (ld bus error). Tests
+    # need no debug info; the Wasm builds use the release profile, unaffected.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
+      - name: Free disk space (preinstalled SDKs Caravel does not use)
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h / | tail -1
       - uses: actions/checkout@v4
       - name: Install toolchain from rust-toolchain.toml
         run: rustup toolchain install && rustup show active-toolchain
