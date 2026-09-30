@@ -110,7 +110,7 @@ This section governs README text, UI copy, pitch material generated from code, a
   - forced position closes through the inbox are M1 (T-M1-08).
 - "Audited", "production", "mainnet", "first ever".
 
-### 2.4 What the platform may claim (M0.5, proposed 2026-09-30, awaiting the human's approval)
+### 2.4 What the platform may claim (M0.5, approved by the human on 2026-09-30)
 
 > Caravel deploys and runs appchains ("lanes") that settle to Stellar, from one lane file, each in the token it chooses: a Stellar asset (through its Stellar Asset Contract) or any SEP-41 token contract whose transfers move exact amounts. `caravel plan` shows every change on Stellar and on the host before it is made; `caravel apply` makes it; `caravel destroy` winds a lane down to a frozen contract and gives every account its exit proof. Each lane's engine is Soroban Wasm, run through `soroban-env-host` by the sequencer and independently by each validator. Every checkpoint, with its block data, is posted to Stellar and accepted only with the validators' threshold signature. Anyone can rebuild a lane from Stellar data alone. The token stays in the lane's settlement contract; if the lane stops checkpointing or ignores deposits and forced withdrawals sent through Stellar, anyone can freeze it, and users take their last checkpointed balance back on Stellar. The token's own rules still apply (an asset issuer's freeze or clawback reaches the contract's balance too). This is testnet software: a lane's admin can still upgrade its contract and rotate its validators, and lane #1's three validators all run on one machine operated by the Caravel team.
 
