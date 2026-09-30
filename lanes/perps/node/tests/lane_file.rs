@@ -131,20 +131,20 @@ fn a_node_refuses_an_engine_the_lane_file_does_not_name() {
 
 /// A deployment block, as `[env.<name>]` tables look in a manifest.
 const ENV_BLOCK: &str = r#"
-[env.testnet]
+[env.other]
 network = "testnet"
 admin = "caravel-admin"
 usdc = "circle"
 threshold = 2
-[env.testnet.settlement_params]
+[env.other.settlement_params]
 force_inclusion_window_secs = 3600
-[[env.testnet.validators]]
+[[env.other.validators]]
 name = "v1"
 key = "caravel-validator-1"
-[env.testnet.host]
+[env.other.host]
 provider = "ssh"
 address = "caravel@example.invalid"
-[env.local]
+[env.other2]
 network = "local"
 "#;
 

@@ -169,30 +169,21 @@ gcloud compute ssh caravel-1 --zone us-central1-a --project caravel-testnet --tu
 
 `provision.sh` installs Caddy and Node.js (checked against `SHASUMS256.txt`), and creates the unprivileged `caravel` user, `/opt/caravel` and 1 GB of swap.
 
-Deploy or upgrade a release:
+Deploy or upgrade a release with the deploy tool (M0.5 P-16, DEC-070). Lane #1's deployment is the `[env.testnet]` table in `lanes/perps/config/lane.caravel-perps.testnet.toml`:
 
 ```sh
 gh run download <run id> -n caravel-release-linux-x86_64 -D /tmp/release
-RELEASE_DIR=/tmp/release ./scripts/deploy-vm.sh     # first time: INIT_KEYS=1
+L=lanes/perps/config/lane.caravel-perps.testnet.toml
+./target/release/caravel plan $L --env testnet --release-dir /tmp/release --diff   # what would change; changes nothing
+./target/release/caravel apply $L --env testnet --release-dir /tmp/release         # asks, then installs and restarts
+./target/release/caravel status $L --env testnet --release-dir /tmp/release
 ```
 
-- It checks the release's `SHA256SUMS` and both Wasm hashes, copies the binaries, contracts, relayer, configs (`lanes/perps/deploy/testnet/`), systemd units and Caddyfile, and restarts the services.
-- `INIT_KEYS=1` copies the validator, relayer and oracle secrets from your keystore to `/opt/caravel/keys` (mode 600, owner `caravel`) and creates the internal API token. Secrets never enter git or the release.
+- The plan reads Stellar and the VM (over `gcloud compute ssh --tunnel-through-iap`) and lists every step. A release step installs the binary, contracts, relayer (with its `node_modules`), feed module and web app, then restarts every node. Nothing on Stellar changes unless the lane file's signers changed.
+- The keys come from your Stellar keystore (`caravel-validator-1..3`, `caravel-relayer`, `caravel-oracle`). They stream over the ssh connection into `/opt/caravel/keys` (mode 600, owner `caravel`), and the internal API token there is kept. Secrets never enter git, the release or your disk.
 - The stores in `/opt/caravel/data` stay. A new release must open them. Check the store schema in `platform/crates/caravel-runtime/src/store.rs` before deploying one that changes it.
-- If the release has a `web/` directory, Caddy serves it at `/`, which publishes the web app. Remove `web/` from the release directory to deploy without it.
-
-Before an upgrade that changes the node or its configs (M0.5 P-07), check the release against the live lane first. Nothing live changes:
-
-```sh
-RELEASE_DIR=/tmp/release ./scripts/vm-preflight.sh                 # stage, check-store a DB copy, start the shadow
-RELEASE_DIR=/tmp/release STEP=compare ./scripts/vm-preflight.sh    # once caught up: every header must match
-STEP=stop ./scripts/vm-preflight.sh                                  # stop the shadow before deploy-vm.sh
-```
-
-- `check-store` re-executes a copy of the live sequencer database with the release's binary and lane file.
-- The shadow is the release's validator, the transient unit `caravel-shadow` on `127.0.0.1:8094`. It follows the live sequencer from block 1 with a throwaway key that is in no signer set. At start it checks the settlement contract's config against the release's lane file (spec §24 item 9).
-- `compare` fails on any checkpoint header that differs from the sequencer's, a halt or a suspicious block. Deploy only after it passes on every checkpoint since genesis and on live ones.
-- Everything stays under `/opt/caravel/staging/<commit>`; remove it after the upgrade. To roll back, run `deploy-vm.sh` with the previous release.
+- For a release that could change execution (the engine or the lane's consensus sections), first re-execute a copy of the live store on the VM with the new binary: `caravel-perps-node check-store --config <a sequencer config pointing at the copy>`. The human chose not to require this for other releases (P-11).
+- To roll back, apply with the previous release.
 
 Status and logs:
 
@@ -212,6 +203,8 @@ The project has a monthly budget of R$100 with alerts at 50%, 90% and 100%. At 1
 
 `admin_rotate_signers(new)` installs a new signer set at once and makes every older set invalid immediately (`MinValidEpoch = Epoch`, spec §13.2). It cannot reuse a set that was ever installed. The e2e script runs this procedure as step 4b.
 
+With the deploy tool (DEC-068, DEC-070), the whole procedure is a lane-file edit: in `[env.testnet]`, replace the validator (for example `name = "3"`, `key = "caravel-validator-3"` becomes `name = "4"`, `key = "caravel-validator-4"`), then run `caravel plan` and `caravel apply`. Apply starts the new validator, calls `admin_rotate_signers`, restarts the sequencer with the new epoch and stops the old validator, in that order, and a re-run after an interruption finishes the job. The manual steps below are what it does.
+
 1. Generate the new key (§2.2) and, if it is a new machine, start its validator (§2) so it catches up.
 2. Build the new set: raw hex keys (not `G...`), sorted, weight 1, threshold 2.
 
@@ -228,7 +221,7 @@ The project has a monthly budget of R$100 with alerts at 50%, 90% and 100%. At 1
    stellar contract invoke --id <settlement> --source-account caravel-admin --network testnet --send=no -- epoch
    ```
 
-4. Update the sequencer's `[signers]`: `epoch` = the new epoch, and the validator list (key and URL). On the VM that is `lanes/perps/deploy/testnet/sequencer.toml`, deployed with `deploy-vm.sh`. Restart the sequencer.
+4. Update the sequencer's `[signers]`: `epoch` = the new epoch, and the validator list (key and URL). Restart the sequencer.
 5. On start, the sequencer sends every checkpoint that was signed by the old set and not accepted yet back for signatures (log: `checkpoints signed under an older epoch go back for signatures`). The header does not hold the epoch, so the old signatures of validators that stay in the set still count; only the new validator is asked. The relayer then submits them with the new epoch.
 6. Check that the next checkpoints are accepted: `curl -s <api>/v1/checkpoints/<seq> | jq '{status, epoch}'`.
 

@@ -420,6 +420,25 @@ impl Ssh {
         Ok(())
     }
 
+    /// A rendered file's current content on the host, if it exists.
+    pub fn read_file(&self, name: &str) -> Result<Option<String>> {
+        let path = if let Some(unit) = name.strip_prefix("systemd/") {
+            format!("/etc/systemd/system/{unit}")
+        } else if name == "caddy/Caddyfile" {
+            "/etc/caddy/Caddyfile".to_string()
+        } else {
+            format!("{}/config/{name}", self.root)
+        };
+        let out = self.exec(
+            &format!(
+                "sudo test -f {p} && {{ echo EXISTS; sudo cat {p}; }} || true",
+                p = q(&path)
+            ),
+            b"",
+        )?;
+        Ok(out.strip_prefix("EXISTS\n").map(str::to_string))
+    }
+
     pub async fn status(&self, port: u16) -> Option<serde_json::Value> {
         let out = self
             .exec(

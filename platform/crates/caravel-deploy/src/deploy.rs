@@ -411,6 +411,39 @@ impl Prepared {
     }
 }
 
+impl Prepared {
+    /// A unified diff of each file the plan would write: the host's version
+    /// against the one the lane file gives.
+    pub fn file_diffs(&self, plan: &Plan) -> Result<String> {
+        let dir = std::env::temp_dir().join(format!("caravel-diff-{}", std::process::id()));
+        std::fs::create_dir_all(&dir)?;
+        let mut out = String::new();
+        for step in &plan.steps {
+            let Step::WriteFile { path } = step else {
+                continue;
+            };
+            let old = self.host_provider.read_file(path)?;
+            let (a, b) = (dir.join("host"), dir.join("file"));
+            std::fs::write(&a, old.as_deref().unwrap_or(""))?;
+            std::fs::write(&b, &self.files[path])?;
+            let d = std::process::Command::new("diff")
+                .args(["-u", "--label"])
+                .arg(if old.is_some() {
+                    format!("host/{path}")
+                } else {
+                    "/dev/null (new on the host)".into()
+                })
+                .args(["--label", &format!("lane-file/{path}")])
+                .arg(&a)
+                .arg(&b)
+                .output()?;
+            out += &String::from_utf8_lossy(&d.stdout);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        Ok(out)
+    }
+}
+
 /// One step as `apply` prints it.
 fn step_line(s: &Step) -> String {
     match s {

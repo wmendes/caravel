@@ -95,6 +95,13 @@ impl HostProvider {
         }
     }
 
+    pub fn read_file(&self, name: &str) -> Result<Option<String>> {
+        match self {
+            Self::Local(l) => l.read_file(name),
+            Self::Ssh(s) => s.read_file(name),
+        }
+    }
+
     pub async fn status(&self, port: u16) -> Option<serde_json::Value> {
         match self {
             Self::Local(l) => l.status(port).await,

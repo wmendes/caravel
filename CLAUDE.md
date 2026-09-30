@@ -60,7 +60,7 @@ npm --prefix lanes/perps/relayer-feeds ci && npm --prefix lanes/perps/relayer-fe
 npm --prefix lanes/perps/relayer-feeds run build && npm --prefix platform/relayer run build && node platform/relayer/dist/main.js --config lanes/perps/config/relayer.local.json   # needs CARAVEL_INTERNAL_TOKEN, CARAVEL_RELAYER_SECRET, CARAVEL_ORACLE_SECRET (read by the feed module)
 npm --prefix lanes/perps/web ci && npm --prefix lanes/perps/web test && npm --prefix lanes/perps/web run build
 WASM_DIR=<CI contracts-wasm artifact> ./scripts/deploy-testnet.sh   # T-012: deploy contracts + witness (refuses to redeploy)
-RELEASE_DIR=<CI release artifact> ./scripts/deploy-vm.sh            # install on the testnet VM (INIT_KEYS=1 the first time)
+./target/release/caravel apply lanes/perps/config/lane.caravel-perps.testnet.toml --env testnet --release-dir <CI release artifact>   # lane #1's VM (DEC-070); plan --diff first
 (cd site && vercel deploy --prod)       # landing page only, never from the repo root (DEC-019)
 ```
 

@@ -2054,7 +2054,7 @@ This drops the lane registry contract, the console and its web packages, hosted 
 | P-13 | `apply` on Stellar and the `local` provider: chain reader, generated node configs, the `caravel` dispatcher (DEC-067) | P-12 | review |
 | P-14 | `status` and `destroy`; `e2e-local.sh` driven by the tool for both templates (DEC-068) — **Gate P3** | P-13 | review |
 | P-15 | The `ssh` provider: prerequisites check, IAP transport, systemd, Caddy, template extras (DEC-069) | P-14 | review |
-| P-16 | Lane #1 under the tool: its `[env.testnet]` in its lane file, a plan with no Stellar changes, the host configs normalized by `apply` | P-15 | todo |
+| P-16 | Lane #1 under the tool: its `[env.testnet]` in its lane file, a plan with no Stellar changes, the host configs normalized by `apply` (DEC-070) | P-15 | review |
 | P-17 | A payments lane on testnet from its lane file, through the whole lifecycle; RESULTS; the `stellar-caravel` plugin | P-16 | todo |
 | P-18 | README, spec and landing copy (after the human approves the claims); security pass over the tool — **Gate P4** | P-17 | todo |
 
@@ -2463,6 +2463,23 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 - **Rendered host files:** units and a Caddyfile (API, validators' public APIs, `/internal/*` and `/v1/sign` closed, the web app when the release has one). For lane #1's deployment the units are byte for byte the ones its VM runs (tested).
 - **Read-only check against lane #1's VM, 2026-09-30:** `plan` with its deployment written out and the installed CI release shows no Stellar step and no problem, the same release and the same units. Only config normalization remains (the lane file is renamed to `lane.toml`, and the node configs are regenerated). The write path runs for the first time when lane #1 is brought under the tool (P-16), with the human's go-ahead.
 - **Cut:** `--preflight`. The human judged check-store and the shadow validator unnecessary for releases that don't change consensus. `import`: lane #1 is the only lane deployed before the tool, so its `[env.testnet]` is written by hand from its chain state and deploy files | A team's own Linux host is the self-hosting case. Reusing lane #1's exact units keeps the first import to config files | Several lanes per host, or hosts without systemd |
+| DEC-070 | **M0.5 (P-16).** Lane #1 is under the deploy tool.
+- **Its lane file carries its deployment:** `[env.testnet]` in `lanes/perps/config/lane.caravel-perps.testnet.toml`, with:
+  - the pinned contract `CBIHBEUZ…` (it was deployed with a random salt) and its build `8a2fafbd…`;
+  - the M0 params `{3600, 21600, 3600, 2}`;
+  - validators `1..3`, threshold 2, and the sequencer on 8080 in production mode;
+  - validators polling Stellar every 30 s;
+  - the relayer's intervals and the perps oracle feed (DEC-058), as its VM had them;
+  - the VM over IAP, with the public URL.
+
+  Genesis is unchanged (tested).
+- **`plan --diff`** prints, for each file a plan would write, a unified diff of the host's version against the lane file's.
+- **The first apply, on 2026-09-30, with the human's go-ahead:**
+  - the plan had no Stellar step, the same release (`2159e7a`) and the same units;
+  - 7 config files were normalized: the lane file became `lane.toml`, comments changed, `weight = 1` became explicit, and JSON keys were reordered;
+  - the 5 nodes restarted over ssh in about 4 minutes;
+  - afterwards the plan reports "No changes", checkpoints keep being accepted with signed equal to accepted, oracle prices stay under 9 s old, and the web app answers.
+- **The imperative VM path is gone:** `scripts/deploy-vm.sh`, `scripts/vm-preflight.sh` and the hand-written node configs in `lanes/perps/deploy/testnet/`. `provision.sh` stays for a new host. The units and the Caddyfile stay as exact copies of what lane #1 runs, and a test checks them against the renderer. The RUNBOOK now upgrades and rotates through `caravel apply` | One way to change a lane: the lane file | — |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

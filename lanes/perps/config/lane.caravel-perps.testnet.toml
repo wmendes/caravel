@@ -103,3 +103,68 @@ band_bps = 500
 max_position_lots = 100000
 max_oi_lots = 1000000
 impact_lots = 1000                         # 10,000 XLM
+
+# Lane #1's deployment (M0.5 P-16): the contract deployed by
+# scripts/deploy-testnet.sh on 2026-09-29 and the VM caravel-1, now run by
+# `caravel plan|apply|status lanes/perps/config/lane.caravel-perps.testnet.toml --env testnet`.
+# Keys are identities in the operator's Stellar keystore; none is written here.
+[env.testnet]
+network = "testnet"
+admin = "caravel-admin"
+usdc = "circle"
+settlement = "CBIHBEUZYFZQZEQPBJH2ID6CDRDZFEDI6XHAXVOCHG6FO5XWUIGPONWO"   # deployed before the tool, with a random salt
+settlement_wasm = "8a2fafbd1ad48d53333ab79d73afa1c50d5f790f39a97fafb88b5443b383d503"   # lane #1's build (DEC-061)
+threshold = 2
+
+[env.testnet.settlement_params]
+force_inclusion_window_secs = 3600
+escape_timeout_secs = 21600
+min_rotation_delay_secs = 3600
+signer_retention_epochs = 2
+
+[[env.testnet.validators]]
+name = "1"
+key = "caravel-validator-1"
+
+[[env.testnet.validators]]
+name = "2"
+key = "caravel-validator-2"
+
+[[env.testnet.validators]]
+name = "3"
+key = "caravel-validator-3"
+
+[env.testnet.sequencer]
+port = 8080
+production = true
+
+[env.testnet.validator_polling]
+sequencer_ms = 200
+stellar_secs = 30
+
+[env.testnet.relayer]
+account = "caravel-relayer"
+feed_keys = { CARAVEL_ORACLE_SECRET = "caravel-oracle" }
+intervals_ms = { inbox = 3000, checkpoints = 2000 }
+
+# The perps oracle (DEC-058): Coinbase's WebSocket first, then its REST spot, then Reflector.
+[[env.testnet.relayer.feeds]]
+module = "relayer-feeds/perps/dist/index.js"
+intervalMs = 1000
+
+[env.testnet.relayer.feeds.options]
+maxSourceAgeSecs = 900
+reflectorContract = "CCYOZJCOPG34LLQQ7N24YXBM7LL62R7ONMZ3G6WZAAYPB5OYKOMJRN63"
+
+[env.testnet.relayer.feeds.options.markets]
+"1" = [{ coinbaseStream = "BTC-USD" }, { coinbase = "BTC-USD" }, { reflector = "BTC" }]
+"2" = [{ coinbaseStream = "ETH-USD" }, { coinbase = "ETH-USD" }, { reflector = "ETH" }]
+"3" = [{ coinbaseStream = "XLM-USD" }, { coinbase = "XLM-USD" }, { reflector = "XLM" }]
+
+[env.testnet.host]
+provider = "ssh"
+transport = "gcloud-iap"
+address = "caravel-1"
+project = "caravel-testnet"
+zone = "us-central1-a"
+public_url = "https://35-224-76-64.sslip.io"
