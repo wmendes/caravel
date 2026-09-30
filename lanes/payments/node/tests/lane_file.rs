@@ -173,7 +173,7 @@ fn a_perps_lane_file_is_refused() {
 /// `[env]` is not consensus: the same genesis with a deployment block.
 #[test]
 fn env_tables_change_no_hash() {
-    let block = "\n[env.local]\nnetwork = \"local\"\nadmin = \"acme-admin\"\n[[env.local.validators]]\nname = \"v1\"\nkey = \"acme-v1\"\n[env.local.host]\nprovider = \"local\"\n";
+    let block = "\n[env.other]\nnetwork = \"local\"\nadmin = \"acme-admin\"\n[[env.other.validators]]\nname = \"v1\"\nkey = \"acme-v1\"\n[env.other.host]\nprovider = \"local\"\n";
     let (_, config, state) = genesis(&local()).unwrap();
     let (report, config_env, state_env) = genesis(&format!("{}{block}", local())).unwrap();
     assert_eq!((config_env, state_env), (config, state));

@@ -19,8 +19,8 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use stellar_xdr::{
     ContractDataDurability, ContractId, Hash, HostFunction, LedgerEntryData, LedgerKey,
-    LedgerKeyContractData, Limits, OperationBody, ReadXdr, ScAddress, ScMap, ScSymbol, ScVal,
-    ScVec, TransactionEnvelope, WriteXdr,
+    LedgerKeyContractData, Limits, OperationBody, ReadXdr, ScAddress, ScVal, TransactionEnvelope,
+    WriteXdr,
 };
 
 use crate::app::NodeApp;
@@ -319,34 +319,8 @@ pub struct RpcSource {
     pub contract: [u8; 32],
 }
 
-fn sym(s: &str) -> ScVal {
-    ScVal::Symbol(ScSymbol(s.try_into().expect("short symbol")))
-}
-
-/// A `#[contracttype]` enum variant key: `Vec[Symbol(name), fields...]`.
-pub fn variant(name: &str, fields: Vec<ScVal>) -> ScVal {
-    let mut v = vec![sym(name)];
-    v.extend(fields);
-    ScVal::Vec(Some(ScVec(v.try_into().expect("small vec"))))
-}
-
-fn field<'a>(m: &'a ScMap, name: &str) -> Result<&'a ScVal> {
-    m.0.iter()
-        .find(|e| e.key == sym(name))
-        .map(|e| &e.val)
-        .ok_or_else(|| anyhow!("no field {name}"))
-}
-
-fn bytes32(v: &ScVal, what: &str) -> Result<[u8; 32]> {
-    match v {
-        ScVal::Bytes(b) => {
-            b.0.as_slice()
-                .try_into()
-                .map_err(|_| anyhow!("{what} is not 32 bytes"))
-        }
-        _ => bail!("{what} is not bytes"),
-    }
-}
+pub use crate::scval::variant;
+use crate::scval::{bytes32, field, sym};
 
 impl RpcSource {
     fn persistent_key(&self, key: ScVal) -> LedgerKey {

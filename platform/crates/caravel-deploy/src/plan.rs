@@ -114,6 +114,18 @@ pub struct NodeState {
     pub running: bool,
     /// Its `/v1/status`, when it answers.
     pub report: Option<NodeReport>,
+    /// The fingerprint of the config files it was started with
+    /// ([`fingerprint`]); a node started on older files needs a restart.
+    pub started_with: Option<Key>,
+}
+
+/// `H(file hashes)` of the config files a node reads.
+pub fn fingerprint(files: &BTreeMap<String, Key>, node: &str) -> Key {
+    let mut all = Vec::new();
+    for f in crate::render::node_files(node) {
+        all.extend(files.get(&f).copied().unwrap_or([0; 32]));
+    }
+    caravel_runtime::checkpoint::sha256(&all)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -124,6 +136,10 @@ pub struct NodeReport {
     pub engine_wasm_hash: Key,
     /// A validator's key.
     pub key: Option<Key>,
+    /// The sequencer's signer epoch.
+    pub epoch: Option<u64>,
+    /// The commit its binary was built from (CI releases only).
+    pub release: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -415,9 +431,20 @@ pub fn diff(d: &Desired, chain: &Chain, host: &Host) -> Plan {
     }
     let start_or_restart = |node: &str, steps: &mut Vec<Step>, problems: &mut Vec<Problem>| {
         let state = host.nodes.get(node).cloned().unwrap_or_default();
+        let target = target_epoch(d, chain);
+        let report = state.report.as_ref();
+        let stale = state
+            .started_with
+            .is_some_and(|f| f != fingerprint(&d.host.files, node))
+            // A sequencer on another epoch than the chain will have.
+            || report.and_then(|r| r.epoch).is_some_and(|e| e != target)
+            // A binary from another release than the host has.
+            || report
+                .and_then(|r| r.release.as_deref())
+                .is_some_and(|c| !c.starts_with(d.host.release.as_str()) && !d.host.release.starts_with(c));
         if !state.running {
             steps.push(Step::Start { node: node.into() });
-        } else if restart.contains(node) {
+        } else if restart.contains(node) || stale {
             steps.push(Step::Restart { node: node.into() });
         } else if let Some(r) = state.report.as_ref().filter(|_| !immutable) {
             let checks = [

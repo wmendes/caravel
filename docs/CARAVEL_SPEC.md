@@ -2051,7 +2051,7 @@ This drops the lane registry contract, the console and its web packages, hosted 
 | P-10 | Payments template: engine, vectors, scenarios, INV-PAY1, parity, node, e2e (DEC-064) — **Gate P2** | P-09 | review |
 | P-11 | Node groundwork, one release for the VM: `[env]` tables set aside by the lane-file parser, identity fields in `/v1/status`, `export-proofs`, release with `COMMIT`, full `SHA256SUMS` and vendored relayer dependencies (DEC-065) | P-10 | review |
 | P-12 | `caravel-deploy`: the `[env]` schema, secret refusal, derived settlement address, and the pure plan engine with golden plans (DEC-066) | P-11 | review |
-| P-13 | `apply` on Stellar and the `local` provider: chain reader, generated node configs, the `caravel` dispatcher | P-12 | todo |
+| P-13 | `apply` on Stellar and the `local` provider: chain reader, generated node configs, the `caravel` dispatcher (DEC-067) | P-12 | review |
 | P-14 | `status` and `destroy`; `e2e-local.sh` driven by the tool for both templates — **Gate P3** | P-13 | todo |
 | P-15 | The `ssh` provider: prerequisites check, IAP transport, systemd, Caddy, template extras, `--preflight` | P-14 | todo |
 | P-16 | Import lane #1: its plan shows no changes, and its next release goes through `apply --preflight` | P-15 | todo |
@@ -2400,6 +2400,29 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - **The target epoch** is computed first, so the sequencer's config can carry it.
 - **Tests:** 11 plan cases, 9 of them golden texts (`tests/golden/plan-*.txt`), and 6 manifest tests.
 - **CI** fails if the name of one well-known IaC tool appears anywhere in the repo (the human's copy rule) | A plan that names every address and step before anything is sent, with the chain as the only record, is what the prior art lacks on Stellar (docs/SOURCES.md, 2026-09-30). A pure diff can be tested case by case | — |
+| DEC-067 | **M0.5 (P-13).** `plan` and `apply` on Stellar with the `local` provider.
+- **Commands.** Every app binary flattens `caravel_deploy::cli::Command` (`plan <lane> --env <name> [--release-dir]` and `apply … [--yes]`) next to the node commands, so genesis runs in-process with the app. The `caravel` dispatcher reads `[app] template` and runs `caravel-<template>-node`. Installed as `stellar-caravel`, it is a Stellar CLI plugin: `stellar caravel plan …`.
+- **Reading the chain** (`chain.rs`) takes two batched `getLedgerEntries` calls and no simulation. It reads:
+  - the admin and relayer accounts;
+  - the USDC contract;
+  - the settlement code;
+  - the settlement instance: code hash, `Config`, `Epoch`, `LastCkpt`, `InboxCount`, `Frozen`;
+  - `Signers(epoch)`, and `SignersEpoch(H(the file's set))`.
+
+  `caravel_node::scval` now holds the storage decoders that replay also uses. `stellar_rpc::ledger_entries` keeps `liveUntilLedgerSeq` for TTL horizons.
+- **Rendering** (`render.rs`): every file lives under the host root (`config/`, `keys/`, `data/`, the release) and uses absolute paths.
+  - The rendered `lane.toml` is the lane file without `[env]`, with the same genesis (tested).
+  - No secret is in any rendered file (tested). Validator keys are key files; the sequencer's internal token and the relayer's keys come from `keys/env`.
+- **Ports.** A validator named `n` listens on the sequencer's port + n; any other name sets `port`. So a replacement never takes the port of the validator it replaces, and a health check compares the validator's key.
+- **The `local` provider** (`local.rs`) runs processes under `.caravel/<lane>/<env>/`, detached, each with a PID file and a log. Keys are mode 600 in a mode-700 directory. The internal token comes from `/dev/urandom` and is kept across applies.
+  - Each start records a fingerprint of the configs the node read (`run/<node>.started`).
+  - A node is restarted when that fingerprint, the sequencer's signer epoch, or its release commit differs from the plan. That covers an apply stopped after writing a file but before the restart.
+- **The release** is a CI artifact (`--release-dir`) or this checkout's builds, named `local-<H(binary ‖ Wasm hashes)>`. Testnet needs the settlement build of record (DEC-033). A local network accepts this machine's build, with a note.
+- **Apply** checks each Stellar result against the plan (the uploaded Wasm hash, the deployed address). It then reads everything back: a finished apply leaves "No changes".
+- **Tested on a local quickstart, 2026-09-30:**
+  - The payments lane came up from its lane file, its first checkpoint was accepted on Stellar, and a second apply showed "No changes".
+  - Validator 3 was swapped for validator 4, and the apply was killed with `-9` twice: once after validator 4 started, once during the rotation. Each re-run finished the swap, ending at epoch 2 with validators 1, 2 and 4 and every signed checkpoint accepted.
+  - Three bugs were found this way and fixed: network flags placed after `--`, validator ports taken from list position, and a health check another validator could answer | Idempotent steps that re-read Stellar and the host make an interrupted apply safe to re-run without a journal | — |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

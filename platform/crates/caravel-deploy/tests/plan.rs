@@ -115,6 +115,8 @@ fn report(d: &Desired) -> NodeReport {
         settlement: d.settlement,
         engine_wasm_hash: d.engine_wasm_hash,
         key: None,
+        epoch: None,
+        release: None,
     }
 }
 
@@ -126,11 +128,13 @@ fn running(d: &Desired) -> Host {
         .map(String::from)
         .chain(d.validators.iter().cloned())
     {
+        let started_with = Some(caravel_deploy::plan::fingerprint(&d.host.files, &n));
         nodes.insert(
             n,
             NodeState {
                 running: true,
                 report: Some(report(d)),
+                started_with,
             },
         );
     }
@@ -423,6 +427,59 @@ fn a_host_that_is_not_ready() {
         plan.problems,
         [Problem::HostNotReady {
             missing: vec!["Node 22".into(), "caddy".into()]
+        }]
+    );
+}
+
+#[test]
+fn a_node_started_on_older_files_is_restarted() {
+    // An apply was stopped after writing sequencer.toml, before the restart:
+    // the file matches, but the sequencer runs what it started with.
+    let d = desired();
+    let mut host = running(&d);
+    host.nodes.get_mut("sequencer").unwrap().started_with = Some(key(0x77));
+    let plan = diff(&d, &deployed(&d), &host);
+    assert_eq!(
+        plan.steps,
+        [Step::Restart {
+            node: "sequencer".into()
+        }]
+    );
+}
+
+#[test]
+fn a_sequencer_on_the_old_epoch_is_restarted() {
+    // A rotation landed, but the apply stopped before restarting the sequencer.
+    let d = desired();
+    let mut host = running(&d);
+    host.nodes.get_mut("sequencer").unwrap().started_with = None;
+    host.nodes
+        .get_mut("sequencer")
+        .unwrap()
+        .report
+        .as_mut()
+        .unwrap()
+        .epoch = Some(0);
+    let plan = diff(&d, &deployed(&d), &host);
+    assert_eq!(
+        plan.steps,
+        [Step::Restart {
+            node: "sequencer".into()
+        }]
+    );
+    // A node built from another release than the host's.
+    let mut host = running(&d);
+    host.nodes
+        .get_mut("validator-2")
+        .unwrap()
+        .report
+        .as_mut()
+        .unwrap()
+        .release = Some("ffffffff".into());
+    assert_eq!(
+        diff(&d, &deployed(&d), &host).steps,
+        [Step::Restart {
+            node: "validator-2".into()
         }]
     );
 }

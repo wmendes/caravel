@@ -10,6 +10,7 @@ pub mod cli;
 pub mod lane_toml;
 pub mod node_config;
 pub mod replay;
+pub mod scval;
 pub mod sequencer;
 pub mod stellar_rpc;
 pub mod validator;

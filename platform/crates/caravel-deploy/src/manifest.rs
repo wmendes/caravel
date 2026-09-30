@@ -77,6 +77,20 @@ pub struct ValidatorSpec {
     pub key: String,
     #[serde(default = "one")]
     pub weight: u32,
+    /// Defaults to the sequencer's port + n for a validator named `n`, so a
+    /// replacement never takes the port of the one it replaces.
+    #[serde(default)]
+    pub port: Option<u16>,
+}
+
+impl ValidatorSpec {
+    /// Its port, given the sequencer's.
+    pub fn port(&self, sequencer: u16) -> Option<u16> {
+        self.port.or_else(|| {
+            let n: u16 = self.name.parse().ok().filter(|n| (1..=999).contains(n))?;
+            sequencer.checked_add(n)
+        })
+    }
 }
 
 fn one() -> u32 {
@@ -86,7 +100,7 @@ fn one() -> u32 {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SequencerSpec {
-    /// Validator `i` (1-based, in file order) listens on `port + i`.
+    /// A validator named `n` listens on `port + n` unless it sets its own.
     #[serde(default = "default_port")]
     pub port: u16,
     #[serde(default)]
@@ -117,9 +131,40 @@ pub struct RelayerSpec {
     /// Env var → identity, for keys the app's feed modules read.
     #[serde(default)]
     pub feed_keys: BTreeMap<String, String>,
-    /// The app's feed modules, passed to the relayer as they are.
+    /// The app's feed modules, passed to the relayer as they are; a relative
+    /// `module` path is under the host's release (`relayer-feeds/<template>/…`).
     #[serde(default)]
     pub feeds: Vec<toml::Table>,
+    /// The relayer's loop intervals, `{ inbox, checkpoints }` in ms.
+    #[serde(default)]
+    pub intervals_ms: Option<toml::Table>,
+}
+
+/// How often validators poll the sequencer and Stellar.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ValidatorPolling {
+    #[serde(default = "default_sequencer_ms")]
+    pub sequencer_ms: u64,
+    #[serde(default = "default_stellar_secs")]
+    pub stellar_secs: u64,
+}
+
+fn default_sequencer_ms() -> u64 {
+    200
+}
+
+fn default_stellar_secs() -> u64 {
+    10
+}
+
+impl Default for ValidatorPolling {
+    fn default() -> Self {
+        Self {
+            sequencer_ms: default_sequencer_ms(),
+            stellar_secs: default_stellar_secs(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
@@ -189,6 +234,8 @@ pub struct EnvSpec {
     pub validators: Vec<ValidatorSpec>,
     #[serde(default)]
     pub sequencer: SequencerSpec,
+    #[serde(default)]
+    pub validator_polling: ValidatorPolling,
     pub relayer: RelayerSpec,
     pub host: HostSpec,
 }
@@ -409,12 +456,24 @@ impl EnvSpec {
         if sp.min_deposit.is_some_and(|m| m < 1) {
             p.push("settlement_params.min_deposit must be at least 1 stroop".into());
         }
-        let last_port = u32::from(self.sequencer.port) + self.validators.len() as u32;
-        if self.sequencer.port < 1024 || last_port > u32::from(u16::MAX) {
+        if self.sequencer.port < 1024 {
             p.push(format!(
-                "sequencer.port {}: the sequencer and its validators need ports {}..={last_port} above 1023",
-                self.sequencer.port, self.sequencer.port
+                "sequencer.port {} must be above 1023",
+                self.sequencer.port
             ));
+        }
+        let mut ports = std::collections::BTreeSet::from([self.sequencer.port]);
+        for v in &self.validators {
+            match v.port(self.sequencer.port) {
+                None => p.push(format!(
+                    "validator {:?}: set its port (a validator named n defaults to the sequencer's port + n)",
+                    v.name
+                )),
+                Some(port) if !ports.insert(port) => {
+                    p.push(format!("validator {:?}: port {port} is already taken", v.name))
+                }
+                Some(_) => {}
+            }
         }
         let h = &self.host;
         match (h.provider, h.transport) {
