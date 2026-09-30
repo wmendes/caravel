@@ -136,3 +136,16 @@ The swap (`deploy-vm.sh`) was at height 45,256 with checkpoint 849 accepted. It 
 - the web app is served;
 - checkpoint 852 (blocks 45,324–45,383) was sealed and signed entirely by the new nodes and accepted on Stellar ([`3de4f6b5…`](https://stellar.expert/explorer/testnet/tx/3de4f6b50a52980f1d9f0e94269162254858308aee97a26cafdb29a03473575f), ledger 4,948,567, `getTransaction` status SUCCESS).
 - `caravel-perps-node replay` from testnet data only, after the swap, with the platform-layout lane file: `OK seq=1..852 final_state_hash=744af89e…4b93`. That covers every M0 checkpoint and the first ones the new nodes produced. The first attempt got an RPC-side error (`getLedgerEntries: could not query captive core … 404`); the rerun, with RPC reporting healthy, passed.
+
+## Coinbase oracle feed and Stellar Wallets Kit on lane #1 (M0.5 P-07a, P-07b, 2026-09-30)
+
+CI release `c6f9b48` was deployed at height 49,926, with checkpoint 927 accepted. Its node binary is byte-identical to the one the P-07 preflight checked (`639f3cce…`), so the deploy changed only the relayer's perps feed module, its config and the web app.
+
+- **Oracle (DEC-058):** the feed reads Coinbase's public ticker and heartbeat stream and runs every block.
+  - Sampled from `/v1/markets` every 2 s for 20 s after the deploy, BTC-PERP's `oracle_time_ms` advanced at +7, +2, +5, +2 and +3 s. It publishes on each one-tick ($1) move, at most once per block. ETH-PERP moved at a similar rate, and XLM-PERP every 6 to 10 s, on its sparser trades.
+  - Before, the first source was Reflector, whose price changes every 300 s, re-signed on a 10 s heartbeat.
+  - Lane prices tracked Coinbase spot: BTC 83,812–83,829 USD on the lane, against 83,814.70 spot.
+  - Checkpoints 928 and 929 were accepted after the deploy. The relayer logged no warnings.
+- **Wallets (DEC-059):**
+  - The web app now connects through Stellar Wallets Kit. The new bundle is served, and headless Chrome opened the kit's picker against the live lane.
+  - Manual flows with real wallets are pending: connect, deposit, enable trading (SEP-53), trade, withdraw and claim, with Freighter and xBull.

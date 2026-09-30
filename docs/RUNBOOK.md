@@ -271,7 +271,7 @@ stellar contract invoke --id <settlement> --source-account <owner> --network <ne
   escape_claim --recipient G... --lane_account <raw hex> --index <index> --equity <equity> --proof '<proof json>'
 ```
 
-Deposits the lane never processed are refunded 1:1 to the depositor with `refund_unprocessed_deposit --index <inbox index>`. The web app's Escape page does all of this with Freighter.
+Deposits the lane never processed are refunded 1:1 to the depositor with `refund_unprocessed_deposit --index <inbox index>`. The web app's Escape page does all of this with the connected wallet.
 
 ## 6. Replay
 

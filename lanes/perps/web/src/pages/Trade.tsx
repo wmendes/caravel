@@ -105,9 +105,9 @@ function SessionControl({ ids, address, hasKey, onKey }: { ids: ReturnType<typeo
           }
         }}
       >
-        {busy ? "Waiting for Freighter…" : "Enable fast trading"}
+        {busy ? "Waiting for your wallet…" : "Enable fast trading"}
       </button>
-      {err ? <span className="error">{err}</span> : <span className="note">One Freighter signature; a trading key on this device signs orders for 24 h.</span>}
+      {err ? <span className="error">{err}</span> : <span className="note">One wallet signature; a trading key on this device signs orders for 24 h.</span>}
     </div>
   );
 }
@@ -343,9 +343,9 @@ function OrderForm({ market, ids, address, sessionKey, account }: { market: Mark
         <dd className="num">{account ? `${usdc(account.free_collateral)} USDC` : "–"}</dd>
       </dl>
       <button className="btn primary" disabled={!canSubmit} onClick={() => void submit()}>
-        {busy ? (sessionKey ? "Sending…" : "Waiting for Freighter…") : `${side === Side.Buy ? "Buy" : "Sell"} ${lots > 0 ? baseAmount(lots, market) : ""} ${base(market.symbol)}`}
+        {busy ? (sessionKey ? "Sending…" : "Waiting for your wallet…") : `${side === Side.Buy ? "Buy" : "Sell"} ${lots > 0 ? baseAmount(lots, market) : ""} ${base(market.symbol)}`}
       </button>
-      {!address && <p className="note">Connect Freighter to trade.</p>}
+      {!address && <p className="note">Connect a wallet to trade.</p>}
       {address && !account && (
         <p className="note">
           No lane account yet. <Link to="/portfolio">Deposit USDC</Link> first.

@@ -1,7 +1,7 @@
 /**
  * The settlement contract and USDC on Stellar (spec §13, §18.3). Views are
  * simulations from a null source account; writes are built here, signed in
- * Freighter and sent through RPC.
+ * the connected wallet (Stellar Wallets Kit) and sent through RPC.
  */
 import { Buffer } from "buffer";
 import { Account, Address, BASE_FEE, Contract, StrKey, TransactionBuilder, nativeToScVal, rpc, scValToNative, xdr } from "@stellar/stellar-sdk";
@@ -52,11 +52,11 @@ export function explain(e: unknown): string {
   const m = /Error\(Contract, #(\d+)\)/.exec(s);
   const code = m?.[1] ? Number(m[1]) : null;
   if (code !== null && ERRORS[code]) return `Stellar refused it: ${ERRORS[code]} (error ${code}).`;
-  if (/trustline|TrustLine/i.test(s)) return "Your account has no USDC trustline. Add USDC in Freighter first.";
+  if (/trustline|TrustLine/i.test(s)) return "Your account has no USDC trustline. Add USDC in your wallet first.";
   return s.length > 240 ? `${s.slice(0, 240)}…` : s;
 }
 
-/** Builds, simulates, signs in Freighter, sends and waits. Returns the transaction hash. */
+/** Builds, simulates, signs in your wallet, sends and waits. Returns the transaction hash. */
 async function invoke(source: string, c: Contract, method: string, ...args: xdr.ScVal[]): Promise<string> {
   const account = await server.getAccount(source);
   const raw = new TransactionBuilder(account, { fee: BASE_FEE, networkPassphrase: config.networkPassphrase }).addOperation(c.call(method, ...args)).setTimeout(180).build();
