@@ -2057,6 +2057,96 @@ The plan of record is `~/.claude/plans/ok-but-now-i-lucky-hoare.md` (architectur
 | P-20 | Testnet e2e through the console, self-hosted and trial; RESULTS | P-18 | todo |
 | P-21 | Security pass over registry, host manager, console and SDK — **Gate P4** | P-20 | todo |
 
+### 20.4 Phase 2 consensus formats — PROPOSED, needs the human's approval (§0.4)
+
+Nothing in P-08 to P-10 is built until the human approves this section. After approval these formats freeze like §9: a change needs a version bump, regenerated vectors and a DEC. They reuse the M0 conventions: little-endian, no padding, an 8-byte magic, the §9.2 transaction envelope, the §9.4 inbox, the §9.10 `CommitmentV1`, the §11.10 receipts container and the §11.8 commitment rules. The perps engine stays on its own frozen formats (DEC-051).
+
+#### 20.4.1 `AppGenesisV1` (genesis config for SDK apps)
+
+```text
+magic "CVAPPGN1" (8) · lane_id (32)
+template [16] (ASCII, zero-padded, e.g. "payments") · template_version u16
+system_key_count u8 (1..=4) · system_keys[] (32 each)   # accounts 0..n-1, flag SYSTEM; key 0 is the treasury (fees)
+access_mode u8 (0 OPEN, 1 ALLOWLIST) · allowlist_count u16 · allowlist[] (32 each, sorted)
+min_deposit i128 · min_withdrawal i128
+max_accounts u32 · max_session_keys u8 · max_txs_per_account_per_block u16
+max_entries_per_block u32 · max_block_bytes u32 · max_pending_withdrawals u32
+exec_cpu_limit u64 · exec_mem_limit u64
+app_params_len u32 · app_params[app_params_len]          # the app's own; the app decodes it strictly
+```
+
+- `config_hash = H(AppGenesisV1 bytes)`, as for `GenesisConfigV1`. The lane file's generic sections (DEC-054) map one to one onto the generic fields, and the app section onto `app_params`.
+- `genesis()` returns `Fatal(BAD_CONFIG)` unless:
+  - `template` is the engine's own and `template_version` is one it runs;
+  - the system keys are distinct and none is in the allowlist;
+  - the allowlist is strictly ascending;
+  - `min_deposit ≥ 1`, `min_withdrawal ≥ 1`, and every `max_*` is > 0;
+  - `max_accounts ≥ system_key_count + 1`;
+  - the block and exec limits are within §10.2's bounds;
+  - `app_params` decodes, to exactly `app_params_len` bytes.
+- There are no feeds in V1. An app with feeds puts its feed configuration in `app_params`; P-08b proposes the Pyth Pro one.
+
+#### 20.4.2 SDK state layout
+
+```text
+StateFrameV1 prefix (209, DEC-052)          # magic = the app's, e.g. "CVSTPAY1"; app_word and app_flags are the app's
+config AppGenesisV1 (embedded)
+account_count u32 · accounts[] AppAccountV1  # index = position; 0..system_key_count-1 are system accounts
+app_globals_len u32 · app_globals[]          # the app's
+pending_count u32 · pending[] (key 32 · amount i128)
+last_commitment CommitmentV1 (160)
+```
+
+`AppAccountV1`:
+
+```text
+key (32) · flags u8 (bit0 SYSTEM) · next_nonce u64 · balance i128
+session_key_count u8 · session_keys[] (key 32 · expires_at_ms u64 · permissions u8)   # sorted by key
+txs_this_block u16
+ext_len u16 · ext[]                          # the app's per-account data
+```
+
+#### 20.4.3 The SDK's standard pipeline
+
+`step` runs the perps order (§11.2), with the app's hooks in place of funding, oracle and liquidations:
+1. Decode and block checks.
+2. Reset `txs_this_block`.
+3. App `begin_block`.
+4. INBOX entries.
+5. FEED entries: fatal for an app without feeds.
+6. USER entries.
+7. App `end_block`.
+8. The commitment on `CHECKPOINT_END`.
+9. Update the frame.
+
+- **INBOX (§11.4).** A deposit credits `balance`, and creates or reuses an empty slot like perps: new accounts start at `next_nonce = block.timestamp_ms`. Otherwise it bounces. A forced withdrawal pushes `min(amount, balance, app free balance, liquidity_left)`.
+- **USER (§11.3), steps 1 to 9 unchanged.** Then:
+  - WITHDRAW (kind 4): §11.3.2, with `balance` and the app's free balance in place of collateral and margin, and no oracle check;
+  - session keys (kinds 5 and 6): §11.3.3, except that the allowed permission bits are the app's mask instead of `0x03`;
+  - any other kind: the app.
+- **Codes.** The platform's are M0's codes 0 to 6 and 40 to 51 (`INSUFFICIENT_FREE_COLLATERAL` reads as insufficient free balance). Apps use 10 to 39 and 60 and up. Fatal codes 1 to 31 are the platform's.
+- **Receipts.** `CVRCPT01`. The platform events are 6 DEPOSIT, 7 FORCED_WITHDRAWAL_PROCESSED and 10 COMMITMENT; the app's events use types 16 and up.
+- **Commitment (§11.8).** `escape_equity_j` is the app's escape equity for account `j`.
+- **Invariants for every SDK app.** SDK-INV1, conservation: `Σ app-held value + Σ pending.amount == deposits_credited_total − withdrawals_committed_total`. INV-P4, INV-P5, INV-P7 and INV-P8 hold unchanged. Each app states what its held value is.
+
+#### 20.4.4 Payments (template `payments` 0.1.0, state magic `CVSTPAY1`)
+
+- **`app_params`** (32 bytes): `transfer_fee i128` (≥ 0, flat per transfer, paid to the treasury; 0 means free) · `min_transfer i128` (≥ 1).
+- **Kind 16, TRANSFER.**
+  - Body: `to 32 · amount i128 · memo u64` (56).
+  - Signer: the owner, or a session key with `PERM_TRANSFER = 0x01` (the app's only permission bit).
+  - Checks, in order, each a rejection that still consumes the nonce:
+    1. `amount ≥ min_transfer` → 12 `BELOW_MIN_TRANSFER`;
+    2. `to != account` → 13 `SELF_TRANSFER`;
+    3. `to` is an existing account → 11 `UNKNOWN_RECIPIENT` (a recipient must have deposited once, so transfers can't fill account slots);
+    4. `balance ≥ amount + transfer_fee` → 10 `INSUFFICIENT_BALANCE`.
+  - Effect: `balance −= amount + fee`; `to.balance += amount`; `treasury.balance += fee`.
+  - Event 16 TRANSFER: `from_idx u32 · to_idx u32 · amount i128 · fee i128 · memo u64`.
+- **Free balance and escape equity** are both the balance. There is no `ext`, no `app_globals`, and `app_word` and `app_flags` are 0.
+- **Feeds:** none. A FEED entry is fatal.
+- **INV-PAY1:** `Σ balances + Σ pending.amount == deposits_credited_total − withdrawals_committed_total`.
+- **Engine and version:** the `payments-engine` contract, `version()` = `payments/0.1.0`, a 64 KB Wasm budget, and its hash in `versions.json` `lanes.payments`.
+
 ---
 
 ## 21. Later milestones (not for M0 agents to start without a human go-ahead)
