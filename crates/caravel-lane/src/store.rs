@@ -405,6 +405,29 @@ impl Store {
         }
     }
 
+    /// Sequencer, after a signer rotation: checkpoints signed under an epoch
+    /// older than `epoch` and not accepted yet go back to waiting for
+    /// signatures, so the current set signs them. Their old signatures stay:
+    /// the header does not hold the epoch, so those of validators still in
+    /// the set are reused. Returns their seqs, lowest first.
+    pub fn unsign_before_epoch(&mut self, epoch: u64) -> Result<Vec<u64>> {
+        let tx = self.conn.transaction()?;
+        let seqs = {
+            let mut stmt = tx.prepare(
+                "SELECT seq FROM checkpoints WHERE status = 'signed' AND epoch < ?1 ORDER BY seq",
+            )?;
+            let rows = stmt.query_map(params![i(epoch)], |r| r.get::<_, i64>(0))?;
+            rows.map(|r| r.map(u))
+                .collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        tx.execute(
+            "UPDATE checkpoints SET status = 'sequenced', epoch = NULL WHERE status = 'signed' AND epoch < ?1",
+            params![i(epoch)],
+        )?;
+        tx.commit()?;
+        Ok(seqs)
+    }
+
     /// Validators: every checkpoint up to `seq` is accepted on Stellar (the
     /// contract accepts them in order).
     pub fn mark_accepted_through(&mut self, seq: u64) -> Result<usize> {

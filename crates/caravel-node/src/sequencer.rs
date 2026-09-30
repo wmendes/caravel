@@ -17,9 +17,9 @@ use axum::{Json, Router};
 use caravel_lane::checkpoint::sha256;
 use caravel_lane::mempool::tx_hash;
 use caravel_lane::sequencer::{
-    hex, Core, Executor, InboxReport, Incident, Produced, SequencerConfig as CoreConfig,
+    hex, unhex, Core, Executor, InboxReport, Incident, Produced, SequencerConfig as CoreConfig,
 };
-use caravel_lane::store::{CheckpointStatus, Store};
+use caravel_lane::store::{CheckpointRow, CheckpointStatus, Store};
 use caravel_lane::views::{self, FillView};
 use caravel_lane::WasmExecutor;
 use caravel_perps::native::verify_strict;
@@ -159,8 +159,21 @@ pub async fn start(cfg: &SequencerConfig) -> Result<(Arc<App>, Router)> {
     if let Some(dir) = cfg.db.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let store = Store::open(&cfg.db, &lane_id, &config_hash, &genesis_state)
+    let mut store = Store::open(&cfg.db, &lane_id, &config_hash, &genesis_state)
         .context("opening the store")?;
+    // After a rotation (`[signers] epoch` raised), checkpoints signed by the
+    // old set and not accepted yet are signed again by the new one: an admin
+    // rotation makes older epochs invalid at once (spec §13.2).
+    if let Some(s) = &cfg.signers {
+        let seqs = store.unsign_before_epoch(s.epoch)?;
+        if !seqs.is_empty() {
+            tracing::warn!(
+                epoch = s.epoch,
+                ?seqs,
+                "checkpoints signed under an older epoch go back for signatures"
+            );
+        }
+    }
     let core_cfg = CoreConfig {
         ids: cfg.header_ids(),
         checkpoint_every_blocks: cfg.lane.node.checkpoint_every_blocks as u32,
@@ -287,7 +300,15 @@ async fn signer_loop(app: Arc<App>) {
             }
             continue;
         }
-        match collect(&client, &signers, &row.header, &row.batch).await {
+        match collect(
+            &client,
+            &signers,
+            &row.header,
+            &row.batch,
+            &prior_signatures(&row),
+        )
+        .await
+        {
             Ok(sigs) => {
                 let json = serde_json::to_string(&sigs).expect("json");
                 let stored = app.core.lock().expect("core lock").store_mut().set_signed(
@@ -312,21 +333,52 @@ async fn signer_loop(app: Arc<App>) {
     }
 }
 
-/// Asks every validator to sign and returns signatures sorted by signer index
+/// Signatures a checkpoint already holds from before a rotation (the row
+/// went back for signatures, see `Store::unsign_before_epoch`).
+fn prior_signatures(row: &CheckpointRow) -> Vec<[u8; 64]> {
+    api::sigs_value(row)
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|s| s["signature"].as_str().and_then(unhex))
+        .filter_map(|s| s.try_into().ok())
+        .collect()
+}
+
+/// Asks the validators to sign and returns signatures sorted by signer index
 /// once their weight reaches the threshold. Each one is verified first.
+///
+/// A signature in `prior` counts for every validator of this set whose key it
+/// verifies under: ed25519 signatures are deterministic and the header does
+/// not hold the epoch, so a validator that stays in the set after a rotation
+/// is not asked again. It would refuse anyway once it has signed a later seq
+/// (spec §15).
 async fn collect(
     client: &reqwest::Client,
     signers: &Signers,
     header: &[u8],
     batch: &[u8],
+    prior: &[[u8; 64]],
 ) -> Result<Vec<Value>> {
     let header_hash = sha256(header);
-    let body = json!({ "header": hex(header), "batch": hex(batch) });
-    let requests = signers.validators.iter().map(|v| {
-        let req = client.post(format!("{}/v1/sign", v.url)).json(&body).send();
-        async move { (v, req.await) }
-    });
     let mut got: BTreeMap<u32, (u32, String)> = BTreeMap::new();
+    for v in &signers.validators {
+        if let Some(sig) = prior
+            .iter()
+            .find(|s| verify_strict(&v.key, &header_hash, s))
+        {
+            got.insert(v.index, (v.weight, hex(sig)));
+        }
+    }
+    let body = json!({ "header": hex(header), "batch": hex(batch) });
+    let requests = signers
+        .validators
+        .iter()
+        .filter(|v| !got.contains_key(&v.index))
+        .map(|v| {
+            let req = client.post(format!("{}/v1/sign", v.url)).json(&body).send();
+            async move { (v, req.await) }
+        });
     for (v, resp) in futures_util::future::join_all(requests).await {
         let resp = match resp {
             Ok(r) if r.status().is_success() => r,

@@ -1936,7 +1936,7 @@ Status values: `todo`, `doing`, `review`, `done`. Agents update the Status cell 
 | T-012 | Testnet deploy script; deploy engine + settlement; one **witness** `step` transaction on testnet with a small state, byte-equal to the executor output | T-011 | §3, §12, §13 | review |
 | T-013 | `apps/web` (§18) against local, then testnet | T-007, T-009 | §18 | review |
 | T-014 | Measurements (§19.6) + `docs/RESULTS.md` with dated numbers | T-012 | §19.6 | review |
-| T-015 | `docs/RUNBOOK.md`: run locally, run a validator, deploy, rotate keys, freeze drill, replay | T-012 | all | todo |
+| T-015 | `docs/RUNBOOK.md`: run locally, run a validator, deploy, rotate keys, freeze drill, replay | T-012 | all | review |
 | T-016 | Security pass: walk §24 checklist, fix or file each item | T-012 | §24 | todo |
 
 Acceptance criteria:
@@ -2110,7 +2110,7 @@ For lanes that need classic Stellar operations or SCP among many validators:
 - soft latency is `POST /v1/tx` → the account's `receipt` on `WS /v1/stream` (the block message that carries it also carries its fills); hard latency is that receipt → its block inside a checkpoint the sequencer reports as accepted on Stellar, sampled for one receipt in ten and kept only for checkpoints whose blocks were all produced under load (after the load stops, the last receipts wait for an idle checkpoint);
 - host `cpu_insns` per block is sampled once a second from `/v1/status` `host_metering` (the last block's `step`), for blocks produced under load;
 - checkpoint size and fees come from the relayer's own log (`feeCharged`, simulation `minResourceFee`, transaction bytes), for checkpoints whose blocks all fall inside the load window; "per 1,000 lane tx" divides their total fee by the user transactions in those blocks | Real network fees and a user's real path to the API; no special access. One request at a time per account is how a client keeps nonces in order | A load generator next to the VM, to separate network latency from lane latency |
-
+| DEC-049 | Signer rotation on a running lane (T-015): when the sequencer starts with a higher `[signers] epoch`, every checkpoint signed under an older epoch and not accepted goes back to waiting for signatures, keeping its old signatures. When it collects signatures, an old signature counts for each validator of the new set whose key it verifies under (the header does not hold the epoch and ed25519 signatures are deterministic), and only the others are asked. The §15 signing rules do not change | An admin rotation makes older epochs invalid at once (§13.2), so without this the relayer would retry a stale checkpoint forever while the escape timeout runs. Validators that stay in the set would refuse to sign an older seq again once they have signed a later one (§15), so asking them again cannot work | A validator endpoint that re-signs an older seq with the same header (a §15 change) |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 
