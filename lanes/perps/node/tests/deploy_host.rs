@@ -1,7 +1,7 @@
-//! The ssh provider's host files for lane #1 (DEC-069): with lane #1's
-//! deployment written as an `[env.testnet]` table, the generated systemd units
-//! are byte for byte the ones its VM runs (`lanes/perps/deploy/testnet/systemd/`),
-//! and the Caddyfile routes the same paths.
+//! The ssh provider's host files for lane #1 (DEC-069, DEC-070): from the
+//! `[env.testnet]` table in its lane file, the generated systemd units and
+//! Caddyfile are byte for byte the ones its VM runs, kept as copies in
+//! `lanes/perps/deploy/testnet/`.
 
 use std::path::PathBuf;
 
@@ -12,61 +12,13 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
 }
 
-/// Lane #1's deployment, as P-16 writes it into its lane file.
-pub const LANE_1_ENV: &str = r#"
-[env.testnet]
-network = "testnet"
-admin = "caravel-admin"
-usdc = "circle"
-settlement = "CBIHBEUZYFZQZEQPBJH2ID6CDRDZFEDI6XHAXVOCHG6FO5XWUIGPONWO"
-settlement_wasm = "8a2fafbd1ad48d53333ab79d73afa1c50d5f790f39a97fafb88b5443b383d503"
-threshold = 2
-
-[env.testnet.settlement_params]
-force_inclusion_window_secs = 3600
-escape_timeout_secs = 21600
-min_rotation_delay_secs = 3600
-signer_retention_epochs = 2
-
-[[env.testnet.validators]]
-name = "1"
-key = "caravel-validator-1"
-
-[[env.testnet.validators]]
-name = "2"
-key = "caravel-validator-2"
-
-[[env.testnet.validators]]
-name = "3"
-key = "caravel-validator-3"
-
-[env.testnet.sequencer]
-port = 8080
-production = true
-
-[env.testnet.validator_polling]
-sequencer_ms = 200
-stellar_secs = 30
-
-[env.testnet.relayer]
-account = "caravel-relayer"
-feed_keys = { CARAVEL_ORACLE_SECRET = "caravel-oracle" }
-intervals_ms = { inbox = 3000, checkpoints = 2000 }
-
-[env.testnet.host]
-provider = "ssh"
-transport = "gcloud-iap"
-address = "caravel-1"
-project = "caravel-testnet"
-zone = "us-central1-a"
-public_url = "https://35-224-76-64.sslip.io"
-"#;
-
+/// Lane #1's deployment, from its lane file (P-16).
 fn manifest() -> Manifest {
-    let text =
-        std::fs::read_to_string(root().join("lanes/perps/config/lane.caravel-perps.testnet.toml"))
-            .unwrap();
-    Manifest::parse(&format!("{text}{LANE_1_ENV}"), "testnet").unwrap()
+    Manifest::load(
+        &root().join("lanes/perps/config/lane.caravel-perps.testnet.toml"),
+        "testnet",
+    )
+    .unwrap()
 }
 
 fn files() -> std::collections::BTreeMap<String, String> {
@@ -102,20 +54,14 @@ fn the_units_are_lane_1s() {
 }
 
 #[test]
-fn the_caddyfile_routes_what_lane_1s_does() {
+fn the_caddyfile_is_lane_1s() {
+    // Lane #1's VM runs the generated Caddyfile since P-16; the file here is a copy.
     let f = files();
-    let have = &f["caddy/Caddyfile"];
-    let want = std::fs::read_to_string(root().join("lanes/perps/deploy/testnet/Caddyfile"))
-        .unwrap()
-        .replace("{$CARAVEL_HOST}", "35-224-76-64.sslip.io");
-    // The same site block, comments aside.
-    let body = |t: &str| {
-        t.lines()
-            .filter(|l| !l.starts_with('#'))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    assert_eq!(body(have), body(&want));
-    // A local host gets no units and no Caddyfile.
-    assert!(f.keys().any(|k| k.starts_with("systemd/")));
+    let want =
+        std::fs::read_to_string(root().join("lanes/perps/deploy/testnet/Caddyfile")).unwrap();
+    assert!(
+        f["caddy/Caddyfile"] == want,
+        "Caddyfile differs:\n{}",
+        f["caddy/Caddyfile"]
+    );
 }

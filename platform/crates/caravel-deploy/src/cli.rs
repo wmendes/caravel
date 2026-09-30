@@ -33,6 +33,9 @@ pub enum Command {
         /// A CI release artifact to install; defaults to this checkout's builds.
         #[arg(long)]
         release_dir: Option<PathBuf>,
+        /// Also show each file it would write as a diff against the host's.
+        #[arg(long)]
+        diff: bool,
     },
     /// Make Stellar and the host match the deployment. Shows the plan and
     /// asks first, unless --yes. Running it again changes nothing.
@@ -97,12 +100,17 @@ pub fn run<A: NodeApp>(app: A, cmd: Command) -> Result<()> {
                 lane,
                 env,
                 release_dir,
+                diff,
             } => {
                 let p = deploy::prepare(&app, &lane, &env, release_dir.as_deref(), false).await?;
                 for n in &p.notes {
                     eprintln!("note: {n}");
                 }
-                print!("{}", p.plan().render(&p.desired));
+                let plan = p.plan();
+                print!("{}", plan.render(&p.desired));
+                if diff {
+                    print!("\n{}", p.file_diffs(&plan)?);
+                }
                 Ok(())
             }
             Command::Apply {

@@ -345,6 +345,11 @@ impl Local {
         Ok(())
     }
 
+    /// A rendered file's current content, if it exists.
+    pub fn read_file(&self, name: &str) -> Result<Option<String>> {
+        Ok(std::fs::read_to_string(self.root.join("config").join(name)).ok())
+    }
+
     /// `export-proofs` with a validator's config, into `out`.
     pub fn export_proofs(&self, node: &str, out: &Path) -> Result<()> {
         let cfg = self.root.join("config").join(format!("{node}.toml"));

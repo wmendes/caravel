@@ -18,7 +18,7 @@ The spec §24 checklist, walked on 2026-09-29 against the M0 code. Each item nam
 | 10 | Admin functions emit events and are listed on `/about` as testnet powers | ✅ | `upgrade` emits `UpgradeEvent`, `admin_rotate_signers` emits `admin_rotate`; the About page says the admin can upgrade the contract and rotate validators |
 | 11 | TTL extension on every persistent entry the contract reads | ✅ | `storage::get` extends the TTL on each read, `bump_instance` on each call; TTL test in `misc.rs` |
 | 12 | Freeze drill executed on testnet; replay OK after freeze | ✅ | `E2E_NETWORK=testnet ./scripts/e2e-local.sh` on a throwaway contract with the settlement Wasm of record: freeze, two escapes, then `replay` `OK seq=1..6` from testnet data (`docs/RESULTS.md`, freeze drill). The demo lane's contract was not frozen: that ends the lane |
-| 13 | Secrets only via env or files outside git | ✅ | `.gitignore` covers `*.key`, `keys/`, `.env*`, `*.sqlite`; no tracked key, env or database file; no `S...` secret in the git history (`git log --all -p`); keys reach the VM from the operator's keystore (`deploy-vm.sh`), mode 600 |
+| 13 | Secrets only via env or files outside git | ✅ | `.gitignore` covers `*.key`, `keys/`, `.env*`, `*.sqlite`; no tracked key, env or database file; no `S...` secret in the git history (`git log --all -p`); keys reach the VM from the operator's keystore over the ssh connection (`caravel apply`, DEC-069), mode 600 |
 | 14 | Dependency audit; soroban-sdk not affected by known advisories | ✅, 3 filed (#20, #21, #22) | below |
 
 ## Dependency audit (2026-09-29)

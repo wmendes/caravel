@@ -157,3 +157,19 @@ CI release `2159e7a` (DEC-065) was installed with `deploy-vm.sh` at height about
 - The sequencer and validator 1 report `release.commit` `2159e7ad…`, with `config_hash` `f4b9db09…`, engine `4571cd25…` and settlement `CBIHBEUZ…` as before.
 - Checkpoints 1393 and 1394 were accepted within a minute of the restart, with signed equal to accepted, and no node halted.
 - `COMMIT` and `SHA256SUMS` are now in `/opt/caravel`, and the relayer ran from its vendored `node_modules`, with no `npm` on the VM.
+
+## Lane #1 under the deploy tool (M0.5 P-16, 2026-09-30)
+
+Lane #1's deployment is now the `[env.testnet]` table of its lane file (DEC-070).
+
+- **Before applying:** `caravel plan lanes/perps/config/lane.caravel-perps.testnet.toml --env testnet --release-dir <CI release 2159e7a> --diff` read Stellar and the VM:
+  - no Stellar step and no problem;
+  - the same release and systemd units;
+  - 7 config files to normalize (the lane file renamed to `lane.toml`, comments, an explicit `weight = 1`, JSON key order), with a restart of the 5 nodes.
+- **`caravel apply --yes`**, with the human's go-ahead, took 3 min 59 s over IAP. It ended with "Applied. The lane matches the lane file".
+- **Afterwards:**
+  - `plan` reports "No changes";
+  - checkpoints 1420 and 1421 were accepted, with signed equal to accepted;
+  - BTC, ETH and XLM oracle prices were 2 to 9 s old;
+  - the web app answers 200;
+  - `status` shows every node up and the relayer at 9,535.76 XLM.
