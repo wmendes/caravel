@@ -73,7 +73,7 @@ pub async fn read(rpc: &Rpc, d: &Desired) -> Result<(Chain, Extra)> {
     let keys = [
         account_key(&d.admin),
         account_key(&d.relayer),
-        instance_key(&d.usdc),
+        instance_key(&d.token),
         code_key(&d.settlement_wasm),
         instance_key(&d.settlement),
         persistent_key(
@@ -98,7 +98,7 @@ pub async fn read(rpc: &Rpc, d: &Desired) -> Result<(Chain, Extra)> {
     if let Some(LedgerEntryData::Account(a)) = e[1].as_ref().map(|e| &e.data) {
         extra.relayer_balance = Some(a.balance);
     }
-    chain.usdc_exists = e[2].is_some();
+    chain.token_exists = e[2].is_some();
     chain.settlement_wasm_uploaded = e[3].is_some();
     if let Some(entry) = &e[3] {
         extra
@@ -170,7 +170,8 @@ pub async fn read(rpc: &Rpc, d: &Desired) -> Result<(Chain, Extra)> {
     chain.settlement = Some(OnChain {
         code,
         admin: address_of(field(config, "admin")?, "admin")?,
-        usdc: address_of(field(config, "usdc")?, "usdc")?,
+        // The settlement token (the M0 ABI names it `usdc`).
+        token: address_of(field(config, "usdc")?, "usdc")?,
         lane_id: bytes32(field(config, "lane_id")?, "lane_id")?,
         engine_wasm_hash: bytes32(field(config, "engine_wasm_hash")?, "engine_wasm_hash")?,
         genesis_state_hash: bytes32(field(config, "genesis_state_hash")?, "genesis_state_hash")?,

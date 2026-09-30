@@ -122,7 +122,8 @@ impl Cli {
     }
 
     /// Deploys the Stellar Asset Contract of `code:issuer`; the issuer signs.
-    pub fn deploy_asset(&self, issuer_identity: &str, code: &str, issuer: &Key) -> Result<()> {
+    /// Deploys the Stellar Asset Contract of `code:issuer`; anyone may.
+    pub fn deploy_asset(&self, source_identity: &str, code: &str, issuer: &Key) -> Result<()> {
         run(&self.with_net(vec![
             s("contract"),
             s("asset"),
@@ -130,9 +131,28 @@ impl Cli {
             s("--asset"),
             format!("{code}:{}", g(issuer)),
             s("--source-account"),
-            s(issuer_identity),
+            s(source_identity),
         ]))
         .map(|_| ())
+    }
+
+    /// A token contract's `decimals()`, read by simulation (nothing is sent).
+    pub fn token_decimals(&self, source: &str, token: &Key) -> Result<u32> {
+        let out = run(&self.with_net(vec![
+            s("contract"),
+            s("invoke"),
+            s("--id"),
+            strkey(token),
+            s("--source-account"),
+            s(source),
+            s("--send=no"),
+            s("--"),
+            s("decimals"),
+        ]))?;
+        out.trim()
+            .trim_matches('"')
+            .parse()
+            .map_err(|_| anyhow!("{} answered decimals() with {out:?}", strkey(token)))
     }
 
     /// Uploads Wasm; returns its hash. Already-uploaded Wasm is skipped.
@@ -156,7 +176,7 @@ impl Cli {
         wasm_hash: &Key,
         salt: &Key,
         admin: &Key,
-        usdc: &Key,
+        token: &Key,
         ids: [&Key; 4],
         signers: &SignerSet,
         params: &Params,
@@ -174,8 +194,9 @@ impl Cli {
             s("--"),
             s("--admin"),
             g(admin),
+            // The settlement token: the M0 constructor names it `usdc`.
             s("--usdc"),
-            strkey(usdc),
+            strkey(token),
             s("--lane_id"),
             hex(lane_id),
             s("--engine_wasm_hash"),

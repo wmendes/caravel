@@ -1,6 +1,6 @@
 //! `[env.<name>]` tables: what parses, and every rule a table can break.
 
-use caravel_deploy::manifest::{Manifest, Network, Provider, Transport, Usdc};
+use caravel_deploy::manifest::{Manifest, Network, Provider, Token, Transport};
 
 const LANE: &str = r#"
 [lane]
@@ -39,7 +39,7 @@ const ENV: &str = r#"
 [env.testnet]
 network = "testnet"
 admin = "demo-admin"
-usdc = "circle"
+token = "circle-usdc"
 threshold = 2
 
 [env.testnet.settlement_params]
@@ -92,7 +92,8 @@ fn a_deployment_parses_with_its_defaults() {
     let m = Manifest::parse(&file(ENV), "testnet").unwrap();
     assert_eq!(m.env_name, "testnet");
     let e = &m.env;
-    assert_eq!((e.network, e.usdc), (Network::Testnet, Usdc::Circle));
+    assert_eq!(e.network, Network::Testnet);
+    assert_eq!(e.token, Token::Named("circle-usdc".into()));
     assert_eq!(e.validators.len(), 3);
     assert!(e.validators.iter().all(|v| v.weight == 1));
     assert_eq!(e.sequencer.port, 8080);
@@ -188,7 +189,11 @@ fn every_rule_is_checked() {
             "network = \"mainnet\"",
             "testnet only",
         ),
-        ("usdc = \"circle\"", "usdc = \"local\"", "Circle's USDC"),
+        ("token = \"circle-usdc\"", "token = { local = \"USDC\" }", "token.local is for local networks"),
+        ("token = \"circle-usdc\"", "token = \"usdc\"", "a known token is"),
+        ("token = \"circle-usdc\"", "token = { asset = \"USDC\" }", "CODE:ISSUER"),
+        ("token = \"circle-usdc\"", "token = { asset = \"THISCODEISTOOLONG:GCQJVJPUPJTVTABP7FK7RXBNFIKKLSM5EO7JP6DECJ77SOBUKWSPB64N\" }", "CODE:ISSUER"),
+        ("token = \"circle-usdc\"", "token = { contract = \"CXYZ\" }", "not a C… contract"),
         (
             "threshold = 2",
             "threshold = 4",
@@ -280,7 +285,7 @@ fn a_local_deployment() {
         .replace("[env.testnet.", "[env.local.")
         .replace("[[env.testnet.", "[[env.local.")
         .replace("network = \"testnet\"", "network = \"local\"")
-        .replace("usdc = \"circle\"", "usdc = \"local\"")
+        .replace("token = \"circle-usdc\"", "token = { local = \"USDC\" }")
         .replace(
             "provider = \"ssh\"\naddress = \"ops@lane.example\"",
             "provider = \"local\"",
@@ -292,4 +297,18 @@ fn a_local_deployment() {
         m.env.network.passphrase(),
         "Standalone Network ; February 2017"
     );
+}
+
+#[test]
+fn any_token_can_settle_a_lane() {
+    // A Stellar asset (its asset contract), a SEP-41 contract, or Circle's USDC.
+    for token in [
+        "{ asset = \"EURC:GCQJVJPUPJTVTABP7FK7RXBNFIKKLSM5EO7JP6DECJ77SOBUKWSPB64N\" }",
+        "{ asset = \"LONGERCODE12:GCQJVJPUPJTVTABP7FK7RXBNFIKKLSM5EO7JP6DECJ77SOBUKWSPB64N\" }",
+        "{ contract = \"CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA\" }",
+        "\"circle-usdc\"",
+    ] {
+        let env = ENV.replace("token = \"circle-usdc\"", &format!("token = {token}"));
+        Manifest::parse(&file(&env), "testnet").unwrap_or_else(|e| panic!("{token}: {e:#}"));
+    }
 }

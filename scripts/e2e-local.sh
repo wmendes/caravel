@@ -5,6 +5,7 @@
 #   ./scripts/e2e-local.sh                        # KEEP=1 leaves everything running
 #   E2E_TEMPLATE=payments ./scripts/e2e-local.sh  # the payments template instead of perps
 #   E2E_NETWORK=testnet ./scripts/e2e-local.sh    # a throwaway lane on Stellar testnet
+#   E2E_TOKEN_CODE=EURC ./scripts/e2e-local.sh    # a local lane settling in another token
 #
 # With E2E_NETWORK=testnet the lane gets a settlement contract of its own (the
 # demo lane's is never touched) and Circle's testnet USDC, bought with
@@ -39,9 +40,11 @@ export XDG_CONFIG_HOME="$WORK/xdg"
 E2E_NETWORK="${E2E_NETWORK:-local}"
 case "$E2E_NETWORK" in
   local)
-    NET=(--network local); RPC="http://localhost:8000/rpc"; PASS="Standalone Network ; February 2017"; USDC_MODE=local ;;
+    # The settlement token: a test asset <E2E_TOKEN_CODE>:<admin> (USDC unless set).
+    CODE="${E2E_TOKEN_CODE:-USDC}"
+    NET=(--network local); RPC="http://localhost:8000/rpc"; PASS="Standalone Network ; February 2017"; TOKEN="{ local = \"$CODE\" }" ;;
   testnet)
-    NET=(--network testnet); RPC="$(node -p 'require("./versions.json").testnet.rpc_url')"; PASS="Test SDF Network ; September 2015"; USDC_MODE=circle
+    NET=(--network testnet); RPC="$(node -p 'require("./versions.json").testnet.rpc_url')"; PASS="Test SDF Network ; September 2015"; TOKEN='"circle-usdc"'
     USDC_ASSET="USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5" ;;
   *) echo "E2E_NETWORK is local or testnet" >&2; exit 1 ;;
 esac
@@ -141,7 +144,7 @@ PIN=""
 [env.e2e]
 network = "$E2E_NETWORK"
 admin = "admin"
-usdc = "$USDC_MODE"
+token = $TOKEN
 threshold = 2
 $PIN
 
@@ -191,7 +194,7 @@ caravel apply --yes > "$WORK/logs/apply.log" 2>&1 || { tail -30 "$WORK/logs/appl
 grep -E '^\+|^~|^-|→|Applied' "$WORK/logs/apply.log" | sed 's/^/   /'
 caravel plan 2>/dev/null | grep -q "No changes." || fail "a second plan still has changes"
 st="$(status)"
-SETTLEMENT="$(jq -r .settlement <<< "$st")"; USDC_ID="$(jq -r .usdc <<< "$st")"
+SETTLEMENT="$(jq -r .settlement <<< "$st")"; USDC_ID="$(jq -r .token <<< "$st")"
 echo "settlement $SETTLEMENT, USDC $USDC_ID"
 lane_get /v1/status | jq -e ".template == \"$E2E_TEMPLATE\"" > /dev/null || fail "the sequencer runs another template"
 if [[ "$E2E_TEMPLATE" == perps ]]; then
@@ -206,7 +209,7 @@ for n in alice bob; do
 done
 if [[ "$E2E_NETWORK" == local ]]; then
   for n in alice bob; do
-    sc tx new change-trust --source-account "$n" --line "USDC:$(pk admin)" "${NET[@]}" > /dev/null
+    sc tx new change-trust --source-account "$n" --line "$CODE:$(pk admin)" "${NET[@]}" > /dev/null
     invoke "$USDC_ID" admin mint --to "$(pk "$n")" --amount $(( 2000 * USDC )) > /dev/null
   done
 else

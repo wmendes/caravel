@@ -12,11 +12,11 @@ Declarative appchains on Stellar. A lane file says what a lane is (its app, rule
 
 - **Nodes.** A lane is a sequencer and its validators. They run the lane's engine, a Soroban Wasm, through `soroban-env-host`, and each validator re-executes every block itself.
 - **Checkpoints.** Every checkpoint, with its block data, goes to the lane's settlement contract on Stellar. The contract accepts it only with the validators' threshold signature.
-- **Funds.** USDC stays in that contract. Withdrawals are Merkle proofs against an accepted checkpoint.
+- **Funds.** The lane's token stays in that contract. Withdrawals are Merkle proofs against an accepted checkpoint.
 - **Exit.** If the lane stops checkpointing, or ignores what users send through Stellar, anyone can freeze the contract. Users then take their last checkpointed balance back on Stellar.
 - **Replay.** Anyone can rebuild the lane from Stellar data alone.
 
-Two templates exist: **Caravel Perps**, a perpetual futures exchange (lane #1, live on testnet), and **Payments**, USDC transfers with a flat fee.
+Two templates exist: **Caravel Perps**, a perpetual futures exchange (lane #1, live on testnet, in USDC), and **Payments**, token transfers with a flat fee.
 
 ## Quickstart: a payments lane on your machine
 
@@ -51,7 +51,7 @@ The lane's own sections (`[lane]`, `[app]`, `[limits]`, and the app's own table)
 [env.local]
 network = "local"                  # or "testnet"; mainnet is refused
 admin = "pay-local-admin"          # a Stellar CLI identity; keys are never written here
-usdc = "local"                     # or "circle" on testnet
+token = { local = "USDC" }         # the settlement token (see below)
 threshold = 2
 
 [env.local.settlement_params]
@@ -75,9 +75,19 @@ provider = "local"                 # or "ssh", for a Linux host you already have
 - **Changes the plan applies:** a validator swap becomes a signer rotation, and a node setting becomes a restart.
 - **Changes it refuses:** anything the settlement contract fixed at deploy time (the lane's rules, the engine, the admin, the params). For those, destroy the lane or give it a new name.
 
+## The settlement token
+
+A lane settles in the token its `[env]` names:
+- `"circle-usdc"`: Circle's testnet USDC;
+- `{ asset = "CODE:ISSUER" }`: any Stellar asset, through its Stellar Asset Contract; `apply` deploys that contract when the network has none;
+- `{ contract = "C…" }`: any SEP-41 token contract;
+- `{ local = "CODE" }`: a test asset the admin issues, on a local network.
+
+The token must move exact amounts on transfer. A token that takes a fee on transfer, or rebases, would break the vault's accounting, and the tool can't check that. Its issuer's rules (freeze, clawback) apply to the contract's balance too. A template may need set decimals: perps' arithmetic is in 10^-7 units, so a perps lane needs a 7-decimal token (every Stellar asset has 7). Payments takes any token.
+
 ## On testnet
 
-- **USDC:** `usdc = "circle"` uses Circle's testnet USDC.
+- **Token:** `token = "circle-usdc"` uses Circle's testnet USDC.
 - **Wasm:** pass `--wasm-dir <CI contracts-wasm artifact>` so the lane deploys the Wasm of record.
 - **Hosts:** `provider = "ssh"` runs the nodes as systemd units on a host prepared with `lanes/perps/deploy/testnet/provision.sh`, reached over ssh or over `gcloud compute ssh --tunnel-through-iap`. Keys stream over the connection into mode-600 files.
 - **Lane #1:** its deployment is `[env.testnet]` in `lanes/perps/config/lane.caravel-perps.testnet.toml`.

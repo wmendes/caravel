@@ -59,8 +59,8 @@ fn desired() -> Desired {
         engine_wasm_hash: key(4),
         admin: key(ADMIN),
         relayer: key(RELAYER),
-        usdc: asset_contract_id(passphrase, "USDC", &key(ADMIN)),
-        usdc_local: true,
+        token: asset_contract_id(passphrase, "USDC", &key(ADMIN)),
+        token_asset: Some(("USDC".into(), key(ADMIN))),
         settlement: contract_id(passphrase, &key(ADMIN), &settlement_salt(&lane_id)),
         settlement_pinned: false,
         settlement_wasm: hex_key(caravel_deploy::versions::settlement_wasm()),
@@ -89,12 +89,12 @@ fn desired() -> Desired {
 fn deployed(d: &Desired) -> Chain {
     Chain {
         accounts: BTreeSet::from([d.admin, d.relayer]),
-        usdc_exists: true,
+        token_exists: true,
         settlement_wasm_uploaded: true,
         settlement: Some(OnChain {
             code: d.settlement_wasm,
             admin: d.admin,
-            usdc: d.usdc,
+            token: d.token,
             lane_id: d.lane_id,
             engine_wasm_hash: d.engine_wasm_hash,
             genesis_state_hash: d.genesis_state_hash,
@@ -178,7 +178,11 @@ fn a_fresh_lane() {
                 who: "relayer",
                 key: d.relayer
             },
-            Step::DeployUsdc { contract: d.usdc },
+            Step::DeployToken {
+                contract: d.token,
+                code: "USDC".into(),
+                issuer: d.admin
+            },
             Step::UploadWasm {
                 hash: d.settlement_wasm
             },
@@ -336,10 +340,10 @@ fn after_a_testnet_reset() {
     // The contract is gone; the address is the same, so the old stores go.
     let mut d = desired();
     d.network = Network::Testnet;
-    d.usdc_local = false;
+    d.token_asset = None;
     let chain = Chain {
         accounts: BTreeSet::new(),
-        usdc_exists: true,
+        token_exists: true,
         settlement_wasm_uploaded: false,
         settlement: None,
     };
