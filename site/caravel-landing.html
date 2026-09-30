@@ -3,19 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="Caravel lets any team run its own appchain, with its own block time, gas token, fees and validators, that settles to Stellar in USDC.">
+<meta name="description" content="Infrastructure as code for Stellar appchains. Declare a lane in one file, see the plan, apply it, and wind it down to exit proofs. It settles to Stellar in the token you choose.">
 <title>Caravel</title>
+<script>document.documentElement.classList.add("js");</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;700&display=swap">
 <style>
-/* Layout: a harbor chart read left to right. Dark "Stage" first; coral = the fast lane, teal = Stellar, never swapped. */
+/* Layout: a harbor chart read left to right. Dark "Stage" first; coral = the lane, teal = Stellar, never swapped. */
 :root {
   --ground: #081E22; --raised: #102C31; --rule: #1C3B41; --line: #4B7178;
   --ink: #F3EEE4; --muted: #A8BAB8;
   --lane: #FF8C7C; --on-lane: #081E22; --lane-soft: #3E1A18;
   --harbor: #26958F; --harbor-ink: #45B5AE; --on-harbor: #081E22; --harbor-soft: #0F3B3F;
   --font: "Schibsted Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --out: cubic-bezier(.25, 1, .5, 1);
   --wrap: 1180px;
   color-scheme: dark;
 }
@@ -47,10 +50,12 @@ body {
 h1, h2, h3, p, ol, ul { margin: 0; }
 h1, h2, h3 { text-wrap: balance; font-weight: 700; }
 a { color: inherit; }
+code { font-family: var(--mono); font-size: .9em; }
 :focus-visible { outline: 3px solid var(--lane); outline-offset: 3px; border-radius: 4px; }
 .wrap { max-width: var(--wrap); margin-inline: auto; padding-inline: clamp(16px, 4vw, 40px); }
 .eyebrow { font-size: .8125rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
 .lede { font-size: clamp(1.0625rem, 1.6vw, 1.25rem); color: var(--muted); max-width: 60ch; }
+.lede code { color: var(--ink); }
 .lane-t { color: var(--lane); }
 .harbor-t { color: var(--harbor-ink); }
 .num { font-variant-numeric: tabular-nums; }
@@ -92,11 +97,30 @@ a { color: inherit; }
 .cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
 .hero-note { margin-top: 18px; font-size: .875rem; color: var(--muted); }
 
-/* Two clocks */
+/* The hero run: plan lists the steps, apply fills them, then the lane runs on the track below */
 .clock { background: var(--raised); border: 1px solid var(--rule); border-radius: 14px; padding: clamp(18px, 3vw, 28px); min-width: 0; }
 .clock-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: end; }
 .stat .k { display: block; font-size: .75rem; letter-spacing: .12em; text-transform: uppercase; font-weight: 700; color: var(--muted); }
 .stat .v { display: block; font-size: clamp(1.5rem, 3vw, 2rem); font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.term { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--rule); font: .8125rem/1.5 var(--mono); }
+.cmd { color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cmd b { color: var(--lane); }
+.plan { list-style: none; padding: 0; margin-top: 12px; display: grid; gap: 7px; }
+.plan li { display: grid; grid-template-columns: 1.5ch 7.5ch minmax(0, 1fr) 20px; column-gap: 10px; align-items: center; color: var(--muted); opacity: 0; transform: translate3d(0, 6px, 0); transition: opacity .5s var(--out), transform .5s var(--out), color .3s ease; }
+.plan li.in { opacity: 1; transform: none; }
+.plan li.on, .plan li.ok { color: var(--ink); }
+.plan.idle li.in { opacity: .5; }
+.plan .sg { color: var(--lane); font-weight: 700; }
+.plan li.st .sg { color: var(--harbor-ink); }
+.plan .ob { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bx { position: relative; height: 14px; border-radius: 3px; border: 2px solid var(--lane); overflow: hidden; }
+.plan li.st .bx { border-color: var(--harbor); }
+.bx::after { content: ""; position: absolute; inset: 0; background: var(--lane); transform-origin: left center; transform: scaleX(var(--p, 0)); }
+.plan li.st .bx::after { background: var(--harbor); }
+html:not(.js) .plan li { opacity: 1; transform: none; color: var(--ink); }
+html:not(.js) .bx::after { transform: none; }
+.said { margin-top: 14px; min-height: 1.5em; color: var(--muted); }
+.said.ok { color: var(--ink); font-weight: 700; }
 .track { position: relative; height: 176px; margin-top: 22px; overflow: hidden; border-radius: 8px; }
 .track .rowlab { position: absolute; left: 0; font-size: .75rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; z-index: 2; background: var(--raised); padding-right: 8px; }
 .blk, .led, .cp { position: absolute; top: 0; left: 0; will-change: transform; }
@@ -108,11 +132,17 @@ a { color: inherit; }
 .led .fill { position: absolute; inset: 0 auto 0 0; background: var(--harbor-soft); }
 .led.done { background: var(--harbor); }
 .led.done .fill { display: none; }
-.clock-legend { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 16px; font-size: .875rem; color: var(--muted); }
+.clock-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; margin-top: 16px; font-size: .875rem; color: var(--muted); }
 .clock-legend span { display: inline-flex; align-items: center; gap: 8px; }
 .sw { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
 .sw-lane { background: var(--lane); } .sw-harbor { background: var(--harbor); }
 .sw-cp { width: 10px; height: 10px; background: var(--ink); transform: rotate(45deg); border-radius: 1px; }
+.replay { margin-left: auto; font: 700 .875rem var(--font); color: var(--ink); background: none; border: 0; padding: 4px 0; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.replay[hidden] { display: inline-block; visibility: hidden; }
+.track .wait { position: absolute; left: 0; top: 34px; font-size: .875rem; color: var(--muted); transition: opacity .4s var(--out); }
+.track .wait.gone { opacity: 0; }
+html:not(.js) .track .wait { display: none; }
+@media (prefers-reduced-motion: reduce) { .plan li, .pl li { transition: none; } }
 
 /* Sections */
 section.band { padding-block: clamp(64px, 9vw, 112px); border-top: 1px solid var(--rule); }
@@ -122,33 +152,21 @@ section.band { padding-block: clamp(64px, 9vw, 112px); border-top: 1px solid var
 .scroll-x > .chart { min-width: 680px; }
 .chart { display: block; width: 100%; height: auto; }
 .chart text { font-family: var(--font); }
-.c-grid { stroke: var(--rule); stroke-width: 1.5; fill: none; }
-.c-gap { fill: var(--harbor); fill-opacity: .24; stroke: none; }
-.c-stel { stroke: var(--harbor); stroke-width: 4; fill: none; stroke-linecap: round; }
-.c-lane { stroke: var(--lane); stroke-width: 3; fill: none; stroke-linejoin: round; stroke-linecap: round; }
-.c-price { stroke: var(--ink); stroke-width: 3; fill: none; stroke-linejoin: round; stroke-linecap: round; }
 .c-lb { fill: var(--lane); stroke: none; }
 .c-sb { fill: var(--harbor); stroke: none; }
-.c-cp { fill: var(--ink); stroke: none; }
+.c-cp, .c-mk { fill: var(--ink); stroke: none; }
 .c-drop { stroke: var(--ink); stroke-width: 2; stroke-dasharray: 4 4; fill: none; }
-.c-trade { stroke: var(--ink); stroke-width: 2; fill: none; }
+.c-doc { stroke: var(--ink); stroke-width: 2; fill: none; stroke-linejoin: round; }
+.c-keep { stroke: var(--lane); stroke-width: 2; stroke-dasharray: 6 5; fill: none; }
+.c-cut { stroke: var(--ground); stroke-width: 5; fill: none; }
 .c-br-lane { stroke: var(--lane); stroke-width: 2.5; fill: none; }
 .c-br-harbor { stroke: var(--harbor-ink); stroke-width: 2.5; fill: none; }
 .c-lab { font-size: 15px; font-weight: 700; fill: var(--ink); }
 .c-lab-lane { fill: var(--lane); } .c-lab-harbor { fill: var(--harbor-ink); }
 .c-tick { font-size: 14px; fill: var(--muted); }
+.c-phase { font-size: 14px; font-weight: 700; fill: var(--muted); }
 .c-note { font-size: 14px; fill: var(--ink); }
 text.c-note.c-lab-lane { fill: var(--lane); } text.c-note.c-lab-harbor { fill: var(--harbor-ink); }
-.legend { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-top: 28px; font-size: .9375rem; color: var(--muted); }
-.legend span { display: inline-flex; align-items: center; gap: 10px; }
-.ln { width: 26px; height: 4px; border-radius: 2px; display: inline-block; }
-.ln-ink { background: var(--ink); } .ln-lane { background: var(--lane); } .ln-harbor { background: var(--harbor); } .ln-gap { height: 14px; background: var(--harbor); opacity: .35; border-radius: 3px; }
-
-.facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; margin-top: 48px; }
-@media (max-width: 760px) { .facts { grid-template-columns: minmax(0, 1fr); } }
-.fact { border-top: 2px solid var(--rule); padding-top: 18px; min-width: 0; }
-.fact b { display: block; font-size: clamp(2rem, 4vw, 2.75rem); line-height: 1.05; letter-spacing: -.02em; }
-.fact p { margin-top: 8px; color: var(--muted); font-size: .9375rem; max-width: 34ch; }
 
 /* How it works */
 .steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; margin-top: 48px; counter-reset: step; }
@@ -192,38 +210,6 @@ text.c-note.c-lab-lane { fill: var(--lane); } text.c-note.c-lab-harbor { fill: v
 .tcard p { color: var(--muted); font-size: .9375rem; }
 .tcard.soft p, .tcard.hard p { color: var(--ink); }
 
-/* Why now */
-.tl { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 20px; margin-top: 48px; position: relative; }
-.tl::before { content: ""; position: absolute; left: 7px; right: 7px; top: 43px; height: 2px; background: var(--line); }
-.tl li { position: relative; min-width: 0; }
-.tl time { display: block; font-size: .875rem; font-weight: 700; color: var(--harbor-ink); height: 28px; }
-.tl .dot { display: block; width: 16px; height: 16px; border-radius: 50%; background: var(--harbor); margin: 8px 0 16px; position: relative; }
-.tl li:last-child time { color: var(--lane); }
-.tl li:last-child .dot { background: var(--lane); }
-.tl h3 { font-size: 1.0625rem; }
-.tl p { margin-top: 6px; font-size: .875rem; color: var(--muted); }
-@media (max-width: 960px) {
-  .tl { grid-template-columns: minmax(0, 1fr); gap: 0; }
-  .tl::before { left: 7px; right: auto; top: 12px; bottom: 12px; width: 2px; height: auto; }
-  .tl li { display: grid; grid-template-columns: 16px minmax(0, 1fr); column-gap: 20px; padding-bottom: 24px; }
-  .tl .dot { grid-row: 1 / span 3; margin: 4px 0 0; }
-  .tl time { height: auto; }
-}
-.cost { margin-top: 48px; background: var(--raised); border: 1px solid var(--rule); border-radius: 12px; padding: clamp(20px, 3vw, 32px); display: grid; gap: 14px; }
-.cost h3 { font-size: 1.125rem; }
-.cost .sub { color: var(--muted); font-size: .9375rem; }
-.bar-row { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 16px; align-items: center; }
-@media (max-width: 600px) { .bar-row { grid-template-columns: minmax(0, 1fr); gap: 6px; } }
-.bar-row .lab { font-size: .9375rem; color: var(--muted); }
-.bar { position: relative; height: 30px; display: flex; align-items: center; }
-.bar i { display: block; height: 100%; border-radius: 4px; }
-.bar em { font-style: normal; font-weight: 700; font-size: .9375rem; margin-left: 12px; white-space: nowrap; }
-.bar .limit { width: 100%; border: 2px solid var(--line); }
-.bar-limit { flex: 1; }
-.bar .before { width: 56.2%; background: var(--harbor-soft); border: 2px solid var(--harbor); }
-.bar .after { width: 20%; background: var(--harbor); }
-.cost .src { font-size: .8125rem; color: var(--muted); }
-
 /* Lanes */
 .lanes { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; margin-top: 48px; }
 @media (max-width: 1000px) { .lanes { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
@@ -238,6 +224,8 @@ text.c-note.c-lab-lane { fill: var(--lane); } text.c-note.c-lab-harbor { fill: v
 .lanecard h3 { font-size: 1.1875rem; }
 .lanecard p { font-size: .9375rem; color: var(--muted); }
 .lanecard.first p { color: var(--ink); }
+.lanecard .cfgline { font: 700 .8125rem var(--mono); color: var(--ink); }
+.lanecard:not(.first) .cfgline { color: var(--muted); }
 
 /* Roadmap */
 .stairs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; margin-top: 48px; align-items: end; }
@@ -276,7 +264,7 @@ footer p { font-size: .875rem; color: var(--muted); }
 .social { display: flex; flex-wrap: wrap; gap: 16px; font-size: .9375rem; }
 .social a { color: var(--ink); }
 
-/* Configure: six settings drawn on the same two bands as "How it works", lane on top, Stellar below */
+/* Configure: six settings drawn on the same two bands as "How it works", lane on top, Stellar below, and the line that sets each */
 .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .dials { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; margin-top: 28px; }
 @media (max-width: 1000px) { .dials { grid-template-columns: repeat(3, minmax(0, 1fr)); } .dial:nth-child(n+4) h3 { padding-top: 28px; } }
@@ -287,9 +275,9 @@ footer p { font-size: .875rem; color: var(--muted); }
 .cell.l { background: var(--lane-soft); }
 .cell.s { background: var(--harbor-soft); }
 .cell b { font-size: .9375rem; line-height: 1.3; }
-.seen { display: flex; gap: 6px; align-items: baseline; padding: 6px 2px 0; font-size: .8125rem; color: var(--muted); }
-.bandkey .ck { transform: none; }
-.ck { width: 14px; height: 14px; flex: none; fill: none; stroke: var(--ink); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; transform: translateY(2px); }
+.seen { display: grid; gap: 2px; align-content: start; padding: 8px 2px 0; font-size: .8125rem; color: var(--muted); }
+.seen code { font-size: .8125rem; font-weight: 700; color: var(--ink); overflow-wrap: anywhere; }
+.kv { font: 700 .8125rem var(--mono); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; }
 @media (max-width: 600px) { .cell { padding: 14px 12px 12px; } .cell b { font-size: .875rem; } }
 .dp { display: block; width: 100%; max-width: 190px; height: auto; overflow: visible; }
 .dp text { font-family: var(--font); font-weight: 700; }
@@ -309,11 +297,45 @@ footer p { font-size: .875rem; color: var(--muted); }
 @keyframes d-sweep { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 @media (prefers-reduced-motion: reduce) { .d-b2, .d-b3, .d-b4, .d-b5, .d-sweep { animation: none; } }
 .srcs { margin-top: 24px; font-size: .8125rem; color: var(--muted); max-width: 90ch; }
-.lanecard .cfgline { font-size: .8125rem; font-weight: 700; color: var(--ink); }
-.lanecard:not(.first) .cfgline { color: var(--muted); }
 
 /* Logo fills */
 .lg-lane { fill: var(--lane); } .lg-harbor { fill: var(--harbor); } .lg-ink { fill: var(--ink); }
+
+/* One lane file: the file on the left, the four commands on the right. */
+.filegrid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); gap: 32px; margin-top: 44px; align-items: start; }
+@media (max-width: 900px) { .filegrid { grid-template-columns: minmax(0, 1fr); } }
+.lanefile { margin: 0; background: var(--raised); border: 1px solid var(--rule); border-radius: 12px; padding: 22px 24px; overflow-x: auto; font: .875rem/1.65 var(--mono); color: var(--ink); tab-size: 2; }
+.lanefile .h { color: var(--lane); font-weight: 700; }
+.lanefile .s { color: var(--harbor-ink); }
+.lanefile .c { color: var(--muted); }
+.verbs { list-style: none; padding: 0; display: grid; gap: 22px; }
+.verb { border-top: 3px solid var(--lane); padding-top: 14px; }
+.verb.st { border-top-color: var(--harbor); }
+.verb code { font: 700 1.125rem var(--mono); }
+.verb p { margin-top: 6px; color: var(--muted); font-size: .9375rem; max-width: 52ch; }
+
+/* Plan: a change to the file on the left, what plan prints for it on the right */
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 40px; }
+.tab { font: 700 .9375rem var(--font); color: var(--muted); background: none; border: 2px solid var(--rule); border-radius: 8px; min-height: 40px; padding: 6px 14px; cursor: pointer; transition: border-color .15s ease, color .15s ease, background-color .15s ease; }
+.tab:hover { color: var(--ink); border-color: var(--line); }
+.tab[aria-selected="true"] { color: var(--ink); border-color: var(--lane); background: var(--lane-soft); }
+@media (prefers-reduced-motion: reduce) { .tab { transition: none; } }
+.diffgrid { margin-top: 16px; }
+@media (min-width: 901px) { .diffgrid { grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); } }
+.lanefile .ln { display: block; margin-inline: -24px; padding-inline: 24px; }
+.lanefile .ln.add { background: var(--lane-soft); }
+.lanefile .ln.del { color: var(--muted); }
+.lanefile .m { color: var(--lane); font-weight: 700; }
+.lanefile .ln.del .m { color: var(--muted); }
+.out p { margin: 0; }
+.pl { list-style: none; padding: 0; margin: 14px 0; display: grid; gap: 2px; }
+.pl li { display: grid; grid-template-columns: 1.5ch 7.5ch minmax(0, 1fr); column-gap: 10px; opacity: 0; transform: translate3d(0, 6px, 0); transition: opacity .45s var(--out), transform .45s var(--out); }
+.pl li.in { opacity: 1; transform: none; }
+.pl .sg { color: var(--lane); font-weight: 700; }
+.pl li.st .sg { color: var(--harbor-ink); }
+.pl li.x { grid-template-columns: 1.5ch minmax(0, 1fr); }
+.pl li.x .sg { color: var(--ink); }
+.out .sum { font-weight: 700; }
 </style>
 </head>
 <body>
@@ -327,7 +349,8 @@ footer p { font-size: .875rem; color: var(--muted); }
       </svg>
     </a>
     <nav class="nav" aria-label="Sections">
-      <a href="#config">Configure</a>
+      <a href="#file">Lane file</a>
+      <a href="#plan">Plan</a>
       <a href="#how">How it works</a>
       <a href="#trust">Trust model</a>
       <a href="#roadmap">Roadmap</a>
@@ -340,109 +363,174 @@ footer p { font-size: .875rem; color: var(--muted); }
   <section class="hero" aria-labelledby="hero-h">
     <div class="wrap">
       <div>
-        <p class="eyebrow">Appchains that settle to Stellar</p>
-        <h1 id="hero-h">Custom lanes that always come home to Stellar.</h1>
-        <p class="lede">Caravel lets any team run its own appchain, with its own block time, gas token, fees and validators, that settles to Stellar in USDC. The first lane is Caravel Perps, a fully onchain perpetual futures exchange with a real order book.</p>
+        <p class="eyebrow">Infrastructure as code for Stellar appchains</p>
+        <h1 id="hero-h">Declare a lane.<br>Plan it.<br>Apply it.</h1>
+        <p class="lede">Caravel turns one lane file into an appchain that settles to Stellar in the token you choose. <code>plan</code> shows every change on Stellar and on your host before it's made, <code>apply</code> makes it, and <code>destroy</code> winds the lane down to an exit proof for every account.</p>
         <div class="cta-row">
           <a class="btn btn-primary" data-waitlist href="#join">Join the testnet waitlist</a>
-          <a class="btn btn-ghost" href="#config">See what a lane can change</a>
+          <a class="btn btn-ghost" href="#file">See a lane file</a>
         </div>
-        <p class="hero-note">Market makers get access first.</p>
+        <p class="hero-note">Testnet only. Teams building lanes get access first.</p>
       </div>
 
-      <figure class="clock" aria-label="Simulation of the two clocks: the Caravel Perps lane closes a block every second, Stellar closes a ledger about every five seconds, and the lane posts a checkpoint to Stellar every five blocks." style="margin:0">
+      <figure class="clock" id="run" aria-label="Simulation of a new lane. caravel plan lists seven steps, three on Stellar and four on your host. caravel apply runs them one by one, the lane starts making blocks and posting checkpoints to Stellar, and a second plan finds no changes." style="margin:0">
         <div class="clock-stats">
-          <div class="stat"><span class="k lane-t">Lane block</span><span class="v num" id="laneN">#18</span></div>
-          <div class="stat"><span class="k harbor-t">Stellar ledger</span><span class="v num" id="ledN">#3</span></div>
-          <div class="stat"><span class="k">Checkpoints</span><span class="v num" id="cpN">3</span></div>
+          <div class="stat"><span class="k harbor-t">Stellar steps</span><span class="v num" id="stN">3/3</span></div>
+          <div class="stat"><span class="k lane-t">Host steps</span><span class="v num" id="hoN">4/4</span></div>
+          <div class="stat"><span class="k">Checkpoints</span><span class="v num" id="cpN">2</span></div>
+        </div>
+        <div class="term" aria-hidden="true">
+          <p class="cmd">$ caravel <b id="verb">plan</b> lane.toml --env testnet</p>
+          <ol class="plan" id="runplan">
+            <li class="st"><span class="sg">+</span><span>fund</span><span class="ob">admin, relayer</span><i class="bx"></i></li>
+            <li class="st"><span class="sg">+</span><span>upload</span><span class="ob">settlement Wasm fb68ee32…</span><i class="bx"></i></li>
+            <li class="st"><span class="sg">+</span><span>deploy</span><span class="ob">settlement CC3U…C6D4</span><i class="bx"></i></li>
+            <li><span class="sg">+</span><span>release</span><span class="ob">0a1b2c3d</span><i class="bx"></i></li>
+            <li><span class="sg">~</span><span>write</span><span class="ob">6 node configs</span><i class="bx"></i></li>
+            <li><span class="sg">+</span><span>start</span><span class="ob">validator-1, -2, -3</span><i class="bx"></i></li>
+            <li><span class="sg">+</span><span>start</span><span class="ob">sequencer, relayer</span><i class="bx"></i></li>
+          </ol>
+          <p class="said" id="said">No changes.</p>
         </div>
         <div class="track" id="track" aria-hidden="true">
-          <span class="rowlab lane-t" style="top:4px">Perps lane · 1s</span>
-          <span class="rowlab harbor-t" style="top:88px">Stellar · ~5s</span>
+          <span class="rowlab lane-t" style="top:4px">Your lane</span>
+          <span class="rowlab harbor-t" style="top:88px">Stellar</span>
+          <span class="wait" id="wait">Not deployed yet</span>
         </div>
         <figcaption class="clock-legend">
-          <span><i class="sw sw-lane"></i>1s lane block</span>
-          <span><i class="sw sw-cp"></i>Checkpoint to Stellar</span>
-          <span><i class="sw sw-harbor"></i>Stellar ledger</span>
-          <span>Simulated at real cadence</span>
+          <span><i class="sw sw-lane"></i>Your host</span>
+          <span><i class="sw sw-harbor"></i>Stellar</span>
+          <span><i class="sw sw-cp"></i>Checkpoint</span>
+          <span>Simulated</span>
+          <button class="replay" id="replay" type="button" hidden>Replay</button>
         </figcaption>
       </figure>
+    </div>
+  </section>
+
+  <section class="band" id="file" aria-labelledby="file-h">
+    <div class="wrap">
+      <div class="head">
+        <p class="eyebrow">One lane file</p>
+        <h2 id="file-h">Everything about a lane lives in one file.</h2>
+        <p class="lede">What the lane is, and where it runs. <code>plan</code> reads Stellar and your host, and <code>apply</code> changes only what differs from the file.</p>
+      </div>
+      <div class="filegrid">
+        <pre class="lanefile" aria-label="An example lane file, abridged"><span class="c"># lane.toml (abridged)</span>
+<span class="h">[lane]</span>
+name = <span class="s">"acme-pay-0"</span>
+<span class="h">[app]</span>
+template = <span class="s">"payments"</span>
+<span class="h">[node]</span>
+block_time_ms = 1000
+<span class="h">[payments]</span>
+transfer_fee = 100000  <span class="c"># 0.01 per transfer</span>
+
+<span class="h">[env.testnet]</span>
+network = <span class="s">"testnet"</span>
+admin = <span class="s">"acme-admin"</span>  <span class="c"># a key in your keystore</span>
+token = <span class="s">"circle-usdc"</span>  <span class="c"># or any Stellar asset</span>
+threshold = 2
+
+<span class="h">[[env.testnet.validators]]</span>
+name = <span class="s">"1"</span>
+key = <span class="s">"acme-v1"</span>  <span class="c"># one table per validator</span>
+
+<span class="h">[env.testnet.host]</span>
+provider = <span class="s">"ssh"</span>
+address = <span class="s">"ops@lane.example"</span></pre>
+        <ol class="verbs">
+          <li class="verb"><code>plan</code><p>Lists every change on Stellar and on your host, down to the settlement contract's address, before anything is sent.</p></li>
+          <li class="verb"><code>apply</code><p>Deploys the contract, installs the release and starts the nodes. Run it again and nothing changes. Interrupted, it finishes on the next run.</p></li>
+          <li class="verb"><code>status</code><p>Height, checkpoints on Stellar, when a freeze would become possible, and whether the lane still matches its file.</p></li>
+          <li class="verb st"><code>destroy</code><p>Drains the lane, writes every account's exit proof, and freezes the contract so users withdraw on Stellar.</p></li>
+        </ol>
+      </div>
     </div>
   </section>
 
   <section class="band" id="config" aria-labelledby="config-h">
     <div class="wrap">
       <div class="head">
-        <p class="eyebrow">Configure your lane</p>
-        <h2 id="config-h">Every lane sets its own rules.</h2>
-        <p class="lede">What Stellar mainnet decides once for everyone, a lane decides for itself. The money still settles on Stellar.</p>
+        <p class="eyebrow">Configure</p>
+        <h2 id="config-h">Every rule is a line in the file.</h2>
+        <p class="lede">What Stellar mainnet decides once for everyone, a lane decides for itself. Some lines change with a restart or a signer rotation. The rest are fixed when the settlement contract is deployed, and <code>plan</code> tells you which is which.</p>
       </div>
       <div class="bandkey">
         <span><i class="bk bk-lane"></i>Top: your lane</span>
         <span><i class="bk bk-harbor"></i>Bottom: Stellar mainnet</span>
-        <span><svg class="ck" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8"/></svg>Already live on another chain</span>
+        <span><code class="kv">key</code>The line that sets it</span>
       </div>
       <ul class="dials">
         <li class="dial">
           <h3>Block time</h3>
-          <div class="cell l"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><rect class="d-lo" x="0" y="14" width="24" height="28" rx="3"/><rect class="d-lo" x="31.5" y="14" width="24" height="28" rx="3"/><rect class="d-lo" x="63" y="14" width="24" height="28" rx="3"/><rect class="d-lo" x="94.5" y="14" width="24" height="28" rx="3"/><rect class="d-lo" x="126" y="14" width="24" height="28" rx="3"/><rect class="d-lf" x="0" y="14" width="24" height="28" rx="3"/><rect class="d-lf d-b2" x="31.5" y="14" width="24" height="28" rx="3"/><rect class="d-lf d-b3" x="63" y="14" width="24" height="28" rx="3"/><rect class="d-lf d-b4" x="94.5" y="14" width="24" height="28" rx="3"/><rect class="d-lf d-b5" x="126" y="14" width="24" height="28" rx="3"/></svg><b><span class="vh">Your lane: </span>1s blocks</b></div>
+          <div class="cell l"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><rect class="d-lo" x="0" y="14" width="24" height="28" rx="3"/><rect class="d-lo" x="31.5" y="14" width="24" height="28" rx="3"/><rect class="d-lo" x="63" y="14" width="24" height="28" rx="3"/><rect class="d-lo" x="94.5" y="14" width="24" height="28" rx="3"/><rect class="d-lo" x="126" y="14" width="24" height="28" rx="3"/><rect class="d-lf" x="0" y="14" width="24" height="28" rx="3"/><rect class="d-lf d-b2" x="31.5" y="14" width="24" height="28" rx="3"/><rect class="d-lf d-b3" x="63" y="14" width="24" height="28" rx="3"/><rect class="d-lf d-b4" x="94.5" y="14" width="24" height="28" rx="3"/><rect class="d-lf d-b5" x="126" y="14" width="24" height="28" rx="3"/></svg><b><span class="vh">Your lane: </span>0.2s to 5s blocks</b></div>
           <div class="cell s"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><defs><clipPath id="d-led"><rect x="0" y="14" width="150" height="28" rx="5"/></clipPath></defs><rect class="d-so" x="0" y="14" width="150" height="28" rx="5"/><g clip-path="url(#d-led)"><rect class="d-sf d-sweep" x="0" y="14" width="150" height="28"/></g></svg><b><span class="vh">Stellar mainnet: </span>~5s ledgers</b></div>
-          <p class="seen"><svg class="ck" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8"/></svg><span><span class="vh">Already live on </span>Hyperliquid</span></p>
+          <p class="seen"><code>block_time_ms = 500</code><span>Changes with a restart</span></p>
         </li>
         <li class="dial">
-          <h3>Gas token</h3>
-          <div class="cell l"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><circle class="d-lf" cx="18" cy="28" r="16"/><text class="d-onl" x="18" y="35" text-anchor="middle" font-size="20">$</text><circle class="d-lf" cx="75" cy="28" r="16"/><rect class="d-onl" x="69" y="22" width="12" height="12" rx="1.5" transform="rotate(45 75 28)"/><circle class="d-lo d-dash" cx="132" cy="28" r="15"/></svg><b><span class="vh">Your lane: </span>USDC, own token, or none</b></div>
-          <div class="cell s"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><circle class="d-sf" cx="18" cy="28" r="16"/><text class="d-ons" x="18" y="32" text-anchor="middle" font-size="10.5">XLM</text></svg><b><span class="vh">Stellar mainnet: </span>XLM only</b></div>
-          <p class="seen"><svg class="ck" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8"/></svg><span><span class="vh">Already live on </span>Arbitrum, ApeChain</span></p>
+          <h3>Settlement token</h3>
+          <div class="cell l"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><circle class="d-lf" cx="18" cy="28" r="16"/><text class="d-onl" x="18" y="35" text-anchor="middle" font-size="20">$</text><circle class="d-lf" cx="75" cy="28" r="16"/><rect class="d-onl" x="69" y="22" width="12" height="12" rx="1.5" transform="rotate(45 75 28)"/><circle class="d-lo d-dash" cx="132" cy="28" r="15"/></svg><b><span class="vh">Your lane: </span>USDC, EURC or any Stellar asset</b></div>
+          <div class="cell s"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><circle class="d-sf" cx="18" cy="28" r="16"/><text class="d-ons" x="18" y="32" text-anchor="middle" font-size="10.5">XLM</text></svg><b><span class="vh">Stellar mainnet: </span>XLM pays every fee</b></div>
+          <p class="seen"><code>token = "circle-usdc"</code><span>Fixed at deploy</span></p>
         </li>
         <li class="dial">
           <h3>Fees</h3>
-          <div class="cell l"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><rect class="d-lf" x="0" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="15.7" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="31.3" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="47" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="62.7" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="78.3" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="94" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="109.7" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="125.3" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="141" y="30" width="9" height="20" rx="1.5"/></svg><b><span class="vh">Your lane: </span>Fixed, sponsored, or zero</b></div>
+          <div class="cell l"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><rect class="d-lf" x="0" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="15.7" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="31.3" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="47" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="62.7" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="78.3" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="94" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="109.7" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="125.3" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="141" y="30" width="9" height="20" rx="1.5"/></svg><b><span class="vh">Your lane: </span>Flat, per trade, or zero</b></div>
           <div class="cell s"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><rect class="d-sf" x="0" y="36" width="9" height="14" rx="1.5"/><rect class="d-sf" x="15.7" y="28" width="9" height="22" rx="1.5"/><rect class="d-sf" x="31.3" y="38" width="9" height="12" rx="1.5"/><rect class="d-sf" x="47" y="16" width="9" height="34" rx="1.5"/><rect class="d-sf" x="62.7" y="24" width="9" height="26" rx="1.5"/><rect class="d-sf" x="78.3" y="6" width="9" height="44" rx="1.5"/><rect class="d-sf" x="94" y="32" width="9" height="18" rx="1.5"/><rect class="d-sf" x="109.7" y="20" width="9" height="30" rx="1.5"/><rect class="d-sf" x="125.3" y="10" width="9" height="40" rx="1.5"/><rect class="d-sf" x="141" y="30" width="9" height="20" rx="1.5"/></svg><b><span class="vh">Stellar mainnet: </span>Market fee in XLM</b></div>
-          <p class="seen"><svg class="ck" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8"/></svg><span><span class="vh">Already live on </span>Hyperliquid, dYdX</span></p>
+          <p class="seen"><code>transfer_fee = 0</code><span>Fixed at deploy</span></p>
         </li>
         <li class="dial">
           <h3>Validators</h3>
           <div class="cell l"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><rect class="d-lo d-dash" x="47" y="4" width="56" height="48" rx="10"/><rect class="d-lf" x="57" y="10" width="14" height="14" rx="2.5"/><rect class="d-lf" x="79" y="10" width="14" height="14" rx="2.5"/><rect class="d-lf" x="57" y="32" width="14" height="14" rx="2.5"/><rect class="d-lf" x="79" y="32" width="14" height="14" rx="2.5"/></svg><b><span class="vh">Your lane: </span>A set you choose</b></div>
           <div class="cell s"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><path class="d-net" d="M8 14L38 34M10 44L38 34M8 14L62 12M38 34L62 12M38 34L86 40M62 12L86 40M62 12L108 16M86 40L108 16M86 40L130 42M108 16L130 42M108 16L144 14M130 42L144 14"/><rect class="d-sf" x="3" y="9" width="10" height="10" rx="2"/><rect class="d-sf" x="5" y="39" width="10" height="10" rx="2"/><rect class="d-sf" x="33" y="29" width="10" height="10" rx="2"/><rect class="d-sf" x="57" y="7" width="10" height="10" rx="2"/><rect class="d-sf" x="81" y="35" width="10" height="10" rx="2"/><rect class="d-sf" x="103" y="11" width="10" height="10" rx="2"/><rect class="d-sf" x="125" y="37" width="10" height="10" rx="2"/><rect class="d-sf" x="139" y="9" width="10" height="10" rx="2"/></svg><b><span class="vh">Stellar mainnet: </span>Open network</b></div>
-          <p class="seen"><svg class="ck" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8"/></svg><span><span class="vh">Already live on </span>Avalanche L1s</span></p>
+          <p class="seen"><code>threshold = 2</code><span>Changes by signer rotation</span></p>
         </li>
         <li class="dial">
           <h3>Access</h3>
-          <div class="cell l"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><circle class="d-lf" cx="10" cy="28" r="7"/><circle class="d-lo d-dash" cx="36" cy="28" r="6.5"/><circle class="d-lf" cx="62" cy="28" r="7"/><circle class="d-lf" cx="88" cy="28" r="7"/><circle class="d-lo d-dash" cx="114" cy="28" r="6.5"/><circle class="d-lf" cx="140" cy="28" r="7"/></svg><b><span class="vh">Your lane: </span>Allow-list or KYC</b></div>
+          <div class="cell l"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><circle class="d-lf" cx="10" cy="28" r="7"/><circle class="d-lo d-dash" cx="36" cy="28" r="6.5"/><circle class="d-lf" cx="62" cy="28" r="7"/><circle class="d-lf" cx="88" cy="28" r="7"/><circle class="d-lo d-dash" cx="114" cy="28" r="6.5"/><circle class="d-lf" cx="140" cy="28" r="7"/></svg><b><span class="vh">Your lane: </span>Open or allow-listed</b></div>
           <div class="cell s"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><circle class="d-sf" cx="10" cy="28" r="7"/><circle class="d-sf" cx="36" cy="28" r="7"/><circle class="d-sf" cx="62" cy="28" r="7"/><circle class="d-sf" cx="88" cy="28" r="7"/><circle class="d-sf" cx="114" cy="28" r="7"/><circle class="d-sf" cx="140" cy="28" r="7"/></svg><b><span class="vh">Stellar mainnet: </span>Any account</b></div>
-          <p class="seen"><svg class="ck" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8"/></svg><span><span class="vh">Already live on </span>Avalanche L1s</span></p>
+          <p class="seen"><code>mode = "allowlist"</code><span>Fixed at deploy</span></p>
         </li>
         <li class="dial">
           <h3>Execution</h3>
-          <div class="cell l"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><rect class="d-lo" x="0" y="10" width="150" height="36" rx="5"/><rect class="d-lf" x="4" y="14" width="96" height="28" rx="2"/><rect class="d-lf d-dim" x="108" y="15" width="16" height="5" rx="1"/><rect class="d-lf d-dim" x="108" y="22" width="28" height="5" rx="1"/><rect class="d-lf" x="108" y="30" width="38" height="5" rx="1"/><rect class="d-lf" x="108" y="37" width="24" height="5" rx="1"/></svg><b><span class="vh">Your lane: </span>Own limits + order book</b></div>
+          <div class="cell l"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><rect class="d-lo" x="0" y="10" width="150" height="36" rx="5"/><rect class="d-lf" x="4" y="14" width="96" height="28" rx="2"/><rect class="d-lf d-dim" x="108" y="15" width="16" height="5" rx="1"/><rect class="d-lf d-dim" x="108" y="22" width="28" height="5" rx="1"/><rect class="d-lf" x="108" y="30" width="38" height="5" rx="1"/><rect class="d-lf" x="108" y="37" width="24" height="5" rx="1"/></svg><b><span class="vh">Your lane: </span>Its own limits</b></div>
           <div class="cell s"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><rect class="d-so" x="0" y="10" width="150" height="36" rx="5"/><rect class="d-sf" x="4" y="14" width="20" height="28" rx="2"/><rect class="d-sf d-dim" x="28" y="14" width="12" height="28" rx="2"/><rect class="d-sf" x="44" y="14" width="24" height="28" rx="2"/><rect class="d-sf d-dim" x="72" y="14" width="10" height="28" rx="2"/><rect class="d-sf" x="86" y="14" width="18" height="28" rx="2"/><rect class="d-sf d-dim" x="108" y="14" width="14" height="28" rx="2"/><rect class="d-sf" x="126" y="14" width="20" height="28" rx="2"/></svg><b><span class="vh">Stellar mainnet: </span>Limits shared by every app</b></div>
-          <p class="seen"><svg class="ck" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8"/></svg><span><span class="vh">Already live on </span>Dexalot</span></p>
+          <p class="seen"><code>max_accounts = 256</code><span>Fixed at deploy</span></p>
         </li>
       </ul>
-      <p class="srcs">Sources: Hyperliquid docs; Arbitrum blog, April 2025; L2BEAT (ApeChain); Decrypt, October 2023 (dYdX); Avalanche L1 docs; Avalanche blog, March 2023 (Dexalot).</p>
     </div>
   </section>
 
-  <section class="band" id="problem" aria-labelledby="problem-h">
+  <section class="band" id="plan" aria-labelledby="plan-h">
     <div class="wrap">
       <div class="head">
-        <p class="eyebrow">First lane: Caravel Perps</p>
-        <h2 id="problem-h">At 5-second blocks, quotes go stale.</h2>
-        <p class="lede">Our first lane is a trading venue, and trading needs speed. Stellar was built for payments, and it's excellent at them. Trading is different. A market maker's quote on a 5-second chain sits frozen while the price moves, and anyone who sees the real price can trade against it. So makers widen spreads or leave, and volume goes to faster chains.</p>
+        <p class="eyebrow">Plan</p>
+        <h2 id="plan-h">See what a change does before it happens.</h2>
+        <p class="lede">Edit the file and run <code>plan</code>. It compares the file with the lane's contract on Stellar and its nodes on your host, then lists what <code>apply</code> would do: a restart, a signer rotation, or a refusal when the contract fixed that rule at deploy.</p>
       </div>
-      <div class="legend">
-        <span><i class="ln ln-ink"></i>Market price</span>
-        <span><i class="ln ln-lane"></i>Quote refreshed every 1s</span>
-        <span><i class="ln ln-harbor"></i>Quote refreshed every ~5s</span>
-        <span><i class="ln ln-gap"></i>Gap takers can trade against</span>
+      <div class="tabs" role="tablist" aria-label="Example changes">
+        <button class="tab" type="button" role="tab" id="tab-0" aria-controls="diff" aria-selected="true">Swap a validator</button>
+        <button class="tab" type="button" role="tab" id="tab-1" aria-controls="diff" aria-selected="false" tabindex="-1">Change the block time</button>
+        <button class="tab" type="button" role="tab" id="tab-2" aria-controls="diff" aria-selected="false" tabindex="-1">Change a fixed rule</button>
       </div>
-      <div class="scroll-x"><svg class="chart" viewBox="0 0 900 392" role="img" aria-label="Price over ten seconds. A quote refreshed every second tracks the price closely. A quote refreshed every five seconds drifts away from it; the shaded area is the gap takers can trade against."><line class="c-grid" x1="130" y1="20" x2="900" y2="20"/><line class="c-grid" x1="130" y1="100" x2="900" y2="100"/><line class="c-grid" x1="130" y1="180" x2="900" y2="180"/><line class="c-grid" x1="130" y1="260" x2="900" y2="260"/><line class="c-grid" x1="515" y1="20" x2="515" y2="260"/><path class="c-gap" d="M130.0 157.6 L133.8 153.7 L137.7 149.7 L141.6 145.8 L145.4 142.0 L149.2 138.3 L153.1 135.0 L156.9 132.1 L160.8 129.5 L164.7 127.3 L168.5 125.5 L172.3 124.1 L176.2 122.8 L180.1 121.8 L183.9 120.8 L187.8 119.7 L191.6 118.5 L195.4 117.1 L199.3 115.2 L203.1 113.0 L207.0 110.2 L210.9 107.0 L214.7 103.1 L218.6 98.8 L222.4 94.0 L226.2 88.7 L230.1 83.2 L233.9 77.6 L237.8 71.9 L241.6 66.3 L245.5 61.0 L249.4 56.2 L253.2 52.0 L257.1 48.5 L260.9 45.8 L264.8 44.1 L268.6 43.4 L272.5 43.7 L276.3 45.1 L280.1 47.4 L284.0 50.7 L287.9 54.8 L291.7 59.6 L295.5 64.9 L299.4 70.7 L303.2 76.7 L307.1 82.8 L311.0 88.8 L314.8 94.6 L318.6 100.1 L322.5 105.1 L326.4 109.5 L330.2 113.4 L334.0 116.6 L337.9 119.3 L341.8 121.3 L345.6 122.9 L349.5 124.0 L353.3 124.8 L357.1 125.4 L361.0 125.8 L364.9 126.3 L368.7 126.9 L372.5 127.7 L376.4 128.8 L380.2 130.3 L384.1 132.1 L387.9 134.4 L391.8 136.9 L395.7 139.8 L399.5 143.0 L403.3 146.3 L407.2 149.7 L411.1 153.0 L414.9 156.1 L418.8 158.9 L422.6 161.3 L426.4 163.2 L430.3 164.6 L434.2 165.3 L438.0 165.3 L441.8 164.7 L445.7 163.5 L449.6 161.6 L453.4 159.4 L457.2 156.7 L461.1 153.9 L464.9 150.9 L468.8 148.0 L472.7 145.4 L476.5 143.1 L480.3 141.4 L484.2 140.3 L488.1 140.0 L491.9 140.6 L495.8 142.0 L499.6 144.3 L503.4 147.5 L507.3 151.5 L511.2 156.2 L515.0 161.6 L515.0 157.6 L130.0 157.6 Z"/><path class="c-gap" d="M515.0 161.6 L518.8 167.5 L522.7 173.7 L526.5 180.2 L530.4 186.7 L534.2 193.0 L538.1 199.1 L542.0 204.8 L545.8 209.9 L549.7 214.5 L553.5 218.3 L557.3 221.4 L561.2 223.8 L565.0 225.5 L568.9 226.6 L572.8 227.0 L576.6 227.0 L580.5 226.6 L584.3 225.9 L588.2 225.0 L592.0 224.2 L595.8 223.3 L599.7 222.6 L603.5 222.1 L607.4 221.9 L611.2 221.9 L615.1 222.2 L619.0 222.6 L622.8 223.3 L626.7 224.0 L630.5 224.7 L634.3 225.2 L638.2 225.5 L642.1 225.4 L645.9 224.8 L649.8 223.6 L653.6 221.8 L657.4 219.2 L661.3 215.9 L665.1 211.8 L669.0 207.0 L672.9 201.4 L676.7 195.3 L680.6 188.7 L684.4 181.6 L688.2 174.4 L692.1 167.1 L695.9 159.9 L699.8 153.0 L703.6 146.5 L707.5 140.6 L711.4 135.4 L715.2 131.0 L719.1 127.5 L722.9 124.9 L726.8 123.1 L730.6 122.3 L734.4 122.3 L738.3 123.1 L742.1 124.4 L746.0 126.3 L749.9 128.5 L753.7 131.0 L757.6 133.4 L761.4 135.8 L765.2 138.0 L769.1 139.8 L772.9 141.1 L776.8 141.9 L780.6 142.2 L784.5 141.9 L788.4 141.0 L792.2 139.6 L796.1 137.7 L799.9 135.5 L803.8 133.0 L807.6 130.3 L811.4 127.6 L815.3 124.9 L819.1 122.5 L823.0 120.3 L826.9 118.4 L830.7 116.9 L834.6 115.9 L838.4 115.2 L842.2 115.0 L846.1 115.0 L849.9 115.3 L853.8 115.8 L857.6 116.4 L861.5 116.8 L865.4 117.1 L869.2 117.1 L873.1 116.6 L876.9 115.6 L880.8 114.1 L884.6 111.9 L888.4 109.0 L892.3 105.5 L896.1 101.4 L900.0 96.8 L900.0 161.6 L515.0 161.6 Z"/><path class="c-stel" d="M130.0 157.6 L515.0 157.6 L515.0 161.6 L900.0 161.6"/><path class="c-lane" d="M130.0 157.6 L207.0 157.6 L207.0 110.2 L284.0 110.2 L284.0 50.7 L361.0 50.7 L361.0 125.8 L438.0 125.8 L438.0 165.3 L515.0 165.3 L515.0 161.6 L592.0 161.6 L592.0 224.2 L669.0 224.2 L669.0 207.0 L746.0 207.0 L746.0 126.3 L823.0 126.3 L823.0 120.3 L900.0 120.3"/><path class="c-price" d="M130.0 157.6 L133.8 153.7 L137.7 149.7 L141.6 145.8 L145.4 142.0 L149.2 138.3 L153.1 135.0 L156.9 132.1 L160.8 129.5 L164.7 127.3 L168.5 125.5 L172.3 124.1 L176.2 122.8 L180.1 121.8 L183.9 120.8 L187.8 119.7 L191.6 118.5 L195.4 117.1 L199.3 115.2 L203.1 113.0 L207.0 110.2 L210.9 107.0 L214.7 103.1 L218.6 98.8 L222.4 94.0 L226.2 88.7 L230.1 83.2 L233.9 77.6 L237.8 71.9 L241.6 66.3 L245.5 61.0 L249.4 56.2 L253.2 52.0 L257.1 48.5 L260.9 45.8 L264.8 44.1 L268.6 43.4 L272.5 43.7 L276.3 45.1 L280.1 47.4 L284.0 50.7 L287.9 54.8 L291.7 59.6 L295.5 64.9 L299.4 70.7 L303.2 76.7 L307.1 82.8 L311.0 88.8 L314.8 94.6 L318.6 100.1 L322.5 105.1 L326.4 109.5 L330.2 113.4 L334.0 116.6 L337.9 119.3 L341.8 121.3 L345.6 122.9 L349.5 124.0 L353.3 124.8 L357.1 125.4 L361.0 125.8 L364.9 126.3 L368.7 126.9 L372.5 127.7 L376.4 128.8 L380.2 130.3 L384.1 132.1 L387.9 134.4 L391.8 136.9 L395.7 139.8 L399.5 143.0 L403.3 146.3 L407.2 149.7 L411.1 153.0 L414.9 156.1 L418.8 158.9 L422.6 161.3 L426.4 163.2 L430.3 164.6 L434.2 165.3 L438.0 165.3 L441.8 164.7 L445.7 163.5 L449.6 161.6 L453.4 159.4 L457.2 156.7 L461.1 153.9 L464.9 150.9 L468.8 148.0 L472.7 145.4 L476.5 143.1 L480.3 141.4 L484.2 140.3 L488.1 140.0 L491.9 140.6 L495.8 142.0 L499.6 144.3 L503.4 147.5 L507.3 151.5 L511.2 156.2 L515.0 161.6 L518.8 167.5 L522.7 173.7 L526.5 180.2 L530.4 186.7 L534.2 193.0 L538.1 199.1 L542.0 204.8 L545.8 209.9 L549.7 214.5 L553.5 218.3 L557.3 221.4 L561.2 223.8 L565.0 225.5 L568.9 226.6 L572.8 227.0 L576.6 227.0 L580.5 226.6 L584.3 225.9 L588.2 225.0 L592.0 224.2 L595.8 223.3 L599.7 222.6 L603.5 222.1 L607.4 221.9 L611.2 221.9 L615.1 222.2 L619.0 222.6 L622.8 223.3 L626.7 224.0 L630.5 224.7 L634.3 225.2 L638.2 225.5 L642.1 225.4 L645.9 224.8 L649.8 223.6 L653.6 221.8 L657.4 219.2 L661.3 215.9 L665.1 211.8 L669.0 207.0 L672.9 201.4 L676.7 195.3 L680.6 188.7 L684.4 181.6 L688.2 174.4 L692.1 167.1 L695.9 159.9 L699.8 153.0 L703.6 146.5 L707.5 140.6 L711.4 135.4 L715.2 131.0 L719.1 127.5 L722.9 124.9 L726.8 123.1 L730.6 122.3 L734.4 122.3 L738.3 123.1 L742.1 124.4 L746.0 126.3 L749.9 128.5 L753.7 131.0 L757.6 133.4 L761.4 135.8 L765.2 138.0 L769.1 139.8 L772.9 141.1 L776.8 141.9 L780.6 142.2 L784.5 141.9 L788.4 141.0 L792.2 139.6 L796.1 137.7 L799.9 135.5 L803.8 133.0 L807.6 130.3 L811.4 127.6 L815.3 124.9 L819.1 122.5 L823.0 120.3 L826.9 118.4 L830.7 116.9 L834.6 115.9 L838.4 115.2 L842.2 115.0 L846.1 115.0 L849.9 115.3 L853.8 115.8 L857.6 116.4 L861.5 116.8 L865.4 117.1 L869.2 117.1 L873.1 116.6 L876.9 115.6 L880.8 114.1 L884.6 111.9 L888.4 109.0 L892.3 105.5 L896.1 101.4 L900.0 96.8"/><rect class="c-lb" x="133.0" y="282" width="71" height="24" rx="3"/><rect class="c-lb" x="210.0" y="282" width="71" height="24" rx="3"/><rect class="c-lb" x="287.0" y="282" width="71" height="24" rx="3"/><rect class="c-lb" x="364.0" y="282" width="71" height="24" rx="3"/><rect class="c-lb" x="441.0" y="282" width="71" height="24" rx="3"/><rect class="c-lb" x="518.0" y="282" width="71" height="24" rx="3"/><rect class="c-lb" x="595.0" y="282" width="71" height="24" rx="3"/><rect class="c-lb" x="672.0" y="282" width="71" height="24" rx="3"/><rect class="c-lb" x="749.0" y="282" width="71" height="24" rx="3"/><rect class="c-lb" x="826.0" y="282" width="71" height="24" rx="3"/><rect class="c-sb" x="133.0" y="318" width="379" height="36" rx="6"/><rect class="c-sb" x="518.0" y="318" width="379" height="36" rx="6"/><text class="c-lab c-lab-lane" x="0" y="300">Lane · 1s</text><text class="c-lab c-lab-harbor" x="0" y="342">Stellar · ~5s</text><text class="c-tick" x="0" y="32">Price</text><text class="c-tick" x="130" y="384" text-anchor="start">0s</text><text class="c-tick" x="515" y="384" text-anchor="middle">5s</text><text class="c-tick" x="900" y="384" text-anchor="end">10s</text></svg></div>
-      <div class="facts">
-        <div class="fact"><b class="harbor-t">~5s</b><p>Stellar ledger close. Protocol 28, live since September 16, 2026, keeps that target.</p></div>
-        <div class="fact"><b>0.2s</b><p>Median order latency on the leading onchain order book (Hyperliquid, co-located clients).</p></div>
-        <div class="fact"><b class="harbor-t">2.44M</b><p>Accounts holding USDC on Stellar, with $381M in circulation (Stellar Light, September 28, 2026).</p></div>
+      <div class="filegrid diffgrid" id="diff" role="tabpanel" aria-labelledby="tab-0">
+        <pre class="lanefile" id="diffA" aria-label="The change to the lane file"><span class="ln c"># lane.toml</span><span class="ln">  <span class="h">[[env.testnet.validators]]</span></span><span class="ln del"><span class="m">-</span> name = "3"</span><span class="ln del"><span class="m">-</span> key = "acme-v3"</span><span class="ln add"><span class="m">+</span> name = "4"</span><span class="ln add"><span class="m">+</span> key = "acme-v4"</span></pre>
+        <div class="lanefile out" id="diffB" aria-label="What plan prints">
+          <p class="c">$ caravel plan lane.toml --env testnet</p>
+          <p class="c">Lane acme-pay-0 · env testnet · network testnet<br>&nbsp;&nbsp;signers: 2 of 3 at epoch 2</p>
+          <ol class="pl">
+            <li class="in"><span class="sg">~</span><span>write</span><span>sequencer.toml</span></li>
+            <li class="in"><span class="sg">~</span><span>write</span><span>validator-4.toml</span></li>
+            <li class="in"><span class="sg">+</span><span>start</span><span>validator-4</span></li>
+            <li class="in st"><span class="sg">~</span><span>rotate</span><span>signers, epoch 1 → 2 (admin_rotate_signers: a testnet-only admin power)</span></li>
+            <li class="in"><span class="sg">~</span><span>restart</span><span>sequencer</span></li>
+            <li class="in"><span class="sg">-</span><span>stop</span><span>validator-3</span></li>
+          </ol>
+          <p class="sum">6 step(s), 0 problem(s).</p>
+        </div>
       </div>
+      <p class="srcs">Output as the tool prints it in its plan tests, with the header shortened. Coral steps run on your host, teal ones on Stellar.</p>
     </div>
   </section>
 
@@ -450,23 +538,23 @@ footer p { font-size: .875rem; color: var(--muted); }
     <div class="wrap">
       <div class="head">
         <p class="eyebrow">How it works</p>
-        <h2 id="how-h">Every dollar starts and ends on Stellar.</h2>
-        <p class="lede">A lane is its own Stellar-based chain with its own validators and rules. It runs Soroban, so existing contracts, SDKs and wallets carry over. Stellar holds the money and checks the lane's work.</p>
+        <h2 id="how-h">Nodes on your host. Money on Stellar.</h2>
+        <p class="lede">After <code>apply</code>, the lane's sequencer and validators run on your host and its settlement contract is live on Stellar. The sequencer and every validator run the lane's app, a Soroban Wasm. Users deposit and withdraw only on Stellar.</p>
       </div>
       <div class="bandkey">
-        <span><i class="bk bk-lane"></i>Top band: a Caravel lane</span>
-        <span><i class="bk bk-harbor"></i>Bottom band: Stellar mainnet, ~5s ledgers</span>
+        <span><i class="bk bk-lane"></i>Top band: your lane, on your host</span>
+        <span><i class="bk bk-harbor"></i>Bottom band: Stellar</span>
       </div>
       <ol class="steps" style="list-style:none; padding:0">
-        <li class="step"><svg class="glyph" viewBox="0 0 240 120" aria-hidden="true"><rect class="g-lane" x="0" y="0" width="240" height="54" rx="8"/><rect class="g-harbor" x="0" y="66" width="240" height="54" rx="8"/><rect class="g-sb" x="36" y="80" width="48" height="26" rx="4"/><rect class="g-lb" x="164" y="14" width="26" height="26" rx="3"/><path class="g-arrow" d="M84 93 L120 93 L120 30 L156 30"/><path class="g-head" d="M151 23 L160 30 L151 37"/></svg><span class="where harbor-t">Stellar → lane</span><h3>Deposit</h3><p>Lock USDC in the settlement contract on Stellar. The same amount appears on the lane.</p></li>
-        <li class="step"><svg class="glyph" viewBox="0 0 240 120" aria-hidden="true"><rect class="g-lane" x="0" y="0" width="240" height="54" rx="8"/><rect class="g-harbor" x="0" y="66" width="240" height="54" rx="8"/><rect class="g-lb" x="22" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="62" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="102" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="142" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="182" y="14" width="30" height="26" rx="3"/></svg><span class="where lane-t">On the lane</span><h3>Trade at 1s</h3><p>Orders match on a Soroban order book in every 1-second block.</p></li>
-        <li class="step"><svg class="glyph" viewBox="0 0 240 120" aria-hidden="true"><rect class="g-lane" x="0" y="0" width="240" height="54" rx="8"/><rect class="g-harbor" x="0" y="66" width="240" height="54" rx="8"/><rect class="g-lb" x="22" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="62" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="102" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="142" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="182" y="14" width="30" height="26" rx="3"/><rect class="g-sb" x="130" y="80" width="88" height="26" rx="4"/><line class="g-arrow" x1="214" y1="44" x2="214" y2="74"/><path class="g-head" d="M207 67 L214 76 L221 67"/></svg><span class="where lane-t">Lane → Stellar</span><h3>Checkpoint</h3><p>Every few blocks, the validators sign the lane's new state and it's posted to Stellar, where a contract verifies it.</p></li>
-        <li class="step"><svg class="glyph" viewBox="0 0 240 120" aria-hidden="true"><rect class="g-lane" x="0" y="0" width="240" height="54" rx="8"/><rect class="g-harbor" x="0" y="66" width="240" height="54" rx="8"/><rect class="g-sb" x="22" y="80" width="88" height="26" rx="4"/><line class="g-arrow" x1="116" y1="93" x2="176" y2="93"/><path class="g-head" d="M171 86 L180 93 L171 100"/><circle class="g-wallet" cx="204" cy="93" r="14"/></svg><span class="where harbor-t">On Stellar</span><h3>Withdraw</h3><p>USDC is released back to your Stellar wallet, and only against a verified checkpoint.</p></li>
+        <li class="step"><svg class="glyph" viewBox="0 0 240 120" aria-hidden="true"><rect class="g-lane" x="0" y="0" width="240" height="54" rx="8"/><rect class="g-harbor" x="0" y="66" width="240" height="54" rx="8"/><rect class="g-sb" x="36" y="80" width="48" height="26" rx="4"/><rect class="g-lb" x="164" y="14" width="26" height="26" rx="3"/><path class="g-arrow" d="M84 93 L120 93 L120 30 L156 30"/><path class="g-head" d="M151 23 L160 30 L151 37"/></svg><span class="where harbor-t">Stellar → lane</span><h3>Deposit</h3><p>Lock the lane's token in its settlement contract on Stellar. The same amount appears on the lane.</p></li>
+        <li class="step"><svg class="glyph" viewBox="0 0 240 120" aria-hidden="true"><rect class="g-lane" x="0" y="0" width="240" height="54" rx="8"/><rect class="g-harbor" x="0" y="66" width="240" height="54" rx="8"/><rect class="g-lb" x="22" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="62" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="102" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="142" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="182" y="14" width="30" height="26" rx="3"/></svg><span class="where lane-t">On the lane</span><h3>Use the lane</h3><p>Every block runs the lane's app: an order book on Caravel Perps, transfers on Payments.</p></li>
+        <li class="step"><svg class="glyph" viewBox="0 0 240 120" aria-hidden="true"><rect class="g-lane" x="0" y="0" width="240" height="54" rx="8"/><rect class="g-harbor" x="0" y="66" width="240" height="54" rx="8"/><rect class="g-lb" x="22" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="62" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="102" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="142" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="182" y="14" width="30" height="26" rx="3"/><rect class="g-sb" x="130" y="80" width="88" height="26" rx="4"/><line class="g-arrow" x1="214" y1="44" x2="214" y2="74"/><path class="g-head" d="M207 67 L214 76 L221 67"/></svg><span class="where lane-t">Lane → Stellar</span><h3>Checkpoint</h3><p>Every few blocks, the validators sign the lane's new state. It goes to Stellar with its block data, and the settlement contract checks their signatures.</p></li>
+        <li class="step"><svg class="glyph" viewBox="0 0 240 120" aria-hidden="true"><rect class="g-lane" x="0" y="0" width="240" height="54" rx="8"/><rect class="g-harbor" x="0" y="66" width="240" height="54" rx="8"/><rect class="g-sb" x="22" y="80" width="88" height="26" rx="4"/><line class="g-arrow" x1="116" y1="93" x2="176" y2="93"/><path class="g-head" d="M171 86 L180 93 L171 100"/><circle class="g-wallet" cx="204" cy="93" r="14"/></svg><span class="where harbor-t">On Stellar</span><h3>Withdraw</h3><p>The token goes back to your Stellar wallet, and only against an accepted checkpoint.</p></li>
       </ol>
       <div class="props">
-        <div class="prop"><h3>Your own settings</h3><p>Block time, fees, reserves and resource limits.</p></div>
-        <div class="prop"><h3>Your own modules</h3><p>Gas token, validator rules, access control, order matching.</p></div>
-        <div class="prop st"><h3>Stellar settlement</h3><p>Deposits, withdrawals and final state stay on mainnet.</p></div>
+        <div class="prop"><h3>Your host</h3><p>This machine, or a Linux host you already have, over ssh. <code>apply</code> installs the release and starts every node there.</p></div>
+        <div class="prop"><h3>Your app</h3><p>Perps or Payments today, each a Soroban Wasm engine that every validator runs again.</p></div>
+        <div class="prop st"><h3>Stellar underneath</h3><p>The settlement contract holds the token and accepts each checkpoint.</p></div>
       </div>
     </div>
   </section>
@@ -475,55 +563,30 @@ footer p { font-size: .875rem; color: var(--muted); }
     <div class="wrap">
       <div class="head">
         <p class="eyebrow">Trust model</p>
-        <h2 id="trust-h">Fast on the lane. Final on Stellar.</h2>
-        <p class="lede">A trade confirms in about a second. It becomes final once Stellar has verified the checkpoint that contains it.</p>
+        <h2 id="trust-h">Winding down is a command too.</h2>
+        <p class="lede">A contract on Stellar can't be deleted, so <code>destroy</code> closes a lane the way a stalled lane closes. It drains the lane, writes every account's exit proof, waits out the forced-withdrawal window and freezes the contract. Then every account withdraws its balance on Stellar.</p>
       </div>
-      <div class="scroll-x"><svg class="chart" viewBox="0 0 900 222" role="img" aria-label="A trade at 1.3 seconds is soft-confirmed by the next 1-second lane block. After five blocks a checkpoint is posted to Stellar; the trade is final when the Stellar ledger that includes the verified checkpoint closes."><rect class="c-lb" x="133" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="197" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="261" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="325" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="389" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="453" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="517" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="581" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="645" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="709" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="773" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="837" y="36" width="58" height="28" rx="3"/><rect class="c-sb" x="133" y="132" width="314" height="40" rx="6"/><rect class="c-sb" x="453" y="132" width="314" height="40" rx="6"/><rect class="c-sb" x="773" y="132" width="122" height="40" rx="6"/><rect class="c-cp" x="442" y="84" width="16" height="16" transform="rotate(45 450 92)"/><line class="c-drop" x1="450" y1="104" x2="450" y2="126"/><rect class="c-cp" x="762" y="84" width="16" height="16" transform="rotate(45 770 92)"/><line class="c-drop" x1="770" y1="104" x2="770" y2="126"/><line class="c-trade" x1="213.2" y1="22" x2="213.2" y2="196"/><path class="c-br-lane" d="M213.2 26 L213.2 18 L258 18 L258 26"/><path class="c-br-harbor" d="M213.2 182 L213.2 190 L770 190 L770 182"/><text class="c-lab c-lab-lane" x="0" y="56">Lane · 1s</text><text class="c-lab" x="0" y="98">Checkpoint</text><text class="c-lab c-lab-harbor" x="0" y="158">Stellar · ~5s</text><text class="c-note c-lab-lane" x="268" y="22">Soft confirmation: next 1s block</text><text class="c-note c-lab-harbor" x="221.2" y="214">Hard settlement: a Stellar ledger includes the verified checkpoint</text><text class="c-note" x="205.2" y="14" text-anchor="end">Your trade</text></svg></div>
+      <div class="scroll-x"><svg class="chart" viewBox="0 0 900 248" role="img" aria-label="caravel destroy in four steps. Drain: the lane makes blocks until its last checkpoint is accepted on Stellar. Export: every account's exit proof is written to exit.json. Trigger, then wait: a forced withdrawal that nobody processes starts the force-inclusion window, while the validators keep serving proofs. Freeze: the contract is frozen, and users withdraw on Stellar with their exit proofs."><text class="c-phase" x="133" y="16">1 · Drain</text><text class="c-phase" x="389" y="16">2 · Export</text><text class="c-phase" x="536" y="16">3 · Trigger, then wait</text><text class="c-phase" x="736" y="16">4 · Freeze</text><rect class="c-lb" x="133" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="197" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="261" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="325" y="36" width="58" height="28" rx="3"/><path class="c-doc" d="M402 34 H418 L426 42 V66 H402 Z M418 34 V42 H426"/><text class="c-note" x="436" y="55">exit.json</text><rect class="c-keep" x="536" y="37" width="359" height="26" rx="3"/><text class="c-note c-lab-lane" x="550" y="55">Validators keep serving proofs</text><rect class="c-cp" x="378" y="84" width="16" height="16" transform="rotate(45 386 92)"/><line class="c-drop" x1="386" y1="104" x2="386" y2="126"/><text class="c-note" x="402" y="97">Last checkpoint</text><circle class="c-mk" cx="536" cy="92" r="7"/><line class="c-drop" x1="536" y1="102" x2="536" y2="126"/><text class="c-note" x="550" y="97">Forced withdrawal</text><rect class="c-mk" x="729" y="85" width="14" height="14" rx="2"/><line class="c-drop" x1="736" y1="102" x2="736" y2="126"/><text class="c-note" x="750" y="97">Freeze</text><rect class="c-sb" x="133" y="132" width="250" height="40" rx="6"/><rect class="c-sb" x="389" y="132" width="141" height="40" rx="6"/><rect class="c-sb" x="536" y="132" width="194" height="40" rx="6"/><path class="c-cut" d="M626 126 L634 178 M636 126 L644 178"/><rect class="c-sb" x="736" y="132" width="159" height="40" rx="6"/><path class="c-br-harbor" d="M536 182 L536 190 L730 190 L730 182"/><text class="c-note c-lab-harbor" x="633" y="212" text-anchor="middle">force_inclusion_window_secs</text><text class="c-tick" x="633" y="232" text-anchor="middle">1 h on Caravel Perps</text><text class="c-note" x="742" y="212">Users withdraw</text><text class="c-note" x="742" y="232">with exit proofs</text><text class="c-lab c-lab-lane" x="0" y="56">Lane</text><text class="c-lab" x="0" y="98">Contract calls</text><text class="c-lab c-lab-harbor" x="0" y="158">Stellar</text></svg></div>
       <div class="cards3">
-        <div class="tcard soft"><span class="pill l">~1s</span><h3>Soft confirmation</h3><p>The lane's validators confirm your trade in the next block. Between checkpoints you're trusting them, the same trade-off every rollup makes.</p></div>
-        <div class="tcard hard"><span class="pill h">Checkpoint + ~5s</span><h3>Hard settlement</h3><p>Once the settlement contract verifies the checkpoint and a Stellar ledger closes, the trade is final. You're trusting Stellar and the math.</p></div>
-        <div class="tcard exit"><span class="pill o">Planned</span><h3>If the lane stops</h3><p>Your USDC never leaves Stellar. The exit path lets you withdraw against the last verified checkpoint.</p></div>
+        <div class="tcard soft"><span class="pill l">Between checkpoints</span><h3>You trust the validators</h3><p>They run every block again with the lane's Wasm and sign only what they checked. Between checkpoints you rely on them, the same trade-off every rollup makes.</p></div>
+        <div class="tcard hard"><span class="pill h">At each checkpoint</span><h3>Stellar checks their threshold</h3><p>The settlement contract accepts a checkpoint, with its block data, only with the validators' threshold signature. Anyone can replay the lane from Stellar to check them.</p></div>
+        <div class="tcard exit"><span class="pill o">Live</span><h3>If the lane stops</h3><p>If it stops checkpointing, or ignores what users send through Stellar, anyone can freeze it. Every account then withdraws its last checkpointed balance on Stellar.</p></div>
       </div>
-    </div>
-  </section>
-
-  <section class="band" id="now" aria-labelledby="now-h">
-    <div class="wrap">
-      <div class="head">
-        <p class="eyebrow">Why now</p>
-        <h2 id="now-h">Verifying a lane on Stellar just got cheap.</h2>
-        <p class="lede">Checking another chain's work inside a Stellar contract used to be impractical. Four protocol upgrades and one optimization changed that.</p>
-      </div>
-      <ol class="tl">
-        <li><time datetime="2024-12">Dec 2024</time><span class="dot"></span><h3>Protocol 22</h3><p>BLS12-381 host functions, so validators can aggregate signatures (CAP-59).</p></li>
-        <li><time datetime="2026-01">Jan 2026</time><span class="dot"></span><h3>Protocol 25</h3><p>BN254 and Poseidon, the building blocks of most ZK proofs (CAP-74 and CAP-75).</p></li>
-        <li><time datetime="2026-05">May 2026</time><span class="dot"></span><h3>Protocol 26</h3><p>Faster BN254 math for proof checks (CAP-80).</p></li>
-        <li><time datetime="2026-06">Jun 2026</time><span class="dot"></span><h3>Circle CCTP</h3><p>Native USDC moves between Stellar and other chains.</p></li>
-        <li><time datetime="2026-08">Aug 2026</time><span class="dot"></span><h3>Nethermind</h3><p>Noir UltraHonk proof checks on Soroban made 64% cheaper.</p></li>
-        <li><time datetime="2026-10">Oct 2026</time><span class="dot"></span><h3>Caravel</h3><p>Custom lanes that checkpoint to Stellar.</p></li>
-      </ol>
-      <div class="cost">
-        <h3>Cost to verify one ZK proof on Soroban</h3>
-        <p class="sub">CPU instructions for the Noir UltraHonk verifier, against the per-transaction limit.</p>
-        <div class="bar-row"><span class="lab">Transaction limit</span><div class="bar"><i class="limit bar-limit"></i><em>400M</em></div></div>
-        <div class="bar-row"><span class="lab">Before, in pure Wasm</span><div class="bar"><i class="before"></i><em>224.8M · 56%</em></div></div>
-        <div class="bar-row"><span class="lab">After, with host functions</span><div class="bar"><i class="after"></i><em class="harbor-t">~80M · 20%</em></div></div>
-        <p class="src">Nethermind, "Making Noir Verification Cheaper on Stellar," August 2026. A shielded-pool proof verified for 0.01242 XLM on testnet.</p>
-      </div>
+      <p class="srcs">Testnet software, not audited. A lane's admin can still upgrade its contract and rotate its validators, and Caravel Perps' three validators run on one machine operated by the Caravel team. The token's own rules still apply: an issuer's freeze or clawback reaches the contract's balance too.</p>
     </div>
   </section>
 
   <section class="band" id="lanes" aria-labelledby="lanes-h">
     <div class="wrap">
       <div class="head">
-        <p class="eyebrow">Lanes</p>
-        <h2 id="lanes-h">Perps first. Then any team that needs its own rules.</h2>
+        <p class="eyebrow">Templates</p>
+        <h2 id="lanes-h">Start from a template. Set your own rules.</h2>
       </div>
       <div class="lanes">
-        <article class="lanecard first"><div class="row5"><i></i><i></i><i></i><i></i><i></i></div><span class="tag">First lane</span><h3>Caravel Perps</h3><p class="cfgline">1s blocks · fees in USDC</p><p>A fully onchain order book for perpetual futures, quoting every second and settling in USDC.</p></article>
-        <article class="lanecard"><div class="row5"><i></i><i></i><i></i><i></i><i></i></div><span class="tag">Example</span><h3>Agent payments</h3><p class="cfgline">Sponsored fees · gas in USDC</p><p>Pay-per-request networks where agents never need to hold XLM.</p></article>
-        <article class="lanecard"><div class="row5"><i></i><i></i><i></i><i></i><i></i></div><span class="tag">Example</span><h3>Anchors and institutions</h3><p class="cfgline">KYC'd validators · allow-listed accounts</p><p>A permissioned lane with your own compliance rules, settling on Stellar.</p></article>
-        <article class="lanecard"><div class="row5"><i></i><i></i><i></i><i></i><i></i></div><span class="tag">Example</span><h3>Real-time games</h3><p class="cfgline">Own gas token · 0.5s blocks</p><p>Moves confirmed at play speed, with the game's own token paying for gas.</p></article>
+        <article class="lanecard first"><div class="row5"><i></i><i></i><i></i><i></i><i></i></div><span class="tag">Live on testnet</span><h3>Caravel Perps</h3><p class="cfgline">template = "perps"</p><p>Lane #1: perpetual futures on an order book, in testnet USDC. Its whole deployment is one <code>[env.testnet]</code> table.</p></article>
+        <article class="lanecard"><div class="row5"><i></i><i></i><i></i><i></i><i></i></div><span class="tag">Template</span><h3>Payments</h3><p class="cfgline">template = "payments"</p><p>Transfers between lane accounts, with a flat fee to a treasury or none, in the token you choose.</p></article>
+        <article class="lanecard"><div class="row5"><i></i><i></i><i></i><i></i><i></i></div><span class="tag">Idea</span><h3>Anchors and issuers</h3><p class="cfgline">mode = "allowlist"</p><p>A permissioned Payments lane with your own validators, settling in your own asset.</p></article>
+        <article class="lanecard"><div class="row5"><i></i><i></i><i></i><i></i><i></i></div><span class="tag">Idea</span><h3>Real-time games</h3><p class="cfgline">block_time_ms = 200</p><p>Short blocks for play, settling in the game's own asset, on an engine of its own.</p></article>
       </div>
     </div>
   </section>
@@ -532,14 +595,14 @@ footer p { font-size: .875rem; color: var(--muted); }
     <div class="wrap">
       <div class="head">
         <p class="eyebrow">Roadmap</p>
-        <h2 id="roadmap-h">From trusted validators to trustless lanes.</h2>
+        <h2 id="roadmap-h">From team-run validators to proven lanes.</h2>
         <p class="lede">Each step asks users to trust less.</p>
       </div>
       <div class="stairs">
-        <div class="stair l"><span class="when lane-t">Now</span><h3>Signed checkpoints</h3><p>Three validators run by the team. Stellar checks their aggregated BLS signature on every checkpoint.</p><div class="riser"></div></div>
-        <div class="stair"><span class="when harbor-t">Next · Q4 2026</span><h3>Validity proofs</h3><p>A ZK proof replaces the signature check. The exit path and a public testnet ship with it.</p><div class="riser"></div></div>
-        <div class="stair"><span class="when harbor-t">Then</span><h3>Bonded validators</h3><p>Anyone can run a validator. Rewards are a share of fees in USDC, vesting and slashable.</p><div class="riser"></div></div>
-        <div class="stair l"><span class="when lane-t">Later</span><h3>Lane launch kit</h3><p>Pick block time, gas token, fees and validators, and deploy a lane settled on Stellar.</p><div class="riser"></div></div>
+        <div class="stair l"><span class="when lane-t">Now</span><h3>Lanes from one file</h3><p>Plan, apply, check and wind down a lane, on this machine or your own host, in the token you choose. On testnet.</p><div class="riser"></div></div>
+        <div class="stair l"><span class="when lane-t">Now</span><h3>Signed checkpoints</h3><p>Validators sign every checkpoint (2 of 3 on Caravel Perps, run by the team) and Stellar checks the signatures. The exit path is live.</p><div class="riser"></div></div>
+        <div class="stair"><span class="when harbor-t">Next</span><h3>Validity proofs</h3><p>A ZK proof replaces the signature check, so a wrong state can't be accepted.</p><div class="riser"></div></div>
+        <div class="stair"><span class="when harbor-t">Then</span><h3>Bonded validators</h3><p>Anyone can run a validator, with a bond it loses for signing two versions of a checkpoint.</p><div class="riser"></div></div>
       </div>
     </div>
   </section>
@@ -549,16 +612,16 @@ footer p { font-size: .875rem; color: var(--muted); }
       <div class="join">
         <div>
           <p class="eyebrow">Testnet waitlist</p>
-          <h2 id="join-h">Get on the lane early.</h2>
-          <p class="lede">We're opening the testnet in waves. Tell us who you are and we'll send access when your wave opens.</p>
+          <h2 id="join-h">Put your lane on testnet.</h2>
+          <p class="lede">We're opening the testnet in waves. Tell us what you'd run and we'll send access when your wave opens.</p>
           <div class="cta-row"><a class="btn btn-primary" data-waitlist href="#join">Join the testnet waitlist</a></div>
           <p class="small" id="join-note">Opens in a new tab.</p>
         </div>
         <ul class="who">
-          <li><span><b>Market makers.</b> First wave. Quote on a 1-second order book and tell us what breaks.</span></li>
-          <li><span><b>Traders.</b> Perps with an order book, settling in Stellar USDC.</span></li>
-          <li class="v"><span><b>Validator operators.</b> Run a lane validator and earn a share of fees.</span></li>
-          <li class="v"><span><b>Builders.</b> Teams that want their own lane on Stellar.</span></li>
+          <li><span><b>Builders.</b> First wave. Declare a lane, apply it on testnet, and tell us what breaks.</span></li>
+          <li><span><b>Traders and market makers.</b> Trade on Caravel Perps, lane #1, in testnet USDC.</span></li>
+          <li class="v"><span><b>Operators.</b> Run a lane's nodes on your own host.</span></li>
+          <li class="v"><span><b>Anchors and issuers.</b> A lane that settles in your own asset, under your own access rules.</span></li>
         </ul>
       </div>
     </div>
@@ -568,7 +631,7 @@ footer p { font-size: .875rem; color: var(--muted); }
 <footer>
   <div class="wrap">
     <div>
-      <p><b style="color:var(--ink)">Caravel</b> · Custom lanes that always come home to Stellar.</p>
+      <p><b style="color:var(--ink)">Caravel</b> · Appchains as code, settled on Stellar.</p>
       <p>Built in Lisbon</p>
     </div>
     <div class="social" id="social"></div>
@@ -579,6 +642,7 @@ footer p { font-size: .875rem; color: var(--muted); }
 /* Links: paste your URLs here. Empty ones stay hidden. */
 const WAITLIST_URL = "";
 const SOCIAL = { GitHub: "", X: "", Telegram: "" };
+const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 (function links() {
   const ok = /^https:\/\//.test(WAITLIST_URL);
@@ -595,53 +659,140 @@ const SOCIAL = { GitHub: "", X: "", Telegram: "" };
   });
 })();
 
-(function clocks() {
-  const track = document.getElementById("track");
-  const laneN = document.getElementById("laneN"), ledN = document.getElementById("ledN"), cpN = document.getElementById("cpN");
-  const VIS = 15, GAP = 6, LEFT = 0;
-  const T0 = 18.4;
-  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+/* The hero run. plan lists the steps, apply fills them one by one (Stellar ones take a ledger or so),
+   the lane starts when the sequencer does, and a second plan finds nothing to do.
+   Stellar ledgers run the whole time: the network is there before the lane is. */
+(function run() {
+  const fig = document.getElementById("run"), track = document.getElementById("track");
+  const planEl = document.getElementById("runplan"), rows = Array.from(planEl.children);
+  const verb = document.getElementById("verb"), said = document.getElementById("said"), replay = document.getElementById("replay"), wait = document.getElementById("wait");
+  const stN = document.getElementById("stN"), hoN = document.getElementById("hoN"), cpN = document.getElementById("cpN");
+  const st = rows.map((r) => r.classList.contains("st"));
+  const nSt = st.filter(Boolean).length, nHo = rows.length - nSt;
+
+  const SHOW = 0.3, STAG = 0.1, LISTED = SHOW + rows.length * STAG + 0.3;
+  const APPLY = LISTED + 1.1;
+  const spans = []; let at = APPLY;
+  rows.forEach((r, i) => { const d = st[i] ? 0.9 : 0.45; spans.push([at, at + d]); at += d + 0.1; });
+  const UP = spans[spans.length - 1][1], AGAIN = UP + 1.9;
+
+  const BLOCK = 0.8, EVERY = 5, VIS = 15, GAP = 6, T0 = 20;
   const mk = (cls, n) => Array.from({ length: n }, () => { const e = document.createElement("div"); e.className = cls; track.appendChild(e); return e; });
   const blocks = mk("blk", VIS + 3);
   const leds = mk("led", 6); leds.forEach((l) => { const f = document.createElement("span"); f.className = "fill"; l.appendChild(f); });
   const cps = mk("cp", 5);
   let W = 0, pitch = 0;
   function size() { W = track.clientWidth; pitch = W / VIS; blocks.forEach((b) => (b.style.width = (pitch - GAP) + "px")); leds.forEach((l) => (l.style.width = (pitch * 5 - GAP) + "px")); }
-  function draw(t) {
-    const xOf = (time) => W - (t - time) * pitch;
+  const put = (e, x, show) => { e.style.transform = "translate3d(" + x.toFixed(1) + "px,0,0)"; e.style.visibility = show ? "visible" : "hidden"; };
+  const text = (e, s) => { if (e.textContent !== s) e.textContent = s; };
+
+  function draw(tau, from) {                 // tau and from are in lane blocks
+    const xOf = (b) => W - (tau - b) * pitch;
     let bi = 0;
-    for (let i = Math.floor(t) - VIS - 1; i <= Math.floor(t); i++) {
+    for (let i = Math.max(Math.floor(tau) - VIS - 1, from); i <= Math.floor(tau); i++) {
       const b = blocks[bi++]; if (!b) break;
-      const x = xOf(i);
-      b.style.transform = "translate3d(" + x.toFixed(1) + "px,0,0)";
-      b.classList.toggle("done", i + 1 <= t);
-      b.style.visibility = x > -pitch && x < W ? "visible" : "hidden";
+      const x = xOf(i); put(b, x, x > -pitch && x < W); b.classList.toggle("done", i + 1 <= tau);
     }
     for (; bi < blocks.length; bi++) blocks[bi].style.visibility = "hidden";
-    let li = 0, ci = 0;
-    for (let k = Math.floor(t / 5) - 3; k <= Math.floor(t / 5); k++) {
+    let li = 0;
+    for (let k = Math.floor(tau / 5) - 3; k <= Math.floor(tau / 5); k++) {
       const l = leds[li++]; if (!l) break;
-      const x = xOf(5 * k);
-      l.style.transform = "translate3d(" + x.toFixed(1) + "px,0,0)";
-      const done = 5 * k + 5 <= t;
-      l.classList.toggle("done", done);
-      l.firstChild.style.width = done ? "100%" : Math.max(0, Math.min(1, (t - 5 * k) / 5)) * 100 + "%";
-      l.style.visibility = x > -5 * pitch && x < W ? "visible" : "hidden";
-      const c = cps[ci++];
-      if (c) { const cx = xOf(5 * k) - GAP / 2 - 1; c.style.transform = "translate3d(" + cx.toFixed(1) + "px,0,0)"; c.style.visibility = 5 * k <= t && cx > 0 && cx < W ? "visible" : "hidden"; }
+      const x = xOf(5 * k), done = 5 * k + 5 <= tau;
+      put(l, x, x > -5 * pitch && x < W); l.classList.toggle("done", done);
+      l.firstChild.style.width = done ? "100%" : Math.max(0, Math.min(1, (tau - 5 * k) / 5)) * 100 + "%";
     }
     for (; li < leds.length; li++) leds[li].style.visibility = "hidden";
+    const n = tau >= from ? Math.floor((tau - from) / EVERY) : 0;
+    let ci = 0;
+    for (let m = Math.max(1, n - 3); m <= n; m++) {
+      const c = cps[ci++]; if (!c) break;
+      const x = xOf(from + m * EVERY) - GAP / 2 - 1; put(c, x, x > 0 && x < W);
+    }
     for (; ci < cps.length; ci++) cps[ci].style.visibility = "hidden";
-    laneN.textContent = "#" + Math.floor(t).toLocaleString("en-US");
-    ledN.textContent = "#" + Math.floor(t / 5).toLocaleString("en-US");
-    cpN.textContent = Math.floor(t / 5).toLocaleString("en-US");
+    return n;
   }
-  size(); draw(T0);
-  window.addEventListener("resize", () => { size(); if (reduce) draw(T0); });
-  if (reduce) return;
-  let start = null;
-  function frame(now) { if (start === null) start = now; draw(T0 + (now - start) / 1000); requestAnimationFrame(frame); }
-  requestAnimationFrame(frame);
+
+  function step(s) {                         // s: seconds since this run started
+    let dSt = 0, dHo = 0;
+    rows.forEach((r, i) => {
+      const [a, b] = spans[i], p = s <= a ? 0 : s >= b ? 1 : (s - a) / (b - a);
+      r.classList.toggle("in", s >= SHOW + i * STAG);
+      r.classList.toggle("on", p > 0 && p < 1);
+      r.classList.toggle("ok", p === 1);
+      if (r._p !== p) { r._p = p; r.lastChild.style.setProperty("--p", p.toFixed(3)); }
+      if (p === 1) { if (st[i]) dSt++; else dHo++; }
+    });
+    text(stN, dSt + "/" + nSt); text(hoN, dHo + "/" + nHo);
+    text(verb, s >= APPLY && s < AGAIN ? "apply" : "plan");
+    planEl.classList.toggle("idle", s >= AGAIN);
+    const msg = s >= AGAIN ? "No changes." : s >= UP ? "Applied. The lane is running." : s >= APPLY ? "Applying…" : s >= LISTED ? rows.length + " steps, 0 problems. Nothing sent yet." : "";
+    text(said, msg); said.classList.toggle("ok", s >= AGAIN);
+    wait.classList.toggle("gone", s >= UP);
+    if (s >= AGAIN) ran = true;
+    replay.hidden = REDUCE || !ran;
+  }
+
+  let t = 0, base = 0, last = null, raf = 0, ran = false;
+  function render() {
+    step(t - base);
+    text(cpN, String(draw((T0 + t) / BLOCK, Math.ceil((T0 + base + UP) / BLOCK))));
+  }
+  function loop(now) { if (last !== null) t += Math.min(0.1, (now - last) / 1000); last = now; render(); raf = requestAnimationFrame(loop); }
+  function go() { if (!raf) { last = null; raf = requestAnimationFrame(loop); } }
+  function halt() { cancelAnimationFrame(raf); raf = 0; }
+
+  size();
+  window.addEventListener("resize", () => { size(); render(); });
+  if (REDUCE) { t = AGAIN + 9; render(); return; }
+  render();
+  replay.addEventListener("click", () => { base = t; render(); });
+  if ("IntersectionObserver" in window) new IntersectionObserver((es) => es.forEach((e) => (e.isIntersecting ? go() : halt())), { threshold: 0.2 }).observe(fig);
+  else go();
+})();
+
+/* Plan examples: the diff on the left, the tool's output for it on the right (from its golden plan tests). */
+(function plans() {
+  const CASES = [
+    { diff: [[" ", "[[env.testnet.validators]]"], ["-", 'name = "3"'], ["-", 'key = "acme-v3"'], ["+", 'name = "4"'], ["+", 'key = "acme-v4"']],
+      epoch: 2,
+      rows: [["~", "write", "sequencer.toml"], ["~", "write", "validator-4.toml"], ["+", "start", "validator-4"], ["~", "rotate", "signers, epoch 1 → 2 (admin_rotate_signers: a testnet-only admin power)", "st"], ["~", "restart", "sequencer"], ["-", "stop", "validator-3"]],
+      sum: "6 step(s), 0 problem(s)." },
+    { diff: [[" ", "[node]"], ["-", "block_time_ms = 1000"], ["+", "block_time_ms = 500"]],
+      epoch: 1,
+      rows: [["~", "write", "lane.toml"], ["~", "restart", "validator-1"], ["~", "restart", "validator-2"], ["~", "restart", "validator-3"], ["~", "restart", "sequencer"], ["~", "restart", "relayer"]],
+      sum: "6 step(s), 0 problem(s)." },
+    { diff: [[" ", "[env.testnet.settlement_params]"], ["-", "escape_timeout_secs = 21600"], ["+", "escape_timeout_secs = 43200"]],
+      epoch: 1,
+      rows: [["!", "", "settlement_params.escape_timeout_secs: the contract has 21600, the lane file gives 43200. The constructor fixed it: destroy this lane, or give the lane a new name", "x"]],
+      sum: "0 step(s), 1 problem(s). Apply refuses until they are fixed." },
+  ];
+  const tabs = Array.from(document.querySelectorAll('#plan [role="tab"]'));
+  const pane = document.getElementById("diff"), A = document.getElementById("diffA"), B = document.getElementById("diffB");
+  const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  function show(i, focus) {
+    const c = CASES[i];
+    tabs.forEach((tb, j) => { tb.setAttribute("aria-selected", String(j === i)); tb.tabIndex = j === i ? 0 : -1; });
+    pane.setAttribute("aria-labelledby", tabs[i].id);
+    A.innerHTML = '<span class="ln c"># lane.toml</span>' + c.diff.map(([m, s]) => m === " "
+      ? '<span class="ln">  <span class="h">' + esc(s) + "</span></span>"
+      : '<span class="ln ' + (m === "+" ? "add" : "del") + '"><span class="m">' + m + "</span> " + esc(s) + "</span>").join("");
+    B.innerHTML = '<p class="c">$ caravel plan lane.toml --env testnet</p><p class="c">Lane acme-pay-0 · env testnet · network testnet<br>&nbsp;&nbsp;signers: 2 of 3 at epoch ' + c.epoch + '</p><ol class="pl">'
+      + c.rows.map(([sg, v, o, k]) => k === "x"
+        ? '<li class="x"><span class="sg">!</span><span>' + esc(o) + "</span></li>"
+        : "<li" + (k ? ' class="' + k + '"' : "") + '><span class="sg">' + sg + "</span><span>" + v + "</span><span>" + esc(o) + "</span></li>").join("")
+      + '</ol><p class="sum">' + esc(c.sum) + "</p>";
+    const lis = B.querySelectorAll(".pl li");
+    if (REDUCE) lis.forEach((li) => li.classList.add("in"));
+    else requestAnimationFrame(() => requestAnimationFrame(() => lis.forEach((li, j) => setTimeout(() => li.classList.add("in"), j * 70))));
+    if (focus) tabs[i].focus();
+  }
+  tabs.forEach((tb, i) => {
+    tb.addEventListener("click", () => { if (tb.getAttribute("aria-selected") !== "true") show(i); });
+    tb.addEventListener("keydown", (e) => {
+      const n = tabs.length, j = { ArrowRight: (i + 1) % n, ArrowLeft: (i + n - 1) % n, Home: 0, End: n - 1 }[e.key];
+      if (j !== undefined) { e.preventDefault(); show(j, true); }
+    });
+  });
 })();
 </script>
 </body>
