@@ -1,9 +1,9 @@
-//! `caravel-node sequencer` (spec §14): the block loop, checkpoint signature
-//! collection, and the public, internal and WebSocket APIs.
+//! The sequencer (spec §14), for any app: the block loop, checkpoint
+//! signature collection, and the public, internal and WebSocket APIs.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
@@ -16,8 +16,6 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use caravel_core::block::{BlockInputV1, Entry};
 use caravel_core::inbox::InboxMsgV1;
-use caravel_perps_node::views::{self as perps_views, FillView};
-use caravel_perps_node::PerpsApp;
 use caravel_runtime::checkpoint::sha256;
 use caravel_runtime::mempool::{tx_hash, verify_strict};
 use caravel_runtime::sequencer::{
@@ -25,18 +23,15 @@ use caravel_runtime::sequencer::{
 };
 use caravel_runtime::store::{CheckpointRow, CheckpointStatus, Store};
 use caravel_runtime::views;
-use caravel_runtime::LaneApp;
 use caravel_runtime::WasmExecutor;
-use caravel_types::receipts::Receipts;
-use caravel_types::state::StateV1;
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::{broadcast, Notify};
 
 use crate::api::{self, ok, ApiError, ApiResult};
+use crate::app::NodeApp;
 use crate::node_config::{SequencerConfig, Signers};
-
-const FILLS_KEPT: usize = 1000;
 
 pub fn now_ms() -> u64 {
     SystemTime::now()
@@ -45,11 +40,10 @@ pub fn now_ms() -> u64 {
 }
 
 /// What the stream sends after each block or checkpoint change.
-#[derive(Clone)]
-pub enum StreamEvent {
+pub enum StreamEvent<A: NodeApp> {
     Block {
-        produced: Arc<Produced<StateV1>>,
-        fills: Vec<FillView>,
+        produced: Arc<Produced<A::State>>,
+        view: A::BlockView,
         config_hash: [u8; 32],
     },
     Checkpoint {
@@ -58,11 +52,31 @@ pub enum StreamEvent {
     },
 }
 
-pub struct App {
-    pub core: Mutex<Core<PerpsApp>>,
-    pub snapshot: RwLock<Arc<StateV1>>,
-    fills: Mutex<BTreeMap<u16, VecDeque<FillView>>>,
-    pub events: broadcast::Sender<StreamEvent>,
+// By hand: a derive would ask for `A::State: Clone`, but the state is shared.
+impl<A: NodeApp> Clone for StreamEvent<A> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Block {
+                produced,
+                view,
+                config_hash,
+            } => Self::Block {
+                produced: produced.clone(),
+                view: view.clone(),
+                config_hash: *config_hash,
+            },
+            Self::Checkpoint { seq, status } => Self::Checkpoint { seq: *seq, status },
+        }
+    }
+}
+
+/// A running sequencer: the core, the latest state for views, and the stream.
+pub struct SequencerNode<A: NodeApp> {
+    pub app: A,
+    pub core: Mutex<Core<A>>,
+    pub snapshot: RwLock<Arc<A::State>>,
+    cache: Mutex<A::Cache>,
+    pub events: broadcast::Sender<StreamEvent<A>>,
     sealed: Notify,
     halted: Mutex<Option<String>>,
     /// The last block's `step` metering: host metering, not network fees (spec §14.5).
@@ -75,16 +89,22 @@ pub struct App {
     production: bool,
 }
 
-impl App {
-    fn store<T>(&self, f: impl FnOnce(&Store) -> T) -> T {
+impl<A: NodeApp> SequencerNode<A> {
+    pub fn store<T>(&self, f: impl FnOnce(&Store) -> T) -> T {
         f(self.core.lock().expect("core lock").store())
     }
 
-    fn state(&self) -> Arc<StateV1> {
+    /// The state after the latest block.
+    pub fn state(&self) -> Arc<A::State> {
         self.snapshot.read().expect("snapshot lock").clone()
     }
 
-    fn publish(&self, produced: Produced<StateV1>, config_hash: [u8; 32]) {
+    /// The app's view cache.
+    pub fn cache(&self) -> MutexGuard<'_, A::Cache> {
+        self.cache.lock().expect("cache lock")
+    }
+
+    fn publish(&self, produced: Produced<A::State>, config_hash: [u8; 32]) {
         for i in &produced.incidents {
             match i {
                 Incident::Quarantined { .. }
@@ -93,19 +113,7 @@ impl App {
                 Incident::BudgetExceeded { .. } => tracing::warn!(?i, "incident"),
             }
         }
-        let ts = BlockInputV1::decode(&produced.record.input).map_or(0, |b| b.timestamp_ms);
-        let fills = Receipts::decode(&produced.receipts_bytes).map_or_else(
-            |_| Vec::new(),
-            |r| perps_views::fills(&produced.state, produced.height, ts, &r),
-        );
-        {
-            let mut kept = self.fills.lock().expect("fills lock");
-            for f in &fills {
-                let q = kept.entry(f.market_id).or_default();
-                q.push_front(f.clone());
-                q.truncate(FILLS_KEPT);
-            }
-        }
+        let view = self.app.on_block(&mut self.cache(), &produced);
         *self.snapshot.write().expect("snapshot lock") = produced.state.clone();
         *self.last_metering.lock().expect("metering lock") = (produced.height, produced.metering);
         if let Some(cp) = &produced.checkpoint {
@@ -120,7 +128,7 @@ impl App {
         let checkpoint = produced.checkpoint.as_ref().map(|c| c.seq);
         let _ = self.events.send(StreamEvent::Block {
             produced: Arc::new(produced),
-            fills,
+            view,
             config_hash,
         });
         if let Some(seq) = checkpoint {
@@ -133,13 +141,15 @@ impl App {
 }
 
 /// Opens the store and executor, starts the block and signer loops, and
-/// returns the app and its router (the caller serves it).
-pub async fn start(cfg: &SequencerConfig) -> Result<(Arc<App>, Router)> {
-    let (_, config_bytes, genesis_state) = crate::lane_toml::genesis(&cfg.lane)?;
+/// returns the node and its router (the caller serves it).
+pub async fn start<A: NodeApp>(
+    app: A,
+    cfg: &SequencerConfig,
+) -> Result<(Arc<SequencerNode<A>>, Router)> {
+    let (_, config_bytes, genesis_state) = crate::lane_toml::genesis(&app, &cfg.lane)?;
     let config_hash = sha256(&config_bytes);
     let lane_id = cfg.lane.lane_id();
-    let genesis = caravel_types::config::GenesisConfigV1::decode(&config_bytes)
-        .map_err(|_| anyhow::anyhow!("config does not decode"))?;
+    let (exec_cpu_limit, exec_mem_limit) = app.exec_limits(&config_bytes)?;
     let exec = if cfg.native {
         tracing::warn!("native executor: debugging only, not consensus (spec §14.5)");
         Executor::Native
@@ -147,8 +157,8 @@ pub async fn start(cfg: &SequencerConfig) -> Result<(Arc<App>, Router)> {
         let w = WasmExecutor::from_file(
             &cfg.engine_wasm,
             cfg.engine_wasm_hash,
-            genesis.exec_cpu_limit,
-            genesis.exec_mem_limit,
+            exec_cpu_limit,
+            exec_mem_limit,
         )
         .context("loading the engine Wasm")?;
         // The Wasm genesis must give the same state as the native one.
@@ -186,17 +196,18 @@ pub async fn start(cfg: &SequencerConfig) -> Result<(Arc<App>, Router)> {
         mempool_max: cfg.mempool_max,
         mempool_max_per_account: cfg.mempool_max_per_account,
     };
-    let core = Core::open(PerpsApp, exec, store, config_hash, core_cfg)?;
-    tracing::info!(height = core.height(), state_hash = %hex(&core.state_hash()), lane = %cfg.lane.lane.name, "sequencer starting");
+    let core = Core::open(app.clone(), exec, store, config_hash, core_cfg)?;
+    tracing::info!(height = core.height(), state_hash = %hex(&core.state_hash()), lane = %cfg.lane.lane.name, template = A::TEMPLATE, "sequencer starting");
     if cfg.signers.is_none() {
         tracing::warn!("no [signers]: checkpoints are sealed but never signed");
     }
     let snapshot = RwLock::new(core.state());
     let (events, _) = broadcast::channel(1024);
-    let app = Arc::new(App {
+    let node = Arc::new(SequencerNode {
+        app,
         core: Mutex::new(core),
         snapshot,
-        fills: Mutex::new(BTreeMap::new()),
+        cache: Mutex::new(A::Cache::default()),
         events,
         sealed: Notify::new(),
         halted: Mutex::new(None),
@@ -208,19 +219,19 @@ pub async fn start(cfg: &SequencerConfig) -> Result<(Arc<App>, Router)> {
         token: cfg.internal_token.clone(),
         production: cfg.production,
     });
-    let router = router(app.clone(), &cfg.cors_origins);
-    tokio::spawn(block_loop(app.clone(), config_hash));
-    tokio::spawn(signer_loop(app.clone()));
-    Ok((app, router))
+    let router = router(node.clone(), &cfg.cors_origins);
+    tokio::spawn(block_loop(node.clone(), config_hash));
+    tokio::spawn(signer_loop(node.clone()));
+    Ok((node, router))
 }
 
-/// `caravel-node sequencer`: start and serve until Ctrl-C.
-pub async fn run(cfg: SequencerConfig) -> Result<()> {
+/// `sequencer`: start and serve until Ctrl-C.
+pub async fn run<A: NodeApp>(app: A, cfg: SequencerConfig) -> Result<()> {
     let addr: SocketAddr = cfg
         .listen
         .parse()
         .with_context(|| format!("listen address {:?}", cfg.listen))?;
-    let (_app, router) = start(&cfg).await?;
+    let (_node, router) = start(app, &cfg).await?;
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .with_context(|| format!("binding {addr}"))?;
@@ -236,7 +247,7 @@ async fn shutdown() {
     tracing::info!("shutting down");
 }
 
-async fn block_loop(app: Arc<App>, config_hash: [u8; 32]) {
+async fn block_loop<A: NodeApp>(app: Arc<SequencerNode<A>>, config_hash: [u8; 32]) {
     let mut tick = tokio::time::interval(Duration::from_millis(app.block_time_ms));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
@@ -270,7 +281,7 @@ async fn block_loop(app: Arc<App>, config_hash: [u8; 32]) {
 
 // --- Checkpoint signatures (spec §14.3 step 4) -------------------------------------
 
-async fn signer_loop(app: Arc<App>) {
+async fn signer_loop<A: NodeApp>(app: Arc<SequencerNode<A>>) {
     let Some(signers) = app.signers.clone() else {
         return;
     };
@@ -429,27 +440,30 @@ struct SignReply {
 
 // --- Routes (spec §14.4) ---------------------------------------------------------------
 
-pub fn router(app: Arc<App>, cors_origins: &[String]) -> Router {
+pub fn router<A: NodeApp>(app: Arc<SequencerNode<A>>, cors_origins: &[String]) -> Router {
     let public = Router::new()
-        .route("/v1/tx", post(post_tx))
-        .route("/v1/status", get(status))
-        .route("/v1/accounts/{account}", get(account))
-        .route("/v1/markets", get(markets))
-        .route("/v1/markets/{id}/book", get(book))
-        .route("/v1/markets/{id}/trades", get(trades))
-        .route("/v1/blocks/{height}", get(block))
-        .route("/v1/checkpoints/{seq}", get(checkpoint))
-        .route("/v1/proofs/withdrawals", get(withdrawal_proofs))
-        .route("/v1/proofs/escape", get(escape_proof))
-        .route("/v1/stream", get(stream));
-    let internal = Router::new()
-        .route("/internal/inbox", post(internal_inbox))
-        .route("/internal/oracle", post(internal_oracle))
-        .route("/internal/checkpoints/pending", get(internal_pending))
+        .route("/v1/tx", post(post_tx::<A>))
+        .route("/v1/status", get(status::<A>))
+        .route("/v1/accounts/{account}", get(account::<A>))
+        .route("/v1/blocks/{height}", get(block::<A>))
+        .route("/v1/checkpoints/{seq}", get(checkpoint::<A>))
+        .route("/v1/proofs/withdrawals", get(withdrawal_proofs::<A>))
+        .route("/v1/proofs/escape", get(escape_proof::<A>))
+        .route("/v1/stream", get(stream::<A>))
+        .merge(app.app.routes());
+    let mut internal = Router::new()
+        .route("/internal/inbox", post(internal_inbox::<A>))
+        .route("/internal/checkpoints/pending", get(internal_pending::<A>))
         .route(
             "/internal/checkpoints/{seq}/accepted",
-            post(internal_accepted),
+            post(internal_accepted::<A>),
         );
+    if let Some(feed) = app.app.feed_api() {
+        internal = internal.route(
+            &format!("/internal/{}", feed.route),
+            post(internal_feed::<A>),
+        );
+    }
     let mut r = public.merge(internal).with_state(app);
     if !cors_origins.is_empty() {
         use tower_http::cors::{AllowOrigin, CorsLayer};
@@ -465,14 +479,18 @@ pub fn router(app: Arc<App>, cors_origins: &[String]) -> Router {
     r
 }
 
-type AppState = State<Arc<App>>;
+type AppState<A> = State<Arc<SequencerNode<A>>>;
 
 #[derive(Deserialize)]
 struct TxJson {
     tx: String,
 }
 
-async fn post_tx(State(app): AppState, headers: HeaderMap, body: Bytes) -> ApiResult {
+async fn post_tx<A: NodeApp>(
+    State(app): AppState<A>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> ApiResult {
     let raw = match headers
         .get(axum::http::header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
@@ -503,7 +521,7 @@ async fn post_tx(State(app): AppState, headers: HeaderMap, body: Bytes) -> ApiRe
     }
 }
 
-async fn status(State(app): AppState) -> ApiResult {
+async fn status<A: NodeApp>(State(app): AppState<A>) -> ApiResult {
     let core = app.core.lock().expect("core lock");
     let st = core.frame();
     let store = core.store();
@@ -515,6 +533,7 @@ async fn status(State(app): AppState) -> ApiResult {
         "lane_id": hex(&st.lane_id),
         "config_hash": hex(&core.config_hash()),
         "lane_name": app.lane_name,
+        "template": A::TEMPLATE,
         "height": st.height.to_string(),
         "state_hash": hex(&core.state_hash()),
         "last_block_timestamp_ms": st.last_timestamp_ms.to_string(),
@@ -546,47 +565,19 @@ async fn status(State(app): AppState) -> ApiResult {
     ok(body)
 }
 
-async fn account(State(app): AppState, Path(account): Path<String>) -> ApiResult {
+async fn account<A: NodeApp>(State(app): AppState<A>, Path(account): Path<String>) -> ApiResult {
     let key = api::parse_account(&account)?;
-    ok(perps_views::account(&app.state(), &key)
+    ok(app
+        .app
+        .account(&app.state(), &key)
         .ok_or_else(|| ApiError::not_found("no lane account for this key"))?)
 }
 
-async fn markets(State(app): AppState) -> ApiResult {
-    ok(perps_views::markets(&app.state()))
+async fn block<A: NodeApp>(State(app): AppState<A>, Path(height): Path<u64>) -> ApiResult {
+    app.store(|s| api::block_json(&app.app, s, height))
 }
 
-#[derive(Deserialize)]
-struct Depth {
-    depth: Option<usize>,
-}
-
-async fn book(State(app): AppState, Path(id): Path<u16>, Query(q): Query<Depth>) -> ApiResult {
-    let depth = q.depth.unwrap_or(50).clamp(1, 500);
-    ok(perps_views::book(&app.state(), id, depth)
-        .ok_or_else(|| ApiError::not_found("no such market"))?)
-}
-
-#[derive(Deserialize)]
-struct Limit {
-    limit: Option<usize>,
-}
-
-async fn trades(State(app): AppState, Path(id): Path<u16>, Query(q): Query<Limit>) -> ApiResult {
-    let limit = q.limit.unwrap_or(100).clamp(1, FILLS_KEPT);
-    let fills = app.fills.lock().expect("fills lock");
-    let list: Vec<FillView> = fills
-        .get(&id)
-        .map(|q| q.iter().take(limit).cloned().collect())
-        .unwrap_or_default();
-    ok(list)
-}
-
-async fn block(State(app): AppState, Path(height): Path<u64>) -> ApiResult {
-    app.store(|s| api::block_json(s, height))
-}
-
-async fn checkpoint(State(app): AppState, Path(seq): Path<u64>) -> ApiResult {
+async fn checkpoint<A: NodeApp>(State(app): AppState<A>, Path(seq): Path<u64>) -> ApiResult {
     app.store(|s| api::checkpoint_json(s, seq))
 }
 
@@ -595,24 +586,30 @@ struct AccountQuery {
     account: String,
 }
 
-async fn withdrawal_proofs(State(app): AppState, Query(q): Query<AccountQuery>) -> ApiResult {
+async fn withdrawal_proofs<A: NodeApp>(
+    State(app): AppState<A>,
+    Query(q): Query<AccountQuery>,
+) -> ApiResult {
     let key = api::parse_account(&q.account)?;
     app.store(|s| api::withdrawal_proofs(s, &key))
 }
 
-async fn escape_proof(State(app): AppState, Query(q): Query<AccountQuery>) -> ApiResult {
+async fn escape_proof<A: NodeApp>(
+    State(app): AppState<A>,
+    Query(q): Query<AccountQuery>,
+) -> ApiResult {
     let key = api::parse_account(&q.account)?;
     app.store(|s| {
         let accepted = s
             .last_checkpoint_with(CheckpointStatus::Accepted)
             .map_err(ApiError::internal)?;
-        api::escape_proof(s, &key, accepted)
+        api::escape_proof(&app.app, s, &key, accepted)
     })
 }
 
 // --- Internal API (relayer → sequencer, bearer token) ------------------------------------
 
-fn authorized(app: &App, headers: &HeaderMap) -> Result<(), ApiError> {
+fn authorized<A: NodeApp>(app: &SequencerNode<A>, headers: &HeaderMap) -> Result<(), ApiError> {
     if api::token_ok(headers, &app.token) {
         Ok(())
     } else {
@@ -631,8 +628,8 @@ struct InboxJson {
     acc_after_hex: String,
 }
 
-async fn internal_inbox(
-    State(app): AppState,
+async fn internal_inbox<A: NodeApp>(
+    State(app): AppState<A>,
     headers: HeaderMap,
     Json(j): Json<InboxJson>,
 ) -> ApiResult {
@@ -677,22 +674,24 @@ async fn internal_inbox(
 }
 
 #[derive(Deserialize)]
-struct OracleJson {
+struct FeedJson {
     update: String,
 }
 
-async fn internal_oracle(
-    State(app): AppState,
+/// `POST /internal/{feed}`: keeps the newest admitted update per feed slot.
+async fn internal_feed<A: NodeApp>(
+    State(app): AppState<A>,
     headers: HeaderMap,
-    Json(j): Json<OracleJson>,
+    Json(j): Json<FeedJson>,
 ) -> ApiResult {
     authorized(&app, &headers)?;
+    let feed = app
+        .app
+        .feed_api()
+        .ok_or_else(|| ApiError::not_found("this lane has no feeds"))?;
     let bytes = api::unhex(&j.update, "update")?;
-    if PerpsApp.decode_feed(&bytes).is_none() {
-        return Err(ApiError::bad_request(
-            "DECODE",
-            "update is not an OracleUpdateV1",
-        ));
+    if app.app.decode_feed(&bytes).is_none() {
+        return Err(ApiError::bad_request("DECODE", feed.not_decoded));
     }
     let accepted = app
         .core
@@ -703,14 +702,11 @@ async fn internal_oracle(
     if accepted {
         ok(json!({ "status": "queued" }))
     } else {
-        Err(ApiError::bad_request(
-            "BAD_ORACLE",
-            "unknown oracle key or bad signature",
-        ))
+        Err(ApiError::bad_request(feed.refused_code, feed.refused))
     }
 }
 
-async fn internal_pending(State(app): AppState, headers: HeaderMap) -> ApiResult {
+async fn internal_pending<A: NodeApp>(State(app): AppState<A>, headers: HeaderMap) -> ApiResult {
     authorized(&app, &headers)?;
     let row = app
         .store(|s| s.checkpoints_with(CheckpointStatus::Signed))
@@ -735,8 +731,8 @@ struct AcceptedJson {
     ledger: u32,
 }
 
-async fn internal_accepted(
-    State(app): AppState,
+async fn internal_accepted<A: NodeApp>(
+    State(app): AppState<A>,
     headers: HeaderMap,
     Path(seq): Path<u64>,
     Json(j): Json<AcceptedJson>,
@@ -766,34 +762,36 @@ async fn internal_accepted(
 
 // --- WebSocket stream ----------------------------------------------------------------------
 
+/// `{blocks, account}` plus the app's fields.
 #[derive(Deserialize, Default, Clone)]
-struct Subscription {
+#[serde(bound = "S: DeserializeOwned")]
+struct Subscription<S> {
     #[serde(default)]
     blocks: bool,
-    #[serde(default)]
-    markets: Vec<u16>,
     account: Option<String>,
+    #[serde(flatten)]
+    app: S,
 }
 
-async fn stream(State(app): AppState, ws: WebSocketUpgrade) -> Response {
+async fn stream<A: NodeApp>(State(app): AppState<A>, ws: WebSocketUpgrade) -> Response {
     ws.on_upgrade(move |socket| serve_stream(app, socket))
 }
 
-async fn serve_stream(app: Arc<App>, mut socket: WebSocket) {
+async fn serve_stream<A: NodeApp>(app: Arc<SequencerNode<A>>, mut socket: WebSocket) {
     let mut rx = app.events.subscribe();
-    let mut sub = Subscription::default();
+    let mut sub = Subscription::<A::Subscription>::default();
     let mut account: Option<[u8; 32]> = None;
     loop {
         tokio::select! {
             msg = socket.recv() => match msg {
-                Some(Ok(Message::Text(t))) => match serde_json::from_str::<Subscription>(t.as_str()) {
+                Some(Ok(Message::Text(t))) => match serde_json::from_str::<Subscription<A::Subscription>>(t.as_str()) {
                     Ok(s) => {
                         account = s.account.as_deref().and_then(views::parse_g);
                         sub = s;
                         let _ = socket.send(Message::Text(json!({ "type": "subscribed" }).to_string().into())).await;
                     }
                     Err(_) => {
-                        let _ = socket.send(Message::Text(json!({ "type": "error", "error": "expected {blocks, markets, account}" }).to_string().into())).await;
+                        let _ = socket.send(Message::Text(json!({ "type": "error", "error": app.app.subscription_hint() }).to_string().into())).await;
                     }
                 },
                 Some(Ok(Message::Close(_))) | None | Some(Err(_)) => return,
@@ -808,7 +806,7 @@ async fn serve_stream(app: Arc<App>, mut socket: WebSocket) {
                     }
                     Err(_) => return,
                 };
-                for m in messages(&ev, &sub, account.as_ref()) {
+                for m in messages(&app.app, &ev, &sub, account.as_ref()) {
                     if socket.send(Message::Text(m.to_string().into())).await.is_err() {
                         return;
                     }
@@ -818,9 +816,15 @@ async fn serve_stream(app: Arc<App>, mut socket: WebSocket) {
     }
 }
 
-/// The stream messages one event gives a subscriber: `block`, `fill`, `book`,
-/// `account`, `receipt` and `checkpoint`.
-fn messages(ev: &StreamEvent, sub: &Subscription, account: Option<&[u8; 32]>) -> Vec<Value> {
+/// The stream messages one event gives a subscriber: `block` and
+/// `checkpoint`, the account's `receipt`s, and the app's (perps: `fill`,
+/// `book` and `account`), in the order the app gives.
+fn messages<A: NodeApp>(
+    app: &A,
+    ev: &StreamEvent<A>,
+    sub: &Subscription<A::Subscription>,
+    account: Option<&[u8; 32]>,
+) -> Vec<Value> {
     let mut out = Vec::new();
     match ev {
         StreamEvent::Checkpoint { seq, status } => {
@@ -828,7 +832,7 @@ fn messages(ev: &StreamEvent, sub: &Subscription, account: Option<&[u8; 32]>) ->
         }
         StreamEvent::Block {
             produced,
-            fills,
+            view,
             config_hash,
         } => {
             let p = produced.as_ref();
@@ -843,45 +847,25 @@ fn messages(ev: &StreamEvent, sub: &Subscription, account: Option<&[u8; 32]>) ->
                     "state_hash": hex(&p.record.state_hash_after),
                 }));
             }
-            let markets: HashMap<u16, ()> = sub.markets.iter().map(|m| (*m, ())).collect();
-            for f in fills.iter().filter(|f| markets.contains_key(&f.market_id)) {
-                let mut v = serde_json::to_value(f).unwrap_or_default();
-                v["type"] = "fill".into();
-                out.push(v);
-            }
-            for m in &sub.markets {
-                if let Some(b) = perps_views::book(&p.state, *m, 20) {
-                    let mut v = serde_json::to_value(b).unwrap_or_default();
-                    v["type"] = "book".into();
-                    out.push(v);
-                }
-            }
-            if let Some(key) = account {
-                let events = PerpsApp
-                    .render_events(&p.receipts_bytes)
-                    .unwrap_or_default();
-                if let Some(input) = &input {
-                    for (i, rc) in p.receipts.receipts.iter().enumerate() {
-                        if let Some(Entry::User(tx)) = input.entries.get(rc.entry_index as usize) {
-                            if tx.account == *key {
-                                out.push(json!({
-                                    "type": "receipt",
-                                    "height": p.height.to_string(),
-                                    "tx_hash": hex(&tx_hash(tx, config_hash)),
-                                    "nonce": tx.nonce.to_string(),
-                                    "code": rc.code,
-                                    "events": events.get(i).cloned().unwrap_or_default(),
-                                }));
-                            }
+            let mut receipts = Vec::new();
+            if let (Some(key), Some(input)) = (account, &input) {
+                let events = app.render_events(&p.receipts_bytes).unwrap_or_default();
+                for (i, rc) in p.receipts.receipts.iter().enumerate() {
+                    if let Some(Entry::User(tx)) = input.entries.get(rc.entry_index as usize) {
+                        if tx.account == *key {
+                            receipts.push(json!({
+                                "type": "receipt",
+                                "height": p.height.to_string(),
+                                "tx_hash": hex(&tx_hash(tx, config_hash)),
+                                "nonce": tx.nonce.to_string(),
+                                "code": rc.code,
+                                "events": events.get(i).cloned().unwrap_or_default(),
+                            }));
                         }
                     }
                 }
-                if let Some(a) = perps_views::account(&p.state, key) {
-                    let mut v = serde_json::to_value(a).unwrap_or_default();
-                    v["type"] = "account".into();
-                    out.push(v);
-                }
             }
+            out.extend(app.stream(p, view, &sub.app, account, receipts));
         }
     }
     out

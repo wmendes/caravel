@@ -41,7 +41,7 @@ fn wasm() -> (WasmExecutor, [u8; 32]) {
     let bytes = std::fs::read(root().join("target/contracts/perps_engine.wasm"))
         .expect("run ./scripts/build-contracts.sh first");
     let hash = sha256(&bytes);
-    let (_, config_bytes, _) = caravel_node::lane_toml::genesis(&lane()).unwrap();
+    let (_, config_bytes, _) = caravel_node::lane_toml::genesis(&PerpsApp, &lane()).unwrap();
     let g = caravel_types::config::GenesisConfigV1::decode(&config_bytes).unwrap();
     (
         WasmExecutor::new(bytes, hash, g.exec_cpu_limit, g.exec_mem_limit).unwrap(),
@@ -60,7 +60,7 @@ fn ids(wasm_hash: [u8; 32]) -> HeaderIds {
 /// A native sequencer core that produced 25 blocks (checkpoints 1 and 2).
 fn produced() -> (Core<PerpsApp>, [u8; 32]) {
     let lane = lane();
-    let (_, config_bytes, genesis) = caravel_node::lane_toml::genesis(&lane).unwrap();
+    let (_, config_bytes, genesis) = caravel_node::lane_toml::genesis(&PerpsApp, &lane).unwrap();
     let config_hash = sha256(&config_bytes);
     let (_, wasm_hash) = wasm();
     let store = Store::open_in_memory(&lane.lane_id(), &config_hash, &genesis).unwrap();
@@ -172,7 +172,8 @@ struct FakeStellar {
 
 impl FakeStellar {
     fn from(core: &Core<PerpsApp>, wasm_hash: [u8; 32], n: u64) -> Self {
-        let (_, config_bytes, genesis) = caravel_node::lane_toml::genesis(&lane()).unwrap();
+        let (_, config_bytes, genesis) =
+            caravel_node::lane_toml::genesis(&PerpsApp, &lane()).unwrap();
         let checkpoints = (1..=n)
             .map(|s| {
                 let row = core.store().checkpoint(s).unwrap().unwrap();
@@ -232,6 +233,7 @@ impl ReplaySource for FakeStellar {
 async fn run<S: ReplaySource>(src: &S, wasm_hash: [u8; 32]) -> Result<replay::Outcome> {
     let (exec, _) = wasm();
     replay::replay(
+        &PerpsApp,
         src,
         &lane(),
         &Executor::Wasm(exec),
@@ -380,8 +382,8 @@ async fn replay_proofs_match_the_sequencer() {
         core.store_mut().set_signed(seq, 1, "[]").unwrap();
         core.store_mut().set_accepted(seq, "00", 1).unwrap();
     }
-    let ours = replay::escape_proof(&outcome, &pk(B)).unwrap();
-    let theirs = caravel_node::api::escape_proof(core.store(), &pk(B), Some(2)).unwrap();
+    let ours = replay::escape_proof(&PerpsApp, &outcome, &pk(B)).unwrap();
+    let theirs = caravel_node::api::escape_proof(&PerpsApp, core.store(), &pk(B), Some(2)).unwrap();
     let body = axum::body::to_bytes(theirs.into_body(), usize::MAX)
         .await
         .unwrap();

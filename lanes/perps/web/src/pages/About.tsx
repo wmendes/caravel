@@ -40,7 +40,7 @@ export function About() {
         ))}
       </dl>
       <p className="muted">
-        Verify it yourself: <span className="mono">caravel-node replay --rpc {config.rpcUrl} --settlement {config.settlementContract} …</span> rebuilds every checkpoint from Stellar data.
+        Verify it yourself: <span className="mono">caravel-perps-node replay --rpc {config.rpcUrl} --settlement {config.settlementContract} …</span> rebuilds every checkpoint from Stellar data.
       </p>
     </div>
   );

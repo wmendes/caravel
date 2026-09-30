@@ -7,7 +7,7 @@ Wants=network-online.target
 User=caravel
 Group=caravel
 Environment=RUST_LOG=info
-ExecStart=/opt/caravel/bin/caravel-node validator --config /opt/caravel/config/validator-%i.toml
+ExecStart=/opt/caravel/bin/caravel-perps-node validator --config /opt/caravel/config/validator-%i.toml
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true

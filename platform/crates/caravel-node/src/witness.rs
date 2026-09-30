@@ -1,29 +1,31 @@
-//! `caravel-node witness`: the input for the T-012 witness transaction, one
+//! `witness`: the input for the T-012 witness transaction, one
 //! `step` call to the engine contract on Stellar, and the exact bytes the
 //! executor returns for it. On Stellar the transaction's return value must be
 //! byte-equal (spec §20.1 T-012): the same Wasm gives the same output on
 //! the network and on every node.
 
 use anyhow::{anyhow, Result};
+use caravel_core::block::{BlockInputV1, Entry};
+use caravel_core::inbox::{InboxKind, InboxMsgV1};
+use caravel_core::step::StepEnvelope;
 use caravel_runtime::checkpoint::sha256;
 use caravel_runtime::sequencer::hex;
 use caravel_runtime::WasmExecutor;
-use caravel_types::block::{BlockInputV1, Entry};
-use caravel_types::inbox::{InboxKind, InboxMsgV1};
-use caravel_types::step::StepEnvelope;
 use serde_json::{json, Value};
 
+use crate::app::NodeApp;
 use crate::lane_toml::LaneFile;
 
 /// Genesis state plus one `CHECKPOINT_END` block with a deposit, so the call
 /// creates an account and computes a commitment.
-pub fn witness(
+pub fn witness<A: NodeApp>(
+    app: &A,
     lane: &LaneFile,
     exec: &WasmExecutor,
     depositor: [u8; 32],
     timestamp_ms: u64,
 ) -> Result<Value> {
-    let (_, config_bytes, _) = crate::lane_toml::genesis(lane)?;
+    let (_, config_bytes, _) = crate::lane_toml::genesis(app, lane)?;
     let (state, _) = exec
         .genesis(&config_bytes)
         .map_err(|e| anyhow!("genesis: {e:?}"))?;

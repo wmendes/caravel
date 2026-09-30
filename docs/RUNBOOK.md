@@ -2,7 +2,7 @@
 
 How to run, deploy and operate Caravel M0, the testnet demo. The spec is `docs/CARAVEL_SPEC.md`; dated numbers are in `docs/RESULTS.md`.
 
-**Who runs what in M0.** The Caravel team runs the sequencer, all three validators and the relayer, on one GCP VM (DEC-046). The settlement contract admin has testnet-only powers: upgrading the contract and rotating validators without delay (spec §4.3). Anyone can follow the lane with their own validator (§2 below), rebuild it from Stellar data with `caravel-node replay` (§6), and use the escape hatch if the lane stops (§5).
+**Who runs what in M0.** The Caravel team runs the sequencer, all three validators and the relayer, on one GCP VM (DEC-046). The settlement contract admin has testnet-only powers: upgrading the contract and rotating validators without delay (spec §4.3). Anyone can follow the lane with their own validator (§2 below), rebuild it from Stellar data with `caravel-perps-node replay` (§6), and use the escape hatch if the lane stops (§5).
 
 Every command runs from the repository root unless it says otherwise.
 
@@ -21,7 +21,7 @@ Check the pins with `node scripts/check-versions.mjs`. Build the contracts first
 
 ```sh
 ./scripts/build-contracts.sh               # target/contracts/{perps_engine,settlement}.wasm, sizes and hashes
-cargo build --release --locked -p caravel-node
+cargo build --release --locked -p caravel-perps-node
 ```
 
 The engine hash is the same on every host. The settlement Wasm of record is the x86_64 Linux build from CI (DEC-033), so on macOS `build-contracts.sh` warns that the settlement hash differs; local runs are unaffected.
@@ -42,7 +42,7 @@ It starts a local Stellar network in Docker (`stellar container start local --li
 4. A withdraws 100 USDC and claims it on Stellar;
    - 4b. validator 3 is rotated to a new key (the procedure in §4.1);
 5. the sequencer stops, the contract is frozen, A and B escape pro rata;
-6. `caravel-node replay` rebuilds the lane from Stellar data and reports OK.
+6. `caravel-perps-node replay` rebuilds the lane from Stellar data and reports OK.
 
 It takes about 4 minutes from a clean clone. Logs and state go to a temporary work directory, printed at the end (and on failure, with the tail of each log). The Stellar CLI keys it creates live in that directory, not in your keystore. With `E2E_NETWORK=testnet` the same run goes to Stellar testnet with a settlement contract of its own (§5).
 
@@ -52,13 +52,13 @@ For engine or API work. Checkpoints are sealed but never signed or submitted.
 
 ```sh
 CARAVEL_INTERNAL_TOKEN=$(openssl rand -hex 16) \
-  ./target/release/caravel-node sequencer --config lanes/perps/config/sequencer.local.toml
+  ./target/release/caravel-perps-node sequencer --config lanes/perps/config/sequencer.local.toml
 # in another shell: accounts funded through the internal API, prices, orders
-CARAVEL_INTERNAL_TOKEN=<same> cargo run --release -p caravel-node --example loadgen -- \
+CARAVEL_INTERNAL_TOKEN=<same> cargo run --release -p caravel-perps-node --example loadgen -- \
   --url http://127.0.0.1:8080 --lane lanes/perps/config/lane.caravel-perps.local.toml --tps 20 --duration-secs 60
 ```
 
-State goes to `data/sequencer.sqlite`; delete it to start again from genesis. `caravel-node check-store --config lanes/perps/config/sequencer.local.toml` re-executes the whole store through the engine Wasm and checks every block and checkpoint header.
+State goes to `data/sequencer.sqlite`; delete it to start again from genesis. `caravel-perps-node check-store --config lanes/perps/config/sequencer.local.toml` re-executes the whole store through the engine Wasm and checks every block and checkpoint header.
 
 The web app runs against it with `npm --prefix lanes/perps/web run dev` (see `lanes/perps/web/env.local.example`).
 
@@ -71,7 +71,7 @@ A validator follows the sequencer's public block API, re-executes every block wi
 ```sh
 git clone <this repository> && cd caravel
 ./scripts/build-contracts.sh
-cargo build --release --locked -p caravel-node
+cargo build --release --locked -p caravel-perps-node
 shasum -a 256 target/contracts/perps_engine.wasm   # must be engine_wasm_sha256 in versions.json
 ```
 
@@ -113,7 +113,7 @@ The node refuses a mainnet passphrase. Take `engine_wasm_sha256` and the contrac
 ### 2.4 Run and check
 
 ```sh
-RUST_LOG=info ./target/release/caravel-node validator --config lanes/perps/config/my-validator.toml
+RUST_LOG=info ./target/release/caravel-perps-node validator --config lanes/perps/config/my-validator.toml
 ```
 
 It catches up from block 1, then follows live. On 2026-09-29, a laptop following the testnet lane with this exact config caught up about 6,150 blocks in 14 minutes. Compare with the sequencer at the same height:
@@ -131,7 +131,7 @@ curl -s https://35-224-76-64.sslip.io/v1/blocks/<height> | jq -r .state_hash_aft
 - **Suspicious blocks** (`suspicious_blocks` is not empty): a live block failed a policy check (its timestamp is too far from the validator's clock, or an oracle entry is too old). The validator keeps following but refuses to sign a checkpoint that contains it (`SUSPICIOUS_BLOCK`). After looking at the reason, clear it and restart:
 
   ```sh
-  ./target/release/caravel-node validator-clear --config lanes/perps/config/my-validator.toml --through <height>
+  ./target/release/caravel-perps-node validator-clear --config lanes/perps/config/my-validator.toml --through <height>
   ```
 
 - **Never two headers for one seq.** Every signed `(seq, header_hash)` is stored before the reply, and the validator refuses a different header for a seq it signed (`EQUIVOCATION`). Never delete a signing validator's database to "fix" this; it is what makes signing safe.
@@ -231,7 +231,7 @@ Between steps 3 and 5, submissions fail with the old epoch and the relayer retri
 |---|---|---|
 | Relayer (`CARAVEL_RELAYER_SECRET`) | `/opt/caravel/keys/env` | Only pays fees; `submit_checkpoint` needs no particular submitter. Put a funded account's secret in `env`, restart `caravel-relayer`. |
 | Internal API token (`CARAVEL_INTERNAL_TOKEN`) | `/opt/caravel/keys/env` | `openssl rand -hex 24`, then restart the sequencer and the relayer together. |
-| Oracle (`CARAVEL_ORACLE_SECRET`) | `/opt/caravel/keys/env` | Its public key is in the lane file's `[oracle] keys`, which is part of the genesis config the contract commits to (`config_hash`). Changing it is a new lane. |
+| Oracle (`CARAVEL_ORACLE_SECRET`) | `/opt/caravel/keys/env` | Read by the relayer's perps feed module (`lanes/perps/relayer-feeds`). Its public key is in the lane file's `[perps.oracle] keys`, which is part of the genesis config the contract commits to (`config_hash`). Changing it is a new lane. |
 | Settlement admin (`caravel-admin`) | your Stellar CLI keystore | Fixed at deployment in M0. |
 | Backstop and treasury | lane file, genesis | Part of the genesis config: a new lane. |
 
@@ -265,7 +265,7 @@ Deposits the lane never processed are refunded 1:1 to the depositor with `refund
 Rebuilds the lane from Stellar data only and checks every hash (spec §16):
 
 ```sh
-./target/release/caravel-node replay --rpc https://soroban-testnet.stellar.org \
+./target/release/caravel-perps-node replay --rpc https://soroban-testnet.stellar.org \
   --network-passphrase "Test SDF Network ; September 2015" \
   --settlement CBIHBEUZYFZQZEQPBJH2ID6CDRDZFEDI6XHAXVOCHG6FO5XWUIGPONWO \
   --genesis-config lanes/perps/config/lane.caravel-perps.testnet.toml \
@@ -277,7 +277,7 @@ The first JSON line is the report: `ok`, the checkpoints replayed and the final 
 
 ## 7. Data retention
 
-- **Stellar RPC** keeps transactions for about 7 days on testnet (120,959 ledgers, checked 2026-09-29). Replay needs every checkpoint transaction since genesis, so after 7 days it needs another source: the M1 plan is a Galexie ledger archive (`--from-archive` is not built in M0, DEC-042). Until then, the validators' stores are the lane's history. `caravel-node check-store` re-executes a store and checks each header, and the header hashes on Stellar (`checkpoint(seq)`) anchor it.
+- **Stellar RPC** keeps transactions for about 7 days on testnet (120,959 ledgers, checked 2026-09-29). Replay needs every checkpoint transaction since genesis, so after 7 days it needs another source: the M1 plan is a Galexie ledger archive (`--from-archive` is not built in M0, DEC-042). Until then, the validators' stores are the lane's history. `caravel-perps-node check-store` re-executes a store and checks each header, and the header hashes on Stellar (`checkpoint(seq)`) anchor it.
 - **Node stores** (`/opt/caravel/data/*.sqlite`) keep every block, receipt, checkpoint and snapshot; nothing is pruned in M0. Back them up while the node runs with `sqlite3 <db> ".backup <file>"`. The growth rate is in `docs/RESULTS.md`.
 - **Relayer log** `/opt/caravel/data/relayer-checkpoints.jsonl`: one line per submitted checkpoint (fee, size), the input of `scripts/measure-report.mjs`.
 

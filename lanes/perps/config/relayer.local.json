@@ -4,14 +4,38 @@
   "settlementContract": "CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR",
   "sequencerUrl": "http://127.0.0.1:8080",
   "metricsFile": "../../../data/relayer/checkpoints.jsonl",
-  "loops": { "inbox": true, "checkpoints": true, "oracle": true },
-  "intervalsMs": { "inbox": 1000, "checkpoints": 1000, "oracle": 2000 },
-  "oracle": {
-    "maxSourceAgeSecs": 900,
-    "markets": {
-      "1": [{ "fixed": "65000" }],
-      "2": [{ "fixed": "3500" }],
-      "3": [{ "fixed": "0.40" }]
+  "loops": {
+    "inbox": true,
+    "checkpoints": true
+  },
+  "intervalsMs": {
+    "inbox": 1000,
+    "checkpoints": 1000
+  },
+  "feeds": [
+    {
+      "module": "../relayer-feeds/dist/index.js",
+      "intervalMs": 2000,
+      "options": {
+        "maxSourceAgeSecs": 900,
+        "markets": {
+          "1": [
+            {
+              "fixed": "65000"
+            }
+          ],
+          "2": [
+            {
+              "fixed": "3500"
+            }
+          ],
+          "3": [
+            {
+              "fixed": "0.40"
+            }
+          ]
+        }
+      }
     }
-  }
+  ]
 }

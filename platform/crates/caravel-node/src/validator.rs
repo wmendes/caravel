@@ -13,7 +13,6 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use caravel_core::block::BlockRecordV1;
-use caravel_perps_node::PerpsApp;
 use caravel_runtime::checkpoint::{network_id, settlement_addr_hash, sha256, HeaderIds};
 use caravel_runtime::sequencer::{hex, Executor};
 use caravel_runtime::store::{CheckpointStatus, Store};
@@ -25,6 +24,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::api::{self, ok, ApiError, ApiResult};
+use crate::app::NodeApp;
 use crate::lane_toml::LaneFile;
 use crate::node_config::{check_network, parse_contract, parse_hash};
 use crate::replay::{OnChainConfig, ReplaySource, RpcSource};
@@ -107,6 +107,7 @@ impl ValidatorConfig {
         lane.check_node_settings()?;
         let settlement_contract = parse_contract(&v.settlement_contract)?;
         let engine_wasm_hash = parse_hash(&v.engine_wasm_sha256)?;
+        lane.check_engine(&engine_wasm_hash)?;
         Ok(Self {
             listen: v.listen,
             sequencer_url: v.sequencer_url.trim_end_matches('/').to_string(),
@@ -129,29 +130,33 @@ impl ValidatorConfig {
     }
 }
 
-pub struct App {
-    pub follower: Mutex<Follower<PerpsApp>>,
+/// A running validator: the follower and where it follows from.
+pub struct ValidatorNode<A: NodeApp> {
+    pub app: A,
+    pub follower: Mutex<Follower<A>>,
     sequencer_url: String,
 }
 
-impl App {
-    fn with<T>(&self, f: impl FnOnce(&mut Follower<PerpsApp>) -> T) -> T {
+impl<A: NodeApp> ValidatorNode<A> {
+    fn with<T>(&self, f: impl FnOnce(&mut Follower<A>) -> T) -> T {
         f(&mut self.follower.lock().expect("follower lock"))
     }
 }
 
 /// Opens the store, checks genesis, and starts following. Validators always
 /// execute through the Wasm (spec §14.5).
-pub async fn start(cfg: ValidatorConfig) -> Result<(Arc<App>, Router)> {
-    let (_, config_bytes, genesis_state) = crate::lane_toml::genesis(&cfg.lane)?;
+pub async fn start<A: NodeApp>(
+    app: A,
+    cfg: ValidatorConfig,
+) -> Result<(Arc<ValidatorNode<A>>, Router)> {
+    let (_, config_bytes, genesis_state) = crate::lane_toml::genesis(&app, &cfg.lane)?;
     let config_hash = sha256(&config_bytes);
-    let g = caravel_types::config::GenesisConfigV1::decode(&config_bytes)
-        .map_err(|_| anyhow!("config"))?;
+    let (exec_cpu_limit, exec_mem_limit) = app.exec_limits(&config_bytes)?;
     let exec = WasmExecutor::from_file(
         &cfg.engine_wasm,
         cfg.engine_wasm_hash,
-        g.exec_cpu_limit,
-        g.exec_mem_limit,
+        exec_cpu_limit,
+        exec_mem_limit,
     )
     .context("loading the engine Wasm")?;
     let (wasm_genesis, _) = exec
@@ -175,26 +180,27 @@ pub async fn start(cfg: ValidatorConfig) -> Result<(Arc<App>, Router)> {
     let store = Store::open(&cfg.db, &cfg.lane.lane_id(), &config_hash, &genesis_state)
         .context("opening the store")?;
     let follower = Follower::open(
-        PerpsApp,
+        app.clone(),
         Executor::Wasm(exec),
         store,
         cfg.ids,
         cfg.key.clone(),
     )?;
     tracing::info!(height = follower.height(), key = %views::g_address(&follower.public_key()), "validator starting; genesis state hash {}", hex(&sha256(&genesis_state)));
-    let app = Arc::new(App {
+    let node = Arc::new(ValidatorNode {
+        app,
         follower: Mutex::new(follower),
         sequencer_url: cfg.sequencer_url.clone(),
     });
-    let router = router(app.clone(), &cfg.cors_origins);
+    let router = router(node.clone(), &cfg.cors_origins);
     tokio::spawn(follow_loop(
-        app.clone(),
+        node.clone(),
         cfg.sequencer_url.clone(),
         cfg.poll_ms,
     ));
     if let Some(url) = cfg.rpc_url.clone() {
         tokio::spawn(stellar_loop(
-            app.clone(),
+            node.clone(),
             url,
             cfg.settlement_contract,
             cfg.stellar_poll_secs,
@@ -202,7 +208,7 @@ pub async fn start(cfg: ValidatorConfig) -> Result<(Arc<App>, Router)> {
     } else {
         tracing::warn!("no rpc_url: acceptance on Stellar is unknown, so /v1/proofs/escape has nothing to serve");
     }
-    Ok((app, router))
+    Ok((node, router))
 }
 
 /// Refuses to start when the settlement contract on Stellar commits to
@@ -243,12 +249,12 @@ async fn check_contract(url: &str, contract: [u8; 32], want: &OnChainConfig) -> 
     Ok(())
 }
 
-pub async fn run(cfg: ValidatorConfig) -> Result<()> {
+pub async fn run<A: NodeApp>(app: A, cfg: ValidatorConfig) -> Result<()> {
     let addr: SocketAddr = cfg
         .listen
         .parse()
         .with_context(|| format!("listen address {:?}", cfg.listen))?;
-    let (_app, router) = start(cfg).await?;
+    let (_node, router) = start(app, cfg).await?;
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .with_context(|| format!("binding {addr}"))?;
@@ -262,7 +268,7 @@ pub async fn run(cfg: ValidatorConfig) -> Result<()> {
 }
 
 /// Catch-up and live follow: fetch `/v1/blocks/{h}` from our height on.
-async fn follow_loop(app: Arc<App>, sequencer: String, poll_ms: u64) {
+async fn follow_loop<A: NodeApp>(app: Arc<ValidatorNode<A>>, sequencer: String, poll_ms: u64) {
     let http = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
@@ -341,7 +347,12 @@ async fn fetch_block(
 }
 
 /// Polls the contract's `LastCkpt` and marks our matching checkpoints accepted.
-async fn stellar_loop(app: Arc<App>, url: String, contract: [u8; 32], every_secs: u64) {
+async fn stellar_loop<A: NodeApp>(
+    app: Arc<ValidatorNode<A>>,
+    url: String,
+    contract: [u8; 32],
+    every_secs: u64,
+) {
     let rpc = match Rpc::new(&url) {
         Ok(r) => r,
         Err(e) => {
@@ -371,14 +382,14 @@ async fn stellar_loop(app: Arc<App>, url: String, contract: [u8; 32], every_secs
 
 // --- Routes (spec §15) ---------------------------------------------------------------------
 
-pub fn router(app: Arc<App>, cors_origins: &[String]) -> Router {
+pub fn router<A: NodeApp>(app: Arc<ValidatorNode<A>>, cors_origins: &[String]) -> Router {
     let mut r = Router::new()
-        .route("/v1/sign", post(sign))
-        .route("/v1/status", get(status))
-        .route("/v1/blocks/{height}", get(block))
-        .route("/v1/checkpoints/{seq}", get(checkpoint))
-        .route("/v1/proofs/withdrawals", get(withdrawal_proofs))
-        .route("/v1/proofs/escape", get(escape_proof))
+        .route("/v1/sign", post(sign::<A>))
+        .route("/v1/status", get(status::<A>))
+        .route("/v1/blocks/{height}", get(block::<A>))
+        .route("/v1/checkpoints/{seq}", get(checkpoint::<A>))
+        .route("/v1/proofs/withdrawals", get(withdrawal_proofs::<A>))
+        .route("/v1/proofs/escape", get(escape_proof::<A>))
         .with_state(app);
     if !cors_origins.is_empty() {
         use tower_http::cors::{AllowOrigin, CorsLayer};
@@ -393,7 +404,7 @@ pub fn router(app: Arc<App>, cors_origins: &[String]) -> Router {
     r
 }
 
-type AppState = State<Arc<App>>;
+type AppState<A> = State<Arc<ValidatorNode<A>>>;
 
 #[derive(Deserialize)]
 struct SignJson {
@@ -401,7 +412,7 @@ struct SignJson {
     batch: String,
 }
 
-async fn sign(State(app): AppState, Json(j): Json<SignJson>) -> ApiResult {
+async fn sign<A: NodeApp>(State(app): AppState<A>, Json(j): Json<SignJson>) -> ApiResult {
     let header = api::unhex(&j.header, "header")?;
     let batch = api::unhex(&j.batch, "batch")?;
     let a = app.clone();
@@ -427,13 +438,14 @@ async fn sign(State(app): AppState, Json(j): Json<SignJson>) -> ApiResult {
     }
 }
 
-async fn status(State(app): AppState) -> ApiResult {
+async fn status<A: NodeApp>(State(app): AppState<A>) -> ApiResult {
     app.with(|f| {
         let store = f.store();
         let last = |s| store.last_checkpoint_with(s).map_err(ApiError::internal);
         let flags = store.flags_in(0, u64::MAX >> 1).map_err(ApiError::internal)?;
         ok(json!({
             "role": "validator",
+            "template": A::TEMPLATE,
             "key": views::g_address(&f.public_key()),
             "sequencer_url": app.sequencer_url,
             "height": f.height().to_string(),
@@ -449,11 +461,11 @@ async fn status(State(app): AppState) -> ApiResult {
     })
 }
 
-async fn block(State(app): AppState, UrlPath(height): UrlPath<u64>) -> ApiResult {
-    app.with(|f| api::block_json(f.store(), height))
+async fn block<A: NodeApp>(State(app): AppState<A>, UrlPath(height): UrlPath<u64>) -> ApiResult {
+    app.with(|f| api::block_json(&app.app, f.store(), height))
 }
 
-async fn checkpoint(State(app): AppState, UrlPath(seq): UrlPath<u64>) -> ApiResult {
+async fn checkpoint<A: NodeApp>(State(app): AppState<A>, UrlPath(seq): UrlPath<u64>) -> ApiResult {
     app.with(|f| api::checkpoint_json(f.store(), seq))
 }
 
@@ -462,18 +474,24 @@ struct AccountQuery {
     account: String,
 }
 
-async fn withdrawal_proofs(State(app): AppState, Query(q): Query<AccountQuery>) -> ApiResult {
+async fn withdrawal_proofs<A: NodeApp>(
+    State(app): AppState<A>,
+    Query(q): Query<AccountQuery>,
+) -> ApiResult {
     let key = api::parse_account(&q.account)?;
     app.with(|f| api::withdrawal_proofs(f.store(), &key))
 }
 
-async fn escape_proof(State(app): AppState, Query(q): Query<AccountQuery>) -> ApiResult {
+async fn escape_proof<A: NodeApp>(
+    State(app): AppState<A>,
+    Query(q): Query<AccountQuery>,
+) -> ApiResult {
     let key = api::parse_account(&q.account)?;
     app.with(|f| {
         let accepted = f
             .store()
             .last_checkpoint_with(CheckpointStatus::Accepted)
             .map_err(ApiError::internal)?;
-        api::escape_proof(f.store(), &key, accepted)
+        api::escape_proof(&app.app, f.store(), &key, accepted)
     })
 }

@@ -139,6 +139,6 @@ The SDK's fee estimate is 7,699,033 stroops, almost all of it rent (7,682,542) f
 | Blocks per checkpoint | 8 (448), 9 (1), 10 (1) |
 | Worst block, host CPU insns | 49,183,652 |
 
-- **Restart.** The sequencer stopped at height 1,802. `caravel-node check-store` re-executed its whole store through the Wasm and got state hash `b7045073…6a`; the restarted sequencer resumed at height 1,802 with the same hash.
+- **Restart.** The sequencer stopped at height 1,802. `caravel-perps-node check-store` re-executed its whole store through the Wasm and got state hash `b7045073…6a`; the restarted sequencer resumed at height 1,802 with the same hash.
 - **Final check.** `check-store` re-executed all 3,603 blocks through the Wasm and rebuilt all 450 checkpoint headers byte for byte.
 - **Checkpoint spacing.** At this load a block carries about 50 transactions (roughly 10.5 KB), so after 8 blocks the next block might not fit in the 96,000-byte batch. Rule (b) of §14.2 then ends the batch before rule (a) would at 10 blocks. At lighter load, checkpoints come every 10 blocks.

@@ -1,14 +1,26 @@
 /**
  * Oracle feeder (spec §17.3): every 2 s per market, a USD price from the
  * first fresh source, converted to stroops per lot, snapped to the tick,
- * signed with the oracle key and posted to the sequencer. A publish is
- * skipped if the price moved less than one tick and less than 10 s passed.
+ * signed with the oracle key and posted to the sequencer's feed route. A
+ * publish is skipped if the price moved less than one tick and less than
+ * 10 s passed.
  */
 import { Keypair } from "@stellar/stellar-sdk";
 
-import { encodeOracleUpdate, fromHex, oracleSigningPreimage, sha256, toHex } from "./codec.js";
+import { encodeOracleUpdate, oracleSigningPreimage, sha256, toHex } from "./codec.js";
 import { firstFresh, pricePerLot, snapToTick, type PriceSource } from "./prices.js";
-import type { MarketInfo, SequencerApi } from "./sequencer.js";
+
+/** A market as `GET /v1/markets` lists it. */
+export interface MarketInfo {
+  market_id: number;
+  symbol: string;
+  tick: string;
+  display_lot_base_units: number;
+  display_base_decimals: number;
+}
+
+/** Posts one encoded update to the sequencer. */
+export type PostUpdate = (updateHex: string) => Promise<void>;
 
 export const HEARTBEAT_MS = 10_000;
 
@@ -28,7 +40,7 @@ export class OracleFeeder {
   private readonly last = new Map<number, { price: bigint; atMs: number }>();
 
   constructor(
-    private readonly seq: SequencerApi,
+    private readonly post: PostUpdate,
     private readonly key: Keypair,
     private readonly laneId: Uint8Array,
     private readonly markets: FeedMarket[],
@@ -62,14 +74,8 @@ export class OracleFeeder {
     const fields = { marketId: m.info.market_id, price, publishTimeMs: BigInt(nowMs) };
     const signature = this.key.sign(Buffer.from(sha256(oracleSigningPreimage(this.laneId, fields))));
     const update = encodeOracleUpdate({ ...fields, oracleKey: this.key.rawPublicKey(), signature });
-    await this.seq.postOracle(toHex(update));
+    await this.post(toHex(update));
     this.last.set(m.info.market_id, { price, atMs: nowMs });
     return { ...fields, source: q.source };
   }
-}
-
-export function laneIdFromHex(hex: string): Uint8Array {
-  const b = fromHex(hex);
-  if (b.length !== 32) throw new Error("lane_id must be 32 bytes");
-  return b;
 }

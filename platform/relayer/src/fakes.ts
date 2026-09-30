@@ -1,6 +1,6 @@
 /** In-memory sequencer and settlement contract for the loop tests. */
 import { inboxAccAfter, encodeInboxMsg, sha256 } from "./codec.js";
-import type { InboxReply, MarketInfo, PendingCheckpoint, SequencerApi, SequencerStatus } from "./sequencer.js";
+import type { InboxReply, PendingCheckpoint, SequencerApi, SequencerStatus } from "./sequencer.js";
 import type { CheckpointRecord, InboxRecord, SettlementApi, SubmitResult } from "./stellar.js";
 
 export class FakeSettlement implements SettlementApi {
@@ -62,16 +62,17 @@ export class FakeSequencer implements SequencerApi {
   /** Expected acc chain for each index; a wrong one is a mismatch. */
   queue: PendingCheckpoint[] = [];
   reported: { seq: bigint; hash: string; ledger: number }[] = [];
-  oracle: string[] = [];
-  markets_: MarketInfo[] = [];
+  feeds: { route: string; updateHex: string }[] = [];
+  public_: Record<string, unknown> = {};
   failReportOnce = false;
 
   async status(): Promise<SequencerStatus> {
     return { lane_id: this.laneId, height: "1", inbox: { reported: String(this.inbox.length), reported_acc: "", processed: "0", halted: false } };
   }
 
-  async markets(): Promise<MarketInfo[]> {
-    return this.markets_;
+  async getJson(path: string): Promise<unknown> {
+    if (!(path in this.public_)) throw new Error(`${path}: HTTP 404`);
+    return this.public_[path];
   }
 
   async postInbox(index: bigint, msgHex: string, accAfterHex: string): Promise<InboxReply> {
@@ -85,8 +86,8 @@ export class FakeSequencer implements SequencerApi {
     return { status: "added" };
   }
 
-  async postOracle(updateHex: string): Promise<void> {
-    this.oracle.push(updateHex);
+  async postFeed(route: string, updateHex: string): Promise<void> {
+    this.feeds.push({ route, updateHex });
   }
 
   async pendingCheckpoint(): Promise<PendingCheckpoint | null> {

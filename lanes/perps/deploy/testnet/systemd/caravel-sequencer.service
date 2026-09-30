@@ -8,7 +8,7 @@ User=caravel
 Group=caravel
 EnvironmentFile=/opt/caravel/keys/env
 Environment=RUST_LOG=info
-ExecStart=/opt/caravel/bin/caravel-node sequencer --config /opt/caravel/config/sequencer.toml
+ExecStart=/opt/caravel/bin/caravel-perps-node sequencer --config /opt/caravel/config/sequencer.toml
 Restart=on-failure
 RestartSec=5
 NoNewPrivileges=true

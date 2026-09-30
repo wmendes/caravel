@@ -33,10 +33,11 @@ echo "== host $HOST"
 
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
-mkdir -p "$STAGE/opt/bin" "$STAGE/opt/contracts" "$STAGE/opt/config" "$STAGE/opt/relayer" "$STAGE/opt/web" "$STAGE/systemd"
-cp "$RELEASE_DIR/bin/caravel-node" "$STAGE/opt/bin/"
+mkdir -p "$STAGE/opt/bin" "$STAGE/opt/contracts" "$STAGE/opt/config" "$STAGE/opt/relayer" "$STAGE/opt/relayer-feeds/perps" "$STAGE/opt/web" "$STAGE/systemd"
+cp "$RELEASE_DIR/bin/caravel-perps-node" "$STAGE/opt/bin/"
 cp "$RELEASE_DIR"/contracts/*.wasm "$STAGE/opt/contracts/"
 cp -r "$RELEASE_DIR/relayer/dist" "$RELEASE_DIR/relayer/package.json" "$RELEASE_DIR/relayer/package-lock.json" "$STAGE/opt/relayer/"
+cp -r "$RELEASE_DIR/relayer-feeds/perps/dist" "$RELEASE_DIR/relayer-feeds/perps/package.json" "$RELEASE_DIR/relayer-feeds/perps/package-lock.json" "$STAGE/opt/relayer-feeds/perps/"
 [[ -d "$RELEASE_DIR/web" ]] && cp -r "$RELEASE_DIR/web/." "$STAGE/opt/web/"
 cp lanes/perps/config/lane.caravel-perps.testnet.toml lanes/perps/deploy/testnet/*.toml lanes/perps/deploy/testnet/relayer.json "$STAGE/opt/config/"
 cp lanes/perps/deploy/testnet/systemd/* "$STAGE/systemd/"
@@ -71,10 +72,13 @@ sudo rsync -a --delete \$S/opt/bin/ /opt/caravel/bin/
 sudo rsync -a --delete \$S/opt/contracts/ /opt/caravel/contracts/
 sudo rsync -a --delete \$S/opt/config/ /opt/caravel/config/
 sudo rsync -a --delete \$S/opt/relayer/ /opt/caravel/relayer/
+sudo mkdir -p /opt/caravel/relayer-feeds
+sudo rsync -a --delete \$S/opt/relayer-feeds/ /opt/caravel/relayer-feeds/
 sudo rsync -a --delete \$S/opt/web/ /opt/caravel/web/
-sudo chown -R caravel:caravel /opt/caravel/bin /opt/caravel/contracts /opt/caravel/config /opt/caravel/relayer /opt/caravel/web
-sudo chmod 755 /opt/caravel/bin/caravel-node
+sudo chown -R caravel:caravel /opt/caravel/bin /opt/caravel/contracts /opt/caravel/config /opt/caravel/relayer /opt/caravel/relayer-feeds /opt/caravel/web
+sudo chmod 755 /opt/caravel/bin/caravel-perps-node
 (cd /opt/caravel/relayer && sudo -u caravel env HOME=/opt/caravel npm ci --omit=dev --silent --no-audit --no-fund)
+(cd /opt/caravel/relayer-feeds/perps && sudo -u caravel env HOME=/opt/caravel npm ci --omit=dev --silent --no-audit --no-fund)
 sudo cp \$S/systemd/* /etc/systemd/system/
 sudo cp \$S/Caddyfile /etc/caddy/Caddyfile
 rm -rf \$S

@@ -7,12 +7,11 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use caravel_core::checkpoint::CheckpointHeaderV1;
-use caravel_perps_node::{app as perps_app, PerpsApp};
 use caravel_runtime::checkpoint;
 use caravel_runtime::sequencer::{hex, parse_leaves};
 use caravel_runtime::store::{CheckpointRow, CheckpointStatus, Store};
 use caravel_runtime::views;
-use caravel_types::state::StateV1;
+use caravel_runtime::LaneApp;
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -76,12 +75,12 @@ pub fn unhex(s: &str, what: &'static str) -> Result<Vec<u8>, ApiError> {
         .ok_or_else(|| ApiError::bad_request("BAD_HEX", format!("{what} is not hex")))
 }
 
-pub fn block_json(store: &Store, height: u64) -> ApiResult {
+pub fn block_json<A: LaneApp>(app: &A, store: &Store, height: u64) -> ApiResult {
     let (record, receipts) = store
         .block(height)
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found(format!("no block {height}")))?;
-    ok(views::block(&PerpsApp, &record, &receipts)
+    ok(views::block(app, &record, &receipts)
         .ok_or_else(|| ApiError::internal("stored block does not decode"))?)
 }
 
@@ -148,7 +147,12 @@ pub fn withdrawal_proofs(store: &Store, account: &[u8; 32]) -> ApiResult {
 /// The account's escape leaf in the last checkpoint accepted on Stellar.
 /// `accepted` is that checkpoint's seq as this node knows it; the contract's
 /// `last_checkpoint()` is the authority.
-pub fn escape_proof(store: &Store, account: &[u8; 32], accepted: Option<u64>) -> ApiResult {
+pub fn escape_proof<A: LaneApp>(
+    app: &A,
+    store: &Store,
+    account: &[u8; 32],
+    accepted: Option<u64>,
+) -> ApiResult {
     let seq =
         accepted.ok_or_else(|| ApiError::not_found("no checkpoint accepted on Stellar yet"))?;
     let row = store
@@ -161,8 +165,11 @@ pub fn escape_proof(store: &Store, account: &[u8; 32], accepted: Option<u64>) ->
         .snapshot(seq)
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::internal("missing snapshot"))?;
-    let state = StateV1::decode(&state).map_err(|_| ApiError::internal("snapshot"))?;
-    let leaves = perps_app::account_leaves(&header, &state)
+    let escape = app
+        .decode_state(&state)
+        .and_then(|st| app.escape_leaves(&st))
+        .ok_or_else(|| ApiError::internal("snapshot"))?;
+    let leaves = checkpoint::account_leaves(&header, &escape)
         .map_err(|_| ApiError::internal("account leaves do not match the header"))?;
     let hashes = checkpoint::account_hashes(&header, &leaves);
     let proof = views::proofs_for(&header, &leaves, &hashes, account)

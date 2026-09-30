@@ -1,14 +1,13 @@
 /**
- * The lane byte formats the relayer builds (spec §9): InboxMsgV1 (§9.4) and
- * OracleUpdateV1 (§9.5), little-endian, plus the hashes over them. Checked
- * against the shared `test-vectors/` files, the same ones the Rust tests use.
+ * The platform byte formats the relayer builds (spec §9): InboxMsgV1 (§9.4),
+ * little-endian, and the inbox hash chain. Checked against
+ * `platform/test-vectors/`, the files the Rust tests use. An app's feed
+ * formats live with its feed module (perps: `lanes/perps/relayer-feeds`).
  */
 import { createHash } from "node:crypto";
 
 export const TAG_INBOX = new TextEncoder().encode("CARAVEL/INBOX/V1");
-export const TAG_ORACLE = new TextEncoder().encode("CARAVEL/ORACLE/V1");
 export const INBOX_MSG_LEN = 65;
-export const ORACLE_UPDATE_LEN = 114;
 
 export function sha256(data: Uint8Array): Uint8Array {
   return new Uint8Array(createHash("sha256").update(data).digest());
@@ -49,22 +48,9 @@ class Writer {
     return this;
   }
 
-  u16(v: number): this {
-    this.view.setUint16(this.at, v, true);
-    this.at += 2;
-    return this;
-  }
-
   u64(v: bigint): this {
     if (v < 0n || v >= 1n << 64n) throw new Error(`u64 out of range: ${v}`);
     this.view.setBigUint64(this.at, v, true);
-    this.at += 8;
-    return this;
-  }
-
-  i64(v: bigint): this {
-    if (v < -(1n << 63n) || v >= 1n << 63n) throw new Error(`i64 out of range: ${v}`);
-    this.view.setBigInt64(this.at, v, true);
     this.at += 8;
     return this;
   }
@@ -113,28 +99,4 @@ export function encodeInboxMsg(m: InboxMsg): Uint8Array {
 /** `acc_after = H(TAG_INBOX || acc_prev || msg)`. */
 export function inboxAccAfter(accPrev: Uint8Array, msg: Uint8Array): Uint8Array {
   return sha256(concat(TAG_INBOX, accPrev, msg));
-}
-
-export interface OracleUpdate {
-  marketId: number;
-  /** USDC stroops per lot. */
-  price: bigint;
-  publishTimeMs: bigint;
-  oracleKey: Uint8Array;
-  signature: Uint8Array;
-}
-
-/** `market_id u16 · price i64 · publish_time_ms u64`: the signed bytes. */
-export function oracleSignedFields(u: Omit<OracleUpdate, "signature" | "oracleKey">): Uint8Array {
-  return new Writer(18).u16(u.marketId).i64(u.price).u64(u.publishTimeMs).done();
-}
-
-/** `TAG_ORACLE || lane_id || signed fields`; the oracle key signs its SHA-256. */
-export function oracleSigningPreimage(laneId: Uint8Array, u: Omit<OracleUpdate, "signature" | "oracleKey">): Uint8Array {
-  if (laneId.length !== 32) throw new Error("lane_id must be 32 bytes");
-  return concat(TAG_ORACLE, laneId, oracleSignedFields(u));
-}
-
-export function encodeOracleUpdate(u: OracleUpdate): Uint8Array {
-  return concat(oracleSignedFields(u), new Writer(32).bytes(u.oracleKey, 32).done(), new Writer(64).bytes(u.signature, 64).done());
 }

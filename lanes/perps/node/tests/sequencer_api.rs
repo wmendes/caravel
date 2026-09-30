@@ -7,11 +7,12 @@ use std::time::{Duration, Instant};
 
 use axum::routing::post;
 use axum::{Json, Router};
+use caravel_core::checkpoint::CheckpointHeaderV1;
+use caravel_core::inbox::{inbox_acc_preimage, InboxKind, InboxMsgV1};
 use caravel_node::lane_toml::LaneFile;
+use caravel_perps_node::PerpsApp;
 use caravel_runtime::checkpoint::sha256;
 use caravel_runtime::sequencer::{hex, unhex};
-use caravel_types::checkpoint::CheckpointHeaderV1;
-use caravel_types::inbox::{inbox_acc_preimage, InboxKind, InboxMsgV1};
 use caravel_types::oracle::OracleUpdateV1;
 use caravel_types::tx::{LaneTxV1, PlaceOrder, Side, SigScheme, Tif, TxBody};
 use caravel_types::vectors::{key, pk};
@@ -114,12 +115,14 @@ validators = [
         // SAFETY: set once, before any thread reads the environment in this test binary.
         unsafe { std::env::set_var("CARAVEL_TEST_TOKEN", TOKEN) };
         let cfg = caravel_node::node_config::SequencerConfig::load(&path).unwrap();
-        let (_app, router) = caravel_node::sequencer::start(&cfg).await.unwrap();
+        let (_app, router) = caravel_node::sequencer::start(PerpsApp, &cfg)
+            .await
+            .unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
         let file = LaneFile::load(&dir.path().join("lane.toml")).unwrap();
-        let (_, config_bytes, _) = caravel_node::lane_toml::genesis(&file).unwrap();
+        let (_, config_bytes, _) = caravel_node::lane_toml::genesis(&PerpsApp, &file).unwrap();
         Self {
             lane_id: file.lane_id(),
             config_hash: sha256(&config_bytes),

@@ -1,4 +1,4 @@
-//! `caravel-node tx`: signs a lane transaction with an account's `S...` key
+//! `caravel-perps-node tx`: signs a lane transaction with an account's `S...` key
 //! file (raw ed25519 over the tx hash) and submits it to a sequencer. Used by
 //! `scripts/e2e-local.sh` and by operators (spec §14.6).
 
@@ -14,7 +14,9 @@ use clap::{Args, Subcommand, ValueEnum};
 use ed25519_dalek::Signer;
 use serde_json::{json, Value};
 
-use crate::lane_toml::LaneFile;
+use caravel_node::lane_toml::LaneFile;
+
+use crate::PerpsApp;
 
 #[derive(Args, Debug)]
 pub struct TxArgs {
@@ -131,8 +133,8 @@ fn body(b: &Body) -> Result<TxBody> {
 
 pub async fn run(a: TxArgs) -> Result<()> {
     let lane = LaneFile::load(&a.lane)?;
-    let (_, config_bytes, _) = crate::lane_toml::genesis(&lane)?;
-    let key = crate::validator::read_key_file(&a.key_file)?;
+    let (_, config_bytes, _) = caravel_node::lane_toml::genesis(&PerpsApp, &lane)?;
+    let key = caravel_node::validator::read_key_file(&a.key_file)?;
     let account = key.verifying_key().to_bytes();
     let http = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
@@ -159,7 +161,7 @@ pub async fn run(a: TxArgs) -> Result<()> {
                 .parse()?
         }
     };
-    let now_ms = crate::sequencer::now_ms();
+    let now_ms = caravel_node::sequencer::now_ms();
     let mut tx = LaneTxV1 {
         lane_id: lane.lane_id(),
         account,

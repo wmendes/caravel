@@ -84,7 +84,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        app: [platform/relayer, lanes/perps/web]
+        app: [platform/relayer, lanes/perps/relayer-feeds, lanes/perps/web]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -145,16 +145,18 @@ jobs:
           tar xzf stellar-cli.tar.gz -C "$HOME/.local/bin" stellar
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: ./scripts/build-contracts.sh
-      - run: cargo build --release --locked -p caravel-node
+      - run: cargo build --release --locked -p caravel-perps-node
       - run: npm --prefix platform/relayer ci && npm --prefix platform/relayer run build
+      - run: npm --prefix lanes/perps/relayer-feeds ci && npm --prefix lanes/perps/relayer-feeds run build
       - run: npm --prefix lanes/perps/web ci && npm --prefix lanes/perps/web run build
       - name: Assemble the release
         run: |
-          mkdir -p release/bin release/contracts release/relayer release/web
+          mkdir -p release/bin release/contracts release/relayer release/relayer-feeds/perps release/web
           cp -r lanes/perps/web/dist/. release/web/
-          cp target/release/caravel-node release/bin/
+          cp target/release/caravel-perps-node release/bin/
           cp target/contracts/*.wasm release/contracts/
           cp -r platform/relayer/dist platform/relayer/package.json platform/relayer/package-lock.json release/relayer/
+          cp -r lanes/perps/relayer-feeds/dist lanes/perps/relayer-feeds/package.json lanes/perps/relayer-feeds/package-lock.json release/relayer-feeds/perps/
           (cd release && sha256sum bin/* contracts/* > SHA256SUMS && echo "${GITHUB_SHA}" > COMMIT)
           cat release/SHA256SUMS
       - uses: actions/upload-artifact@v4

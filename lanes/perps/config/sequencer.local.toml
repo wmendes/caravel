@@ -3,7 +3,7 @@
 # variable named by internal_token_env, never from this file.
 #
 #   CARAVEL_INTERNAL_TOKEN=$(openssl rand -hex 16) \
-#     cargo run --release -p caravel-node -- sequencer --config lanes/perps/config/sequencer.local.toml
+#     cargo run --release -p caravel-perps-node -- sequencer --config lanes/perps/config/sequencer.local.toml
 
 [sequencer]
 listen = "127.0.0.1:8080"

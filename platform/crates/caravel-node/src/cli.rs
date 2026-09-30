@@ -1,23 +1,25 @@
-//! `caravel-node`: the sequencer, validator and replay binary (spec §14–§16).
+//! The node commands every app's binary has (spec §14–§16, DEC-053): the
+//! sequencer, validator, replay, check-store, genesis and witness. An app's
+//! binary flattens [`Command`] into its own CLI and calls [`run`]:
+//!
+//! ```ignore
+//! #[derive(clap::Subcommand)]
+//! enum Cmd {
+//!     #[command(flatten)]
+//!     Node(caravel_node::cli::Command),
+//!     // the app's own commands
+//! }
+//! ```
 
 use std::path::PathBuf;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::Subcommand;
 
-#[derive(Parser)]
-#[command(
-    name = "caravel-node",
-    version,
-    about = "Caravel lane node (testnet only)"
-)]
-struct Cli {
-    #[command(subcommand)]
-    command: Command,
-}
+use crate::app::NodeApp;
 
-#[derive(Subcommand)]
-enum Command {
+#[derive(Subcommand, Debug)]
+pub enum Command {
     /// Re-execute a node's whole store through the engine Wasm and check every
     /// block and checkpoint header; prints a JSON report.
     CheckStore {
@@ -36,7 +38,7 @@ enum Command {
         /// The settlement contract, C...
         #[arg(long)]
         settlement: String,
-        /// The lane TOML the genesis config is derived from (as `genesis` does).
+        /// The lane file the genesis config is derived from (as `genesis` does).
         #[arg(long)]
         genesis_config: PathBuf,
         /// The engine Wasm; its hash must be the contract's engine_wasm_hash.
@@ -52,7 +54,7 @@ enum Command {
     /// Print the witness `step` input (T-012) and the exact output the
     /// executor gives for it, as JSON.
     Witness {
-        /// The lane TOML.
+        /// The lane file.
         #[arg(long)]
         lane: PathBuf,
         /// The engine Wasm of record.
@@ -65,8 +67,6 @@ enum Command {
         #[arg(long)]
         timestamp_ms: Option<u64>,
     },
-    /// Sign a lane transaction with an account's key file and submit it.
-    Tx(caravel_node::txcli::TxArgs),
     /// Run a validator (spec §15): follow, re-execute, sign, serve proofs.
     Validator {
         /// The validator config, e.g. lanes/perps/config/validator-1.local.toml.
@@ -87,42 +87,42 @@ enum Command {
         #[arg(long)]
         config: PathBuf,
     },
-    /// Build GenesisConfigV1 and the genesis state from a lane file, and print
+    /// Build the genesis config and state from a lane file, and print
     /// config_hash, genesis_state_hash and sizes as JSON (spec §10.3).
     Genesis {
         /// The lane file, e.g. lanes/perps/config/lane.caravel-perps.testnet.toml.
         #[arg(long)]
         config: PathBuf,
-        /// Also write the GenesisConfigV1 bytes to this file.
+        /// Also write the genesis config bytes to this file.
         #[arg(long)]
         config_out: Option<PathBuf>,
-        /// Also write the genesis StateV1 bytes to this file.
+        /// Also write the genesis state bytes to this file.
         #[arg(long)]
         state_out: Option<PathBuf>,
     },
 }
 
-fn init_logging() {
+pub fn init_logging() {
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }
 
-fn main() -> Result<()> {
-    match Cli::parse().command {
+/// Runs one node command for `app`.
+pub fn run<A: NodeApp>(app: A, command: Command) -> Result<()> {
+    match command {
         Command::CheckStore { config } => {
-            let cfg = caravel_node::node_config::SequencerConfig::load_offline(&config)?;
-            let (_, config_bytes, _) = caravel_node::lane_toml::genesis(&cfg.lane)?;
-            let g = caravel_types::config::GenesisConfigV1::decode(&config_bytes)
-                .map_err(|_| anyhow::anyhow!("config"))?;
+            let cfg = crate::node_config::SequencerConfig::load_offline(&config)?;
+            let (_, config_bytes, _) = crate::lane_toml::genesis(&app, &cfg.lane)?;
+            let (cpu, mem) = app.exec_limits(&config_bytes)?;
             let exec = caravel_runtime::WasmExecutor::from_file(
                 &cfg.engine_wasm,
                 cfg.engine_wasm_hash,
-                g.exec_cpu_limit,
-                g.exec_mem_limit,
+                cpu,
+                mem,
             )?;
             let report =
-                caravel_node::check::check_store(&cfg.lane, &cfg.db, &exec, &cfg.header_ids())?;
+                crate::check::check_store(&app, &cfg.lane, &cfg.db, &exec, &cfg.header_ids())?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
         Command::Replay {
@@ -134,28 +134,23 @@ fn main() -> Result<()> {
             prove_escape,
             prove_withdrawals,
         } => {
-            caravel_node::node_config::check_network(&network_passphrase)?;
-            let lane = caravel_node::lane_toml::LaneFile::load(&genesis_config)?;
-            let (_, config_bytes, _) = caravel_node::lane_toml::genesis(&lane)?;
-            let g = caravel_types::config::GenesisConfigV1::decode(&config_bytes)
-                .map_err(|_| anyhow::anyhow!("config"))?;
+            crate::node_config::check_network(&network_passphrase)?;
+            let lane = crate::lane_toml::LaneFile::load(&genesis_config)?;
+            let (_, config_bytes, _) = crate::lane_toml::genesis(&app, &lane)?;
+            let (cpu, mem) = app.exec_limits(&config_bytes)?;
             let wasm = std::fs::read(&engine_wasm)?;
             let wasm_hash = caravel_runtime::checkpoint::sha256(&wasm);
-            let exec =
-                caravel_runtime::sequencer::Executor::Wasm(caravel_runtime::WasmExecutor::new(
-                    wasm,
-                    wasm_hash,
-                    g.exec_cpu_limit,
-                    g.exec_mem_limit,
-                )?);
-            let contract = caravel_node::node_config::parse_contract(&settlement)?;
+            let exec = caravel_runtime::sequencer::Executor::Wasm(
+                caravel_runtime::WasmExecutor::new(wasm, wasm_hash, cpu, mem)?,
+            );
+            let contract = crate::node_config::parse_contract(&settlement)?;
             let ids = caravel_runtime::checkpoint::HeaderIds {
                 network_id: caravel_runtime::checkpoint::network_id(&network_passphrase),
                 settlement_addr_hash: caravel_runtime::checkpoint::settlement_addr_hash(&contract),
                 engine_wasm_hash: wasm_hash,
             };
-            let src = caravel_node::replay::RpcSource {
-                rpc: caravel_node::stellar_rpc::Rpc::new(&rpc)?,
+            let src = crate::replay::RpcSource {
+                rpc: crate::stellar_rpc::Rpc::new(&rpc)?,
                 contract,
             };
             let rt = tokio::runtime::Builder::new_multi_thread()
@@ -163,7 +158,7 @@ fn main() -> Result<()> {
                 .build()?;
             rt.block_on(async {
                 let outcome =
-                    match caravel_node::replay::replay(&src, &lane, &exec, wasm_hash, &ids).await {
+                    match crate::replay::replay(&app, &src, &lane, &exec, wasm_hash, &ids).await {
                         Ok(o) => o,
                         Err(e) => {
                             println!(
@@ -175,15 +170,15 @@ fn main() -> Result<()> {
                     };
                 println!(
                     "{}",
-                    serde_json::to_string_pretty(&caravel_node::replay::report(&outcome))?
+                    serde_json::to_string_pretty(&crate::replay::report(&outcome))?
                 );
                 if let Some(a) = prove_escape {
                     let key = caravel_runtime::views::parse_g(&a)
                         .ok_or_else(|| anyhow::anyhow!("--prove-escape needs a G... account"))?;
                     println!(
                         "{}",
-                        serde_json::to_string_pretty(&caravel_node::replay::escape_proof(
-                            &outcome, &key
+                        serde_json::to_string_pretty(&crate::replay::escape_proof(
+                            &app, &outcome, &key
                         )?)?
                     );
                 }
@@ -194,7 +189,7 @@ fn main() -> Result<()> {
                     println!(
                         "{}",
                         serde_json::to_string_pretty(
-                            &caravel_node::replay::withdrawal_proofs(&src, &outcome, &key).await?
+                            &crate::replay::withdrawal_proofs(&src, &outcome, &key).await?
                         )?
                     );
                 }
@@ -207,40 +202,33 @@ fn main() -> Result<()> {
             depositor,
             timestamp_ms,
         } => {
-            let lane = caravel_node::lane_toml::LaneFile::load(&lane)?;
-            let (_, config_bytes, _) = caravel_node::lane_toml::genesis(&lane)?;
-            let g = caravel_types::config::GenesisConfigV1::decode(&config_bytes)
-                .map_err(|_| anyhow::anyhow!("config"))?;
+            let lane = crate::lane_toml::LaneFile::load(&lane)?;
+            let (_, config_bytes, _) = crate::lane_toml::genesis(&app, &lane)?;
+            let (cpu, mem) = app.exec_limits(&config_bytes)?;
             let wasm = std::fs::read(&engine_wasm)?;
             let hash = caravel_runtime::checkpoint::sha256(&wasm);
-            let exec =
-                caravel_runtime::WasmExecutor::new(wasm, hash, g.exec_cpu_limit, g.exec_mem_limit)?;
-            let key = caravel_node::lane_toml::parse_account(&depositor)?;
-            let ts = timestamp_ms.unwrap_or_else(caravel_node::sequencer::now_ms);
+            lane.check_engine(&hash)?;
+            let exec = caravel_runtime::WasmExecutor::new(wasm, hash, cpu, mem)?;
+            let key = crate::lane_toml::parse_account(&depositor)?;
+            let ts = timestamp_ms.unwrap_or_else(crate::sequencer::now_ms);
             println!(
                 "{}",
-                serde_json::to_string_pretty(&caravel_node::witness::witness(
-                    &lane, &exec, key, ts
+                serde_json::to_string_pretty(&crate::witness::witness(
+                    &app, &lane, &exec, key, ts
                 )?)?
             );
         }
-        Command::Tx(args) => {
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()?
-                .block_on(caravel_node::txcli::run(args))?;
-        }
         Command::Validator { config } => {
             init_logging();
-            let cfg = caravel_node::validator::ValidatorConfig::load(&config)?;
+            let cfg = crate::validator::ValidatorConfig::load(&config)?;
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?
-                .block_on(caravel_node::validator::run(cfg))?;
+                .block_on(crate::validator::run(app, cfg))?;
         }
         Command::ValidatorClear { config, through } => {
-            let cfg = caravel_node::validator::ValidatorConfig::load(&config)?;
-            let (_, config_bytes, genesis_state) = caravel_node::lane_toml::genesis(&cfg.lane)?;
+            let cfg = crate::validator::ValidatorConfig::load(&config)?;
+            let (_, config_bytes, genesis_state) = crate::lane_toml::genesis(&app, &cfg.lane)?;
             let config_hash = caravel_runtime::checkpoint::sha256(&config_bytes);
             let mut store = caravel_runtime::store::Store::open(
                 &cfg.db,
@@ -253,19 +241,19 @@ fn main() -> Result<()> {
         }
         Command::Sequencer { config } => {
             init_logging();
-            let cfg = caravel_node::node_config::SequencerConfig::load(&config)?;
+            let cfg = crate::node_config::SequencerConfig::load(&config)?;
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?
-                .block_on(caravel_node::sequencer::run(cfg))?;
+                .block_on(crate::sequencer::run(app, cfg))?;
         }
         Command::Genesis {
             config,
             config_out,
             state_out,
         } => {
-            let file = caravel_node::lane_toml::LaneFile::load(&config)?;
-            let (report, config_bytes, state) = caravel_node::lane_toml::genesis(&file)?;
+            let file = crate::lane_toml::LaneFile::load(&config)?;
+            let (report, config_bytes, state) = crate::lane_toml::genesis(&app, &file)?;
             if let Some(path) = config_out {
                 std::fs::write(path, &config_bytes)?;
             }
