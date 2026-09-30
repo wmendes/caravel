@@ -96,6 +96,9 @@ fn a_deployment_parses_with_its_defaults() {
     assert_eq!(e.validators.len(), 3);
     assert!(e.validators.iter().all(|v| v.weight == 1));
     assert_eq!(e.sequencer.port, 8080);
+    // A validator named n listens on the sequencer's port + n.
+    let ports: Vec<_> = e.validators.iter().map(|v| v.port(8080).unwrap()).collect();
+    assert_eq!(ports, [8081, 8082, 8083]);
     assert_eq!(
         (e.host.provider, e.host.transport),
         (Provider::Ssh, Transport::Ssh)
@@ -230,6 +233,12 @@ fn every_rule_is_checked() {
             "admin = \"demo-admin\"",
             "admin = \"demo-admin\"\nextra = 1",
             "unknown field",
+        ),
+        ("name = \"3\"", "name = \"third\"", "set its port"),
+        (
+            "key = \"demo-v3\"",
+            "key = \"demo-v3\"\nport = 8081",
+            "port 8081 is already taken",
         ),
     ];
     for (from, to, why) in cases {

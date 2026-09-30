@@ -1,0 +1,16 @@
+{
+  "feeds": [],
+  "intervalsMs": {
+    "checkpoints": 1000,
+    "inbox": 1000
+  },
+  "loops": {
+    "checkpoints": true,
+    "inbox": true
+  },
+  "metricsFile": "/opt/caravel/data/relayer-checkpoints.jsonl",
+  "networkPassphrase": "Standalone Network ; February 2017",
+  "rpcUrl": "http://localhost:8000/rpc",
+  "sequencerUrl": "http://127.0.0.1:18180",
+  "settlementContract": "CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR"
+}

@@ -471,12 +471,16 @@ name = "caravel-deploy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "caravel-core",
  "caravel-node",
  "caravel-runtime",
+ "clap",
+ "reqwest",
  "serde",
  "serde_json",
  "stellar-strkey 0.0.16",
  "stellar-xdr",
+ "tokio",
  "toml",
 ]
 
@@ -536,6 +540,7 @@ dependencies = [
  "axum",
  "caravel-app-sdk",
  "caravel-core",
+ "caravel-deploy",
  "caravel-harness",
  "caravel-node",
  "caravel-payments",
@@ -572,6 +577,7 @@ dependencies = [
  "axum",
  "caravel-app-sdk",
  "caravel-core",
+ "caravel-deploy",
  "caravel-merkle",
  "caravel-node",
  "caravel-perps",

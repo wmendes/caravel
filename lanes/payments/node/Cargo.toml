@@ -17,6 +17,7 @@ caravel-app-sdk = { workspace = true, features = ["native"] }
 caravel-payments = { workspace = true, features = ["native"] }
 caravel-runtime = { workspace = true }
 caravel-node = { workspace = true }
+caravel-deploy = { workspace = true }
 ed25519-dalek = { workspace = true }
 anyhow = "1.0.104"
 axum = { version = "0.8.9", features = ["ws"] }

@@ -28,5 +28,6 @@ test_snapshots/
 
 # Claude Code local state
 .claude/scheduled_tasks.lock
+.claude/settings.local.json
 # Test fixtures (not node stores): the M0.5 golden store.
 !**/tests/fixtures/*.sqlite

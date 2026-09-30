@@ -6,9 +6,19 @@
 use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
 use stellar_xdr::{
-    ContractDataDurability, ContractId, Hash, LedgerEntryData, LedgerKey, LedgerKeyContractData,
-    Limits, ReadXdr, ScAddress, ScMap, ScSymbol, ScVal, ScVec, WriteXdr,
+    AccountId, ContractDataDurability, ContractId, Hash, LedgerEntryData, LedgerKey,
+    LedgerKeyAccount, LedgerKeyContractCode, LedgerKeyContractData, Limits, PublicKey, ReadXdr,
+    ScAddress, ScMap, ScSymbol, ScVal, ScVec, Uint256, WriteXdr,
 };
+
+/// A ledger entry as `getLedgerEntries` returns it.
+#[derive(Clone, Debug)]
+pub struct Entry {
+    pub data: LedgerEntryData,
+    /// `liveUntilLedgerSeq`: the last ledger before the entry is archived
+    /// (contract data and code only).
+    pub live_until: Option<u32>,
+}
 
 pub struct Rpc {
     http: reqwest::Client,
@@ -76,6 +86,38 @@ impl Rpc {
         Ok(Some(LedgerEntryData::from_xdr_base64(xdr, read_limits())?))
     }
 
+    /// `getLedgerEntries` for several keys: each key's entry in the order
+    /// given (`None` when it doesn't exist), and `latestLedger`.
+    pub async fn ledger_entries(&self, keys: &[LedgerKey]) -> Result<(Vec<Option<Entry>>, u32)> {
+        let wanted: Vec<String> = keys
+            .iter()
+            .map(|k| k.to_xdr_base64(Limits::none()))
+            .collect::<Result<_, _>>()?;
+        let result = self
+            .call("getLedgerEntries", json!({ "keys": wanted }))
+            .await?;
+        let latest = result["latestLedger"]
+            .as_u64()
+            .and_then(|l| u32::try_from(l).ok())
+            .ok_or_else(|| anyhow!("getLedgerEntries: no latestLedger"))?;
+        let mut out = vec![None; keys.len()];
+        for e in result["entries"].as_array().into_iter().flatten() {
+            let (Some(key), Some(xdr)) = (e["key"].as_str(), e["xdr"].as_str()) else {
+                bail!("getLedgerEntries: an entry without key or xdr");
+            };
+            let Some(i) = wanted.iter().position(|w| w == key) else {
+                continue;
+            };
+            out[i] = Some(Entry {
+                data: LedgerEntryData::from_xdr_base64(xdr, read_limits())?,
+                live_until: e["liveUntilLedgerSeq"]
+                    .as_u64()
+                    .and_then(|l| u32::try_from(l).ok()),
+            });
+        }
+        Ok((out, latest))
+    }
+
     /// The contract's instance storage map.
     pub async fn instance_storage(&self, contract: &[u8; 32]) -> Result<Option<ScMap>> {
         let Some(LedgerEntryData::ContractData(d)) =
@@ -105,6 +147,27 @@ pub fn instance_key(contract: &[u8; 32]) -> LedgerKey {
         key: ScVal::LedgerKeyContractInstance,
         durability: ContractDataDurability::Persistent,
     })
+}
+
+/// The ledger key of a contract's persistent entry under `key`.
+pub fn persistent_key(contract: &[u8; 32], key: ScVal) -> LedgerKey {
+    LedgerKey::ContractData(LedgerKeyContractData {
+        contract: ScAddress::Contract(ContractId(Hash(*contract))),
+        key,
+        durability: ContractDataDurability::Persistent,
+    })
+}
+
+/// The ledger key of an ed25519 account.
+pub fn account_key(account: &[u8; 32]) -> LedgerKey {
+    LedgerKey::Account(LedgerKeyAccount {
+        account_id: AccountId(PublicKey::PublicKeyTypeEd25519(Uint256(*account))),
+    })
+}
+
+/// The ledger key of uploaded Wasm.
+pub fn code_key(hash: &[u8; 32]) -> LedgerKey {
+    LedgerKey::ContractCode(LedgerKeyContractCode { hash: Hash(*hash) })
 }
 
 /// `DataKey::LastCkpt` as a `#[contracttype]` unit variant: `Vec[Symbol("LastCkpt")]`.

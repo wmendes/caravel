@@ -34,3 +34,43 @@ exec_mem_limit = 41943040
 treasury_key = "GCQJVJPUPJTVTABP7FK7RXBNFIKKLSM5EO7JP6DECJ77SOBUKWSPB64N"   # system account 0: receives the fees
 transfer_fee = 100000                      # 0.01 USDC per transfer, paid by the sender
 min_transfer = 1                           # 1 stroop
+
+# A deployment of this lane on this machine and a local Stellar network
+# (`caravel apply lanes/payments/config/lane.caravel-payments.local.toml --env local`).
+# Keys are Stellar CLI identities: create them first with `stellar keys generate <name>`.
+[env.local]
+network = "local"
+admin = "pay-local-admin"                  # deploys the settlement contract; issues the local USDC
+usdc = "local"
+threshold = 2
+
+[env.local.settlement_params]
+force_inclusion_window_secs = 20
+escape_timeout_secs = 30
+min_rotation_delay_secs = 3600
+signer_retention_epochs = 2
+
+[[env.local.validators]]
+name = "1"
+key = "pay-local-v1"
+
+[[env.local.validators]]
+name = "2"
+key = "pay-local-v2"
+
+[[env.local.validators]]
+name = "3"
+key = "pay-local-v3"
+
+[env.local.sequencer]
+port = 18180
+
+[env.local.validator_polling]
+stellar_secs = 2
+
+[env.local.relayer]
+account = "pay-local-relayer"
+intervals_ms = { inbox = 1000, checkpoints = 1000 }
+
+[env.local.host]
+provider = "local"
