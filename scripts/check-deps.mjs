@@ -15,7 +15,6 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const EXCEPTIONS = {
-  settlement: "P-09 moves its codecs to caravel-core and its tests to caravel-harness",
 };
 
 function manifests(dir) {

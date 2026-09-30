@@ -4,7 +4,7 @@
 
 use alloc::vec::Vec as AllocVec;
 
-use caravel_types::preimage::{signers_hash_preimage, WeightedSigner as RawSigner};
+use caravel_core::preimage::{signers_hash_preimage, WeightedSigner as RawSigner};
 use soroban_sdk::{Bytes, BytesN, Env, Vec};
 
 use crate::types::{Error, Sig, WeightedSigners};

@@ -12,17 +12,16 @@ crate-type = ["cdylib", "rlib"]
 doctest = false
 
 [dependencies]
-caravel-types = { workspace = true }
-caravel-merkle = { workspace = true, features = ["soroban"] }
-# caravel-types builds its byte strings in Vecs (the same builders the engine uses).
+# The platform formats (DEC-052): the checkpoint header, inbox, preimages and Merkle.
+caravel-core = { workspace = true, features = ["soroban"] }
+# caravel-core builds its byte strings in Vecs.
 soroban-sdk = { workspace = true, features = ["alloc"] }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils", "alloc"] }
-caravel-merkle = { workspace = true, features = ["alloc", "native", "soroban"] }
-caravel-perps = { workspace = true, features = ["native"] }
-caravel-testkit = { workspace = true }
-caravel-types = { workspace = true, features = ["gen-vectors"] }
+caravel-core = { workspace = true, features = ["native", "soroban"] }
+caravel-harness = { workspace = true }
+caravel-app-sdk = { workspace = true, features = ["native", "testapp"] }
 ed25519-dalek = { workspace = true }
 serde_json = "1.0.151"
 stellar-strkey = { workspace = true }

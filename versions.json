@@ -23,7 +23,7 @@
   },
   "artifacts": {
     "engine_wasm_sha256": "4571cd252d4b78d523d01fc4a31ab763a1aff77aecafbb9d7302cfb879abbf0a",
-    "settlement_wasm_sha256": "8280828f09f1b16fe874f5c951fb27bc3266ec6c916b5ac82c706bb77efc1a52",
+    "settlement_wasm_sha256": "fb68ee326f158aff61c2de65bb378d8b31775bea6f65562f8c00f14463c395c6",
     "genesis_config_sha256": "f4b9db09137583ba9d66ea0b8a3a2b658a163f7b72993e0f242f04ea3ac93997",
     "genesis_state_sha256": "22702d9f4c45f88306aca02169cf7a86ccaec3b45ed85103c7a9fc4277291e77"
   },

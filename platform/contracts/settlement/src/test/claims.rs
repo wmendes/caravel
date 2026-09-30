@@ -46,7 +46,7 @@ fn claim(
 fn index_of(cp: &Checkpoint, seed: u8) -> u32 {
     cp.withdrawals
         .iter()
-        .position(|(k, _)| *k == caravel_types::vectors::pk(seed))
+        .position(|(k, _)| *k == caravel_harness::pk(seed))
         .unwrap() as u32
 }
 

@@ -67,6 +67,7 @@ M0.5 is splitting the repo into the platform (Caravel) and its first lane (Carav
 - `lanes/perps/engine/`: **frozen** nested workspace, the perps engine of record (DEC-051). Never edit it. It holds caravel-types, caravel-merkle, caravel-perps (engine logic), caravel-testkit (test-only: lane simulator, scenarios, `cargo gen-vectors`), contracts/perps-engine and test-vectors/.
 - `platform/` (Caravel, app-agnostic; `scripts/check-deps.mjs` keeps it off `lanes/`):
   - `crates/caravel-core` (the formats every lane shares, read without the app, DEC-052);
+  - `crates/caravel-harness` (test-only: a native lane on the SDK's test app, for platform tests such as settlement's, DEC-063);
   - `crates/caravel-app-sdk` (no_std: `AppGenesisV1`, the SDK state layout and the standard pipeline for any app engine, DEC-060, DEC-062; `testapp` feature);
   - `crates/caravel-runtime` (executor, store, sequencer and validator cores, checkpoints; any app through the `LaneApp` trait, DEC-053; formerly caravel-lane);
   - `crates/caravel-node` (library: sequencer / validator / replay / genesis / lane files for any app through `NodeApp`, DEC-053, DEC-054; each app's binary links it);

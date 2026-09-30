@@ -1,7 +1,7 @@
 //! Constructor, inbox, golden vector, recipient encoding, TTL, upgrade and
 //! the full-batch budget.
 
-use caravel_types::inbox::inbox_acc_preimage;
+use caravel_core::inbox::inbox_acc_preimage;
 use soroban_sdk::testutils::storage::{Instance as _, Persistent as _};
 use soroban_sdk::testutils::{Events as _, Ledger as _};
 use soroban_sdk::{Event as _, IntoVal, Val};
@@ -79,7 +79,7 @@ fn golden_header_vector_verifies_in_the_contract() {
 #[test]
 fn account_xdr_prefix() {
     let env = Env::default();
-    for key in [[0u8; 32], [0xFF; 32], caravel_types::vectors::pk(A)] {
+    for key in [[0u8; 32], [0xFF; 32], caravel_harness::pk(A)] {
         let xdr = account_address(&env, &key).to_xdr(&env).to_alloc_vec();
         assert_eq!(xdr.len(), 44);
         assert_eq!(xdr[..12], ACCOUNT_XDR_PREFIX);
@@ -222,7 +222,7 @@ fn deposit_event() {
     let msg = InboxMsgV1 {
         kind: InboxKind::Deposit,
         index: 0,
-        lane_account: caravel_types::vectors::pk(A),
+        lane_account: caravel_harness::pk(A),
         amount: 100 * USDC,
         enqueued_at: START,
     };
@@ -315,7 +315,7 @@ fn forced_withdrawal_reaches_a_claim() {
     let cp = h.checkpoint();
     assert_eq!(
         cp.withdrawals,
-        std::vec![(caravel_types::vectors::pk(A), 40 * USDC)]
+        std::vec![(caravel_harness::pk(A), 40 * USDC)]
     );
     h.accept(&cp);
     h.c().claim_withdrawal(
@@ -572,7 +572,7 @@ fn storage_layout_read_off_chain() {
             .unwrap()
     })));
     for (name, want) in [
-        ("lane_id", caravel_testkit::lane::config().lane_id),
+        ("lane_id", caravel_harness::config().lane_id),
         ("engine_wasm_hash", ENGINE_HASH),
         ("config_hash", h.lane.config_hash),
     ] {
