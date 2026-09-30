@@ -2003,6 +2003,48 @@ If time is short, cut in this order:
 
 Never cut replay, validator re-execution or the escape contract path: they are the claims.
 
+### 20.3 Milestone M0.5: the platform split
+
+**Decided with the human on 2026-09-30.** Caravel is the platform that lets any team launch a lane settling to Stellar, modeled on Tanssi. Caravel Perps is the first lane built with it, not the product. M0 built the two as one. M0.5 splits them in one repository:
+- `platform/` holds the app-agnostic runtime, nodes, settlement, lane registry, console, CLI and relayer core;
+- `lanes/perps/` holds Caravel Perps;
+- `lanes/payments/` holds a small second template.
+
+The live testnet lane keeps its engine Wasm byte for byte and becomes lane #1 in the registry. Hosting is self-hosted by default, plus hosted trial lanes: at most 2 at a time, 48 h each, on the existing VM.
+
+The plan of record is `~/.claude/plans/ok-but-now-i-lucky-hoare.md` (architecture §1–§11). Its DEC numbers (DEC-051 to DEC-057) are added to §22 as each task lands. Phase gates are P1 (P-07), P2 (P-10), P3 (P-16) and P4 (P-21).
+
+**Needs the human first (§0.4):**
+- the new consensus formats of Phase 2 (`AppGenesisV1`, the SDK state layout, the Payments rules);
+- the new settlement build of record for new lanes;
+- the registry admin key;
+- the platform §2 claims and the landing copy;
+- whether hosted trials open to everyone or to an allowlist first.
+
+| ID | Task | Depends | Status |
+|---|---|---|---|
+| P-01 | Baseline: tag `perps-m0`; golden sequencer trace, fixture store, API and genesis snapshots | T-016 | review |
+| P-02 | Frozen perps engine workspace `lanes/perps/engine/` (byte-identical Wasm, tree-hash check) | P-01 | todo |
+| P-03 | Moves into `platform/` and `lanes/perps/` (runtime, node, settlement, configs, web, relayer) | P-02 | todo |
+| P-04 | `caravel-core`: generic codecs over the same bytes (opaque bodies, feeds, receipts, state frame) + compatibility tests | P-03 | todo |
+| P-05 | Runtime on `LaneApp` + `PerpsApp`: golden trace byte for byte, parity gate, fixture store opens | P-04 | todo |
+| P-06 | Node on `NodeApp`, lane-file split, `caravel-perps-node`, relayer feed module: API snapshots identical, dependency guard | P-05 | todo |
+| P-07 | Live VM upgrade to `caravel-perps-node` (check-store, shadow validator, replay) — **Gate P1** | P-06 | todo |
+| P-08 | `caravel-app-sdk` + `testapp`, conformance with perps' standard kinds | P-07 | todo |
+| P-09 | `caravel-harness`; settlement tests move off perps; new settlement build of record | P-08 | todo |
+| P-10 | Payments template: engine, vectors, scenarios, INV-PAY1, parity, node, e2e — **Gate P2** | P-09 | todo |
+| P-11 | Lane registry contract + tests | P-10 | todo |
+| P-12 | `caravel-lane-config` + browser Wasm build (same hashes as the CLI and lane #1) | P-10 | todo |
+| P-13 | `caravel` CLI (init, genesis, deploy, register, bundle, run, escape-proofs, status) | P-11, P-12 | todo |
+| P-14 | Registry on testnet; lane #1 registered | P-13 | todo |
+| P-15 | `lane-client` / `lane-ui` packages; perps web app to `lanes/perps/web` | P-07 | todo |
+| P-16 | Console: lanes, dashboard, explorer, portfolio, escape, self-hosted wizard; on Vercel — **Gate P3** | P-14, P-15 | todo |
+| P-17 | Host manager, trial slots, teardown, archive on the VM | P-16 | todo |
+| P-18 | Console trial path | P-17 | todo |
+| P-19 | Landing page and platform §2 claims (after the human approves them) | P-16 | todo |
+| P-20 | Testnet e2e through the console, self-hosted and trial; RESULTS | P-18 | todo |
+| P-21 | Security pass over registry, host manager, console and SDK — **Gate P4** | P-20 | todo |
+
 ---
 
 ## 21. Later milestones (not for M0 agents to start without a human go-ahead)
