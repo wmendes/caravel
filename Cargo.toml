@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["platform/crates/*", "platform/contracts/*", "lanes/perps/node"]
+members = ["platform/crates/*", "platform/contracts/*", "lanes/perps/node", "lanes/payments/app", "lanes/payments/contracts/*", "lanes/payments/node"]
 # The frozen Caravel Perps engine is its own workspace (DEC-051); the crates
 # here use it by path only.
 exclude = ["lanes/perps/engine"]
@@ -30,6 +30,8 @@ caravel-core = { path = "platform/crates/caravel-core" }
 caravel-node = { path = "platform/crates/caravel-node" }
 caravel-app-sdk = { path = "platform/crates/caravel-app-sdk" }
 caravel-harness = { path = "platform/crates/caravel-harness" }
+caravel-payments = { path = "lanes/payments/app" }
+caravel-payments-node = { path = "lanes/payments/node" }
 caravel-perps-node = { path = "lanes/perps/node" }
 caravel-testkit = { path = "lanes/perps/engine/crates/caravel-testkit" }
 

@@ -142,3 +142,17 @@ The SDK's fee estimate is 7,699,033 stroops, almost all of it rent (7,682,542) f
 - **Restart.** The sequencer stopped at height 1,802. `caravel-perps-node check-store` re-executed its whole store through the Wasm and got state hash `b7045073…6a`; the restarted sequencer resumed at height 1,802 with the same hash.
 - **Final check.** `check-store` re-executed all 3,603 blocks through the Wasm and rebuilt all 450 checkpoint headers byte for byte.
 - **Checkpoint spacing.** At this load a block carries about 50 transactions (roughly 10.5 KB), so after 8 blocks the next block might not fit in the 96,000-byte batch. Rule (b) of §14.2 then ends the batch before rule (a) would at 10 blocks. At lighter load, checkpoints come every 10 blocks.
+
+## Payments engine: the costliest block (P-10, 2026-09-30)
+
+Same machine. The payments engine Wasm (`f8384963…b29d`, 48,434 bytes, the macOS build; DEC-064) at the local payments lane's limits: 256 accounts, 512 pending withdrawals, 12,000-byte blocks, a 200M CPU limit. The block is a checkpoint over all 256 accounts and a full withdrawal queue, filled with SEP-53-signed transfers. That makes it the costliest block the limits allow: both commitment trees at their largest, and the extra hash of each SEP-53 signature.
+
+Reproduce with `cargo test -p caravel-payments-node --test parity a_full_block -- --nocapture` after `./scripts/build-contracts.sh`.
+
+| Measure | Result |
+|---|---:|
+| Transfers | 49 (11,951 bytes) |
+| Host CPU insns | 68,244,029 (34% of 200M) |
+| Host mem bytes | 3,601,255 (8% of 41,943,040) |
+
+The test fails if a block costs more than 100M instructions (§12.2) or more than half the limit (the 2× headroom of DEC-028). With the measured budget the block runs, and with one instruction less it is `BudgetExceeded` every time (DEC-015). The 10,000-block payments parity gate (`--ignored`) takes 31 s.

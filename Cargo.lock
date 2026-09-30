@@ -507,6 +507,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "caravel-payments"
+version = "0.1.0"
+dependencies = [
+ "caravel-app-sdk",
+ "caravel-core",
+]
+
+[[package]]
+name = "caravel-payments-node"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "caravel-app-sdk",
+ "caravel-core",
+ "caravel-harness",
+ "caravel-node",
+ "caravel-payments",
+ "caravel-runtime",
+ "clap",
+ "ed25519-dalek",
+ "futures-util",
+ "proptest",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "soroban-env-host",
+ "stellar-strkey 0.0.16",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite",
+]
+
+[[package]]
 name = "caravel-perps"
 version = "0.1.0"
 dependencies = [
@@ -2094,6 +2128,17 @@ name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
+
+[[package]]
+name = "payments-engine"
+version = "0.1.0"
+dependencies = [
+ "caravel-app-sdk",
+ "caravel-core",
+ "caravel-payments",
+ "sha2",
+ "soroban-sdk",
+]
 
 [[package]]
 name = "percent-encoding"

@@ -2044,7 +2044,7 @@ The plan of record is `~/.claude/plans/ok-but-now-i-lucky-hoare.md` (architectur
 | P-08 | `caravel-app-sdk` + `testapp`, conformance with perps' standard kinds | P-07 | review |
 | P-08b | Pyth Pro feed verified in-engine in the SDK (needs format approval and a Pyth Pro subscription) | P-08 | todo |
 | P-09 | `caravel-harness`; settlement tests move off perps; new settlement build of record | P-08 | review |
-| P-10 | Payments template: engine, vectors, scenarios, INV-PAY1, parity, node, e2e — **Gate P2** | P-09 | todo |
+| P-10 | Payments template: engine, vectors, scenarios, INV-PAY1, parity, node, e2e (DEC-064) — **Gate P2** | P-09 | review |
 | P-11 | Lane registry contract + tests | P-10 | todo |
 | P-12 | `caravel-lane-config` + browser Wasm build (same hashes as the CLI and lane #1) | P-10 | todo |
 | P-13 | `caravel` CLI (init, genesis, deploy, register, bundle, run, escape-proofs, status) | P-11, P-12 | todo |
@@ -2139,13 +2139,14 @@ ext_len u16 · ext[]                          # the app's per-account data
     1. `amount ≥ min_transfer` → 12 `BELOW_MIN_TRANSFER`;
     2. `to != account` → 13 `SELF_TRANSFER`;
     3. `to` is an existing account → 11 `UNKNOWN_RECIPIENT` (a recipient must have deposited once, so transfers can't fill account slots);
-    4. `balance ≥ amount + transfer_fee` → 10 `INSUFFICIENT_BALANCE`.
+    4. `balance ≥ amount + transfer_fee` → 10 `INSUFFICIENT_BALANCE` (a sum that overflows i128 is this rejection too, not a fatal).
   - Effect: `balance −= amount + fee`; `to.balance += amount`; `treasury.balance += fee`.
   - Event 16 TRANSFER: `from_idx u32 · to_idx u32 · amount i128 · fee i128 · memo u64`.
 - **Free balance and escape equity** are both the balance. There is no `ext`, no `app_globals`, and `app_word` and `app_flags` are 0.
 - **Feeds:** none. A FEED entry is fatal.
 - **INV-PAY1:** `Σ balances + Σ pending.amount == deposits_credited_total − withdrawals_committed_total`.
-- **Engine and version:** the `payments-engine` contract, `version()` = `payments/0.1.0`, a 64 KB Wasm budget, and its hash in `versions.json` `lanes.payments`.
+- **Engine and version:** the `payments-engine` contract, `version()` = `H("CARAVEL/ENGINE/V1" ‖ "payments/0.1.0")`, a 64 KB Wasm budget, and its hash in `versions.json` `lanes.payments`.
+- **Lane file** (DEC-054): `[app] template = "payments"`, and `[payments] treasury_key` (G..., system account 0), `transfer_fee`, `min_transfer`. The node is `caravel-payments-node` (DEC-064).
 
 ---
 
@@ -2359,6 +2360,21 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 - **`platform/crates/caravel-harness`** (test-only) is a native lane on the app SDK, driven block by block like the testkit's: queues, blocks, checkpoints, records, the previous block hash, `escape_leaves` and `pending`. It runs the SDK's test app by default and checks SDK-INV1 after every block.
 - **The settlement contract** takes its codecs from `caravel-core` instead of `caravel-types` and `caravel-merkle`; they are byte-identical copies (DEC-052). Its 74 tests run on the harness instead of the perps testkit, unchanged apart from the imports and where the escape leaves come from.
 - **New settlement build of record:** `fb68ee32…`, the x86_64 Linux build from CI (DEC-033; CI run 36733965429, 2026-09-30). It is 42,900 bytes, like `8280828f…`, and the code is the same: after the crate switch the compiler orders the function-type and function-index tables differently (902 bytes differ, measured on macOS). The macOS build of the same source is `d2c67d28…`, so `build-contracts.sh` only warns there, as DEC-033 allows. It replaces `8280828f…` (DEC-061), which no lane ever deployed. Lane #1 keeps `8a2fafbd…`. The human is told at Gate P2 | The platform's contract is tested with the platform's own lane, so no app's engine is part of its test surface. A build identity change on a contract nobody deployed costs nothing | A settlement code change, which gets its own build and DEC |
+| DEC-064 | **M0.5 (P-10).** Caravel Payments, the second template (§20.4.4), is built on the app SDK and runs on the generic node with no payments code in `platform/`.
+- **Crates:**
+  - `lanes/payments/app` (`caravel-payments`, no_std): the `AppEngine`;
+  - `lanes/payments/contracts/payments-engine`: the contract, 48,434 bytes of its 65,536 budget. Its sha256 `f8384963…` is from a macOS arm64 build; the x86_64 Linux build from CI is the one of record (DEC-033), checked at Gate P2;
+  - `lanes/payments/node` (`caravel-payments-node`): `PaymentsApp` as `LaneApp` and `NodeApp`, the account view (`balance`, `next_nonce`, `session_keys`), the `[payments]` lane-file section, and `tx transfer|withdraw`.
+- **Local lane:** `lanes/payments/config/lane.caravel-payments.local.toml`, with the public fixture treasury key (seed `0x22`). lane_id `5528e7c7…`, config_hash `8c16d400…`, genesis_state_hash `589cb7a6…`.
+- **Tests** (`lanes/payments/node/tests/`):
+  - scenarios P1–P12, each replayed through the Wasm byte for byte, fatal blocks and bad genesis included;
+  - the INV-PAY1 property (96 cases), which also checks that the treasury holds exactly the fees plus what users sent it;
+  - parity on 300 random blocks, and 10,000 behind `--ignored` (31 s locally);
+  - the budget: the costliest block the limits allow (a checkpoint over 256 accounts and 512 pending withdrawals, with 49 SEP-53 transfers filling 11,951 bytes) costs 68.2M instructions (34% of 200M) and 3.6 MB (8%). Budget exhaustion is deterministic;
+  - the sequencer API over HTTP and WebSocket, with proofs checked against the header;
+  - lane-file goldens and refusals;
+  - vectors in `lanes/payments/test-vectors/payments.json`, which freeze the format (DEC-060).
+- **e2e:** `E2E_TEMPLATE=payments ./scripts/e2e-local.sh`. A new step 4c, a forced withdrawal asked for on Stellar and claimed there, runs for both templates. Both passed on a local quickstart on 2026-09-30: payments in 197 s and perps in 164 s, each with 5 checkpoints replayed from Stellar. CI runs the e2e for both, and runs the payments parity gate and no_std build on every push | A second app on the same node, settlement contract and relayer shows the platform carries a lane without app code of its own. Step 4c covers the forced-withdrawal path, which the M0 e2e left to unit tests | Fee sponsorship, transfers that create accounts, or a template that needs feeds (P-08b) |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 
