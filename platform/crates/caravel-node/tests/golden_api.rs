@@ -2,7 +2,7 @@
 //!
 //! - The API builders (`checkpoint_json`, `block_json`, `withdrawal_proofs`,
 //!   `escape_proof`) over the fixture store that
-//!   `caravel-runtime/tests/golden.rs` leaves behind, with checkpoints 1 to 5
+//!   `lanes/perps/node/tests/golden.rs` leaves behind, with checkpoints 1 to 5
 //!   marked accepted.
 //! - `caravel-node genesis` for both perps lane files.
 //!
@@ -71,7 +71,7 @@ async fn m0_api_json_is_unchanged() {
     let tmp = tempfile::tempdir().unwrap();
     let db = tmp.path().join("lane.sqlite");
     std::fs::copy(
-        root().join("platform/crates/caravel-runtime/tests/fixtures/m0-sequencer.sqlite"),
+        root().join("lanes/perps/node/tests/fixtures/m0-sequencer.sqlite"),
         &db,
     )
     .unwrap();

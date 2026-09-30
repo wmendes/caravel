@@ -6,11 +6,12 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+use caravel_core::checkpoint::CheckpointHeaderV1;
+use caravel_perps_node::{app as perps_app, PerpsApp};
 use caravel_runtime::checkpoint;
 use caravel_runtime::sequencer::{hex, parse_leaves};
 use caravel_runtime::store::{CheckpointRow, CheckpointStatus, Store};
 use caravel_runtime::views;
-use caravel_types::checkpoint::CheckpointHeaderV1;
 use caravel_types::state::StateV1;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -80,7 +81,7 @@ pub fn block_json(store: &Store, height: u64) -> ApiResult {
         .block(height)
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::not_found(format!("no block {height}")))?;
-    ok(views::block(&record, &receipts)
+    ok(views::block(&PerpsApp, &record, &receipts)
         .ok_or_else(|| ApiError::internal("stored block does not decode"))?)
 }
 
@@ -161,7 +162,7 @@ pub fn escape_proof(store: &Store, account: &[u8; 32], accepted: Option<u64>) ->
         .map_err(ApiError::internal)?
         .ok_or_else(|| ApiError::internal("missing snapshot"))?;
     let state = StateV1::decode(&state).map_err(|_| ApiError::internal("snapshot"))?;
-    let leaves = checkpoint::account_leaves(&header, &state)
+    let leaves = perps_app::account_leaves(&header, &state)
         .map_err(|_| ApiError::internal("account leaves do not match the header"))?;
     let hashes = checkpoint::account_hashes(&header, &leaves);
     let proof = views::proofs_for(&header, &leaves, &hashes, account)

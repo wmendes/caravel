@@ -4,22 +4,30 @@
 
 mod common;
 
+use caravel_core::batch::BatchV1;
+use caravel_core::block::BlockRecordV1;
+use caravel_core::checkpoint::CheckpointHeaderV1;
 use caravel_perps::native::verify_strict;
+use caravel_perps_node::PerpsApp;
 use caravel_runtime::checkpoint::sha256;
 use caravel_runtime::sequencer::Executor;
 use caravel_runtime::store::Store;
 use caravel_runtime::validator::{FollowError, Follower, Refusal, LIVE_WINDOW_MS};
 use caravel_testkit::lane::{config, seeds, BTC};
-use caravel_types::batch::BatchV1;
-use caravel_types::block::BlockRecordV1;
-use caravel_types::checkpoint::CheckpointHeaderV1;
 use common::harness::*;
 use ed25519_dalek::SigningKey;
 
-fn follower(exec: Executor) -> Follower {
+fn follower(exec: Executor) -> Follower<PerpsApp> {
     let (state, config_hash) = genesis();
     let store = Store::open_in_memory(&config().lane_id, &config_hash, &state).unwrap();
-    Follower::open(exec, store, ids(), SigningKey::from_bytes(&[0x61; 32])).unwrap()
+    Follower::open(
+        PerpsApp,
+        exec,
+        store,
+        ids(),
+        SigningKey::from_bytes(&[0x61; 32]),
+    )
+    .unwrap()
 }
 
 /// Records `from..=to` from the sequencer, as `/v1/blocks` serves them.
@@ -34,7 +42,7 @@ fn records(t: &T, from: u64, to: u64) -> Vec<BlockRecordV1> {
 }
 
 /// Catch-up: applied long after production, so no live checks.
-fn catch_up(v: &mut Follower, t: &T) {
+fn catch_up(v: &mut Follower<PerpsApp>, t: &T) {
     let late = t.now + 3_600_000;
     for r in records(t, v.height() + 1, t.core.height()) {
         v.apply(&r, late).unwrap();
@@ -195,6 +203,7 @@ fn a_restarted_validator_resumes_and_keeps_its_signatures() {
     let open = || {
         let store = Store::open(&path, &config().lane_id, &config_hash, &state).unwrap();
         Follower::open(
+            PerpsApp,
             Executor::Native,
             store,
             ids(),

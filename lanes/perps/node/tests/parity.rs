@@ -70,7 +70,7 @@ fn a_thousand_random_blocks_match_native() {
 }
 
 /// The full T-005 gate: 10,000 random blocks (50 lanes × 200). Run with
-/// `cargo test --release -p caravel-runtime --test parity -- --ignored`.
+/// `cargo test --release -p caravel-perps-node --test parity -- --ignored`.
 #[test]
 #[ignore = "long: the 10,000-block parity gate, run in CI"]
 fn ten_thousand_random_blocks_match_native() {

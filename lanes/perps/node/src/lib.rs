@@ -1,6 +1,14 @@
 //! Caravel Perps on the platform runtime (M0.5, spec §20.3).
 //!
-//! P-05 and P-06 move the perps parts of the node here (the `LaneApp` and
-//! `NodeApp` implementations, views, routes and the node binary). For now the
-//! crate holds the format compatibility tests (P-04): the platform's generic
-//! readers in `caravel-core` against the frozen perps codecs.
+//! - [`app::PerpsApp`]: the perps `LaneApp`, what the runtime needs from the
+//!   engine (P-05);
+//! - [`views`]: the perps JSON views (accounts, markets, books, fills).
+//!
+//! P-06 adds the `NodeApp` side (routes, lane-file section) and the binary.
+//! The format compatibility tests (P-04) check the platform's generic readers
+//! in `caravel-core` against the frozen perps codecs.
+
+pub mod app;
+pub mod views;
+
+pub use app::PerpsApp;

@@ -14,6 +14,11 @@ use std::path::PathBuf;
 
 use common::harness::*;
 
+use caravel_core::block::BlockInputV1;
+use caravel_core::checkpoint::CheckpointHeaderV1;
+use caravel_core::inbox::{InboxKind, InboxMsgV1};
+use caravel_core::tx::TxEnvelopeV1;
+use caravel_perps_node::{app, views as perps_views, PerpsApp};
 use caravel_runtime::checkpoint::{self, sha256};
 use caravel_runtime::sequencer::{self, hex, Executor, InboxReport, Produced};
 use caravel_runtime::store::Store;
@@ -21,9 +26,7 @@ use caravel_runtime::views;
 use caravel_testkit::lane::{
     config, seeds, BTC, BTC_PRICE, ETH, ETH_PRICE, TICK, USDC, XLM, XLM_PRICE,
 };
-use caravel_types::block::BlockInputV1;
-use caravel_types::checkpoint::CheckpointHeaderV1;
-use caravel_types::inbox::{InboxKind, InboxMsgV1};
+use caravel_types::receipts::Receipts;
 use caravel_types::state::StateV1;
 use caravel_types::tx::{Side, TxBody};
 use caravel_types::vectors::pk;
@@ -39,23 +42,22 @@ fn updating() -> bool {
     std::env::var_os("UPDATE_GOLDEN").is_some()
 }
 
-fn block_json(t: &T, p: &Produced) -> Value {
+fn block_json(t: &T, p: &Produced<StateV1>) -> Value {
     let input = BlockInputV1::decode(&p.record.input).unwrap();
     let mut v = json!({
         "height": p.height,
         "record_hex": hex(&p.record.encode()),
         "receipts_hex": hex(&p.receipts_bytes),
         "state_hash": hex(&t.core.state_hash()),
-        "view": views::block(&p.record, &p.receipts_bytes),
-        "fills": views::fills(&p.state, p.height, input.timestamp_ms, &p.receipts),
+        "view": views::block(&PerpsApp, &p.record, &p.receipts_bytes),
+        "fills": perps_views::fills(&p.state, p.height, input.timestamp_ms, &Receipts::decode(&p.receipts_bytes).unwrap()),
         "incidents": p.incidents.iter().map(|i| format!("{i:?}")).collect::<Vec<_>>(),
     });
     if let Some(row) = &p.checkpoint {
         let header = CheckpointHeaderV1::decode(&row.header).unwrap();
         let withdrawals = sequencer::parse_leaves(&row.withdrawals).unwrap();
         let (_, snap) = t.core.store().snapshot(row.seq).unwrap().unwrap();
-        let accounts =
-            checkpoint::account_leaves(&header, &StateV1::decode(&snap).unwrap()).unwrap();
+        let accounts = app::account_leaves(&header, &StateV1::decode(&snap).unwrap()).unwrap();
         let w_hashes = checkpoint::withdrawal_hashes(&header, &withdrawals);
         let a_hashes = checkpoint::account_hashes(&header, &accounts);
         v["checkpoint"] = json!({
@@ -78,7 +80,7 @@ fn block_json(t: &T, p: &Produced) -> Value {
 /// The scripted M0 workload; returns the trace.
 fn workload(t: &mut T) -> Value {
     let mut blocks = Vec::new();
-    let mut push = |t: &mut T, p: Produced| {
+    let mut push = |t: &mut T, p: Produced<StateV1>| {
         let v = block_json(t, &p);
         blocks.push(v);
     };
@@ -103,7 +105,10 @@ fn workload(t: &mut T) -> Value {
         TxBody::CancelAll { market_id: BTC },
     );
     bad.signature[5] ^= 1;
-    t.core.mempool.push([0xBA; 32], bad).unwrap();
+    t.core
+        .mempool
+        .push([0xBA; 32], TxEnvelopeV1::decode(&bad.encode()).unwrap())
+        .unwrap();
     t.order(seeds::C, BTC, Side::Sell, BTC_PRICE - 2 * TICK, 2);
     let p = t.block();
     push(t, p);
@@ -160,9 +165,9 @@ fn workload(t: &mut T) -> Value {
             "height": t.core.height(),
             "state_hash": hex(&t.core.state_hash()),
             "inbox_halted": t.core.inbox_halted(),
-            "accounts": ACCOUNTS.iter().map(|s| views::account(&st, &pk(*s))).collect::<Vec<_>>(),
-            "markets": views::markets(&st),
-            "books": ([BTC, ETH, XLM].iter().map(|m| views::book(&st, *m, 20)).collect::<Vec<_>>()),
+            "accounts": ACCOUNTS.iter().map(|s| perps_views::account(&st, &pk(*s))).collect::<Vec<_>>(),
+            "markets": perps_views::markets(&st),
+            "books": ([BTC, ETH, XLM].iter().map(|m| perps_views::book(&st, *m, 20)).collect::<Vec<_>>()),
         },
         "blocks": blocks,
     })

@@ -5,13 +5,14 @@
 
 use std::sync::Arc;
 
-use caravel_types::batch::BatchV1;
-use caravel_types::block::{BlockInputV1, BlockRecordV1, Entry};
-use caravel_types::checkpoint::CheckpointHeaderV1;
-use caravel_types::receipts::Receipts;
-use caravel_types::state::StateV1;
+use caravel_core::batch::BatchV1;
+use caravel_core::block::{BlockInputV1, BlockRecordV1, Entry};
+use caravel_core::checkpoint::CheckpointHeaderV1;
+use caravel_core::receipts::ReceiptsV1;
+use caravel_core::state::StateFrameV1;
 use ed25519_dalek::{Signer, SigningKey};
 
+use crate::app::LaneApp;
 use crate::checkpoint::{self, block_hash, sha256, HeaderIds};
 use crate::sequencer::{leaves_json, CoreError, Executor};
 use crate::store::{CheckpointRow, CheckpointStatus, Store, StoreError};
@@ -20,8 +21,6 @@ use crate::store::{CheckpointRow, CheckpointStatus, Store, StoreError};
 pub const LIVE_WINDOW_MS: u64 = 10_000;
 /// A live block may be at most this far ahead of the validator's clock.
 pub const MAX_AHEAD_MS: u64 = 5_000;
-/// Oracle entries in a live block must be within this of the validator's clock.
-pub const ORACLE_WINDOW_MS: u64 = 60_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FollowError {
@@ -123,13 +122,15 @@ pub struct Applied {
     pub checkpoint: Option<u64>,
 }
 
-pub struct Follower {
+pub struct Follower<A: LaneApp> {
+    app: A,
     exec: Executor,
     store: Store,
     ids: HeaderIds,
     key: SigningKey,
     state_bytes: Vec<u8>,
-    state: Arc<StateV1>,
+    state: Arc<A::State>,
+    frame: StateFrameV1,
     prev_block_hash: [u8; 32],
     last_header_hash: [u8; 32],
     /// First height of the open batch.
@@ -137,15 +138,20 @@ pub struct Follower {
     halted: Option<String>,
 }
 
-impl Follower {
+impl<A: LaneApp> Follower<A> {
     pub fn open(
+        app: A,
         exec: Executor,
         store: Store,
         ids: HeaderIds,
         key: SigningKey,
     ) -> Result<Self, CoreError> {
         let (height, state_bytes) = store.head()?;
-        let state = StateV1::decode(&state_bytes).map_err(|_| CoreError::Corrupt("head state"))?;
+        let state = app
+            .decode_state(&state_bytes)
+            .ok_or(CoreError::Corrupt("head state"))?;
+        let frame =
+            StateFrameV1::read(&state_bytes).map_err(|_| CoreError::Corrupt("head state"))?;
         let prev_block_hash = if height == 0 {
             [0; 32]
         } else {
@@ -156,7 +162,7 @@ impl Follower {
                     .0,
             )
         };
-        let last_header_hash = match state.checkpoint_seq {
+        let last_header_hash = match frame.checkpoint_seq {
             0 => [0; 32],
             seq => sha256(
                 &store
@@ -165,14 +171,16 @@ impl Follower {
                     .header,
             ),
         };
-        let batch_start = state.last_commitment.last_block_height + 1;
+        let batch_start = frame.last_commitment.last_block_height + 1;
         Ok(Self {
+            app,
             exec,
             store,
             ids,
             key,
             state_bytes,
             state: Arc::new(state),
+            frame,
             prev_block_hash,
             last_header_hash,
             batch_start,
@@ -181,11 +189,20 @@ impl Follower {
     }
 
     pub fn height(&self) -> u64 {
-        self.state.height
+        self.frame.height
     }
 
-    pub fn state(&self) -> Arc<StateV1> {
+    pub fn app(&self) -> &A {
+        &self.app
+    }
+
+    pub fn state(&self) -> Arc<A::State> {
         self.state.clone()
+    }
+
+    /// The platform's view of the head state.
+    pub fn frame(&self) -> &StateFrameV1 {
+        &self.frame
     }
 
     pub fn state_hash(&self) -> [u8; 32] {
@@ -223,7 +240,7 @@ impl Follower {
         let input = record
             .decode_input()
             .map_err(|_| self.halt("block input does not decode".into()))?;
-        let height = self.state.height + 1;
+        let height = self.frame.height + 1;
         if input.height != height {
             return Err(self.halt(format!("expected height {height}, got {}", input.height)));
         }
@@ -234,7 +251,7 @@ impl Follower {
             )));
         }
         // 2. Execute it ourselves; 3. same state.
-        let (out, _) = match self.exec.step(&self.state_bytes, &record.input) {
+        let (out, _) = match self.exec.step(&self.app, &self.state_bytes, &record.input) {
             Ok(o) => o,
             Err(e) => return Err(self.halt(format!("block {height} does not execute: {e:?}"))),
         };
@@ -244,10 +261,14 @@ impl Follower {
                 "block {height}: state_hash_after differs from re-execution"
             )));
         }
-        let new_state = StateV1::decode(&out.state)
-            .map_err(|_| self.halt("engine output state does not decode".into()))?;
+        let Some(new_state) = self.app.decode_state(&out.state) else {
+            return Err(self.halt("engine output state does not decode".into()));
+        };
+        let Ok(new_frame) = StateFrameV1::read(&out.state) else {
+            return Err(self.halt("engine output state does not decode".into()));
+        };
         let flags = if now_ms.saturating_sub(input.timestamp_ms) <= LIVE_WINDOW_MS {
-            live_checks(&input, now_ms)
+            live_checks(&self.app, &input, now_ms)
         } else {
             Vec::new()
         };
@@ -256,7 +277,7 @@ impl Follower {
             input: record.input.clone(),
             state_hash_after: state_hash,
         };
-        let seq = input.checkpoint_end.then_some(new_state.checkpoint_seq);
+        let seq = input.checkpoint_end.then_some(new_frame.checkpoint_seq);
         self.store
             .commit_block(height, &own, &out.receipts, &out.state, seq)?;
         for f in &flags {
@@ -265,6 +286,7 @@ impl Follower {
         self.prev_block_hash = block_hash(&own);
         self.state_bytes = out.state;
         self.state = Arc::new(new_state);
+        self.frame = new_frame;
         let checkpoint = if input.checkpoint_end {
             Some(self.compute_checkpoint(height)?)
         } else {
@@ -285,14 +307,13 @@ impl Follower {
             &self.ids,
             self.last_header_hash,
             &records,
-            &self.state,
             &self.state_bytes,
         )
         .map_err(|e| FollowError::Store(format!("assembling checkpoint: {e:?}")))?;
-        let decoded: Vec<(BlockRecordV1, Receipts)> = blocks
+        let decoded: Vec<(BlockRecordV1, ReceiptsV1)> = blocks
             .into_iter()
             .map(|(r, rc)| {
-                Receipts::decode(&rc)
+                ReceiptsV1::decode(&rc)
                     .map(|rc| (r, rc))
                     .map_err(|_| FollowError::Store("stored receipts".into()))
             })
@@ -333,7 +354,7 @@ impl Follower {
         else {
             return Err(Refusal::NotCaughtUp {
                 seq: h.seq,
-                height: self.state.height,
+                height: self.frame.height,
             });
         };
         if own.header != header {
@@ -400,16 +421,20 @@ impl Follower {
     }
 }
 
-/// The live policy checks for one block (spec §15).
-pub fn live_checks(input: &BlockInputV1, now_ms: u64) -> Vec<String> {
+/// The live policy checks for one block (spec §15): the block's time, and
+/// each feed entry's, through the app's feed rule.
+pub fn live_checks<A: LaneApp>(app: &A, input: &BlockInputV1, now_ms: u64) -> Vec<String> {
     let mut flags = Vec::new();
     if input.timestamp_ms > now_ms + MAX_AHEAD_MS {
         flags.push(format!("block timestamp {} is more than {MAX_AHEAD_MS} ms ahead of this validator's clock {now_ms}", input.timestamp_ms));
     }
     for e in &input.entries {
-        if let Entry::Oracle(u) = e {
-            if u.publish_time_ms.abs_diff(now_ms) > ORACLE_WINDOW_MS {
-                flags.push(format!("oracle update for market {} published at {} is more than {ORACLE_WINDOW_MS} ms from {now_ms}", u.market_id, u.publish_time_ms));
+        if let Entry::Feed(bytes) = e {
+            if let Some(flag) = app
+                .decode_feed(bytes)
+                .and_then(|u| app.feed_live_flag(&u, now_ms))
+            {
+                flags.push(flag);
             }
         }
     }

@@ -12,8 +12,8 @@
 
 use std::path::Path;
 
-use caravel_perps::StepOutput;
-use caravel_types::step::StepEnvelope;
+use crate::app::StepOutput;
+use caravel_core::step::StepEnvelope;
 use sha2::{Digest, Sha256};
 use soroban_env_host::budget::AsBudget;
 use soroban_env_host::testutils::generate_account_id;

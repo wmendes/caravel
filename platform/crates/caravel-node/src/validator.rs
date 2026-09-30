@@ -12,13 +12,14 @@ use axum::extract::{Path as UrlPath, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use caravel_core::block::BlockRecordV1;
+use caravel_perps_node::PerpsApp;
 use caravel_runtime::checkpoint::{network_id, settlement_addr_hash, sha256, HeaderIds};
 use caravel_runtime::sequencer::{hex, Executor};
 use caravel_runtime::store::{CheckpointStatus, Store};
 use caravel_runtime::validator::{FollowError, Follower, Refusal};
 use caravel_runtime::views;
 use caravel_runtime::WasmExecutor;
-use caravel_types::block::BlockRecordV1;
 use ed25519_dalek::SigningKey;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -129,12 +130,12 @@ impl ValidatorConfig {
 }
 
 pub struct App {
-    pub follower: Mutex<Follower>,
+    pub follower: Mutex<Follower<PerpsApp>>,
     sequencer_url: String,
 }
 
 impl App {
-    fn with<T>(&self, f: impl FnOnce(&mut Follower) -> T) -> T {
+    fn with<T>(&self, f: impl FnOnce(&mut Follower<PerpsApp>) -> T) -> T {
         f(&mut self.follower.lock().expect("follower lock"))
     }
 }
@@ -173,7 +174,13 @@ pub async fn start(cfg: ValidatorConfig) -> Result<(Arc<App>, Router)> {
     }
     let store = Store::open(&cfg.db, &cfg.lane.lane_id(), &config_hash, &genesis_state)
         .context("opening the store")?;
-    let follower = Follower::open(Executor::Wasm(exec), store, cfg.ids, cfg.key.clone())?;
+    let follower = Follower::open(
+        PerpsApp,
+        Executor::Wasm(exec),
+        store,
+        cfg.ids,
+        cfg.key.clone(),
+    )?;
     tracing::info!(height = follower.height(), key = %views::g_address(&follower.public_key()), "validator starting; genesis state hash {}", hex(&sha256(&genesis_state)));
     let app = Arc::new(App {
         follower: Mutex::new(follower),

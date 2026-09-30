@@ -3,7 +3,7 @@
 //! caps allow (256 entries, 24,000 bytes). Every block also runs natively and
 //! must match byte for byte.
 //!
-//! `cargo run --release -p caravel-runtime --example bench_full_caps [wasm]`
+//! `cargo run --release -p caravel-perps-node --example bench_full_caps [wasm]`
 
 use caravel_perps::native::DiagnosticCrypto;
 use caravel_runtime::WasmExecutor;
@@ -478,7 +478,10 @@ fn main() {
             .step(&state_bytes, &bytes)
             .unwrap_or_else(|e| panic!("{name}: wasm {e:?}"));
         let wall_ms = started.elapsed().as_secs_f64() * 1000.0;
-        assert!(out == native, "{name}: native and wasm differ");
+        assert!(
+            out.state == native.state && out.receipts == native.receipts,
+            "{name}: native and wasm differ"
+        );
         let rc = caravel_types::receipts::Receipts::decode(&out.receipts).unwrap();
         let fills: usize = rc
             .receipts

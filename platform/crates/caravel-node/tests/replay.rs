@@ -8,16 +8,17 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use anyhow::Result;
+use caravel_core::batch::BatchV1;
+use caravel_core::checkpoint::CheckpointHeaderV1;
+use caravel_core::inbox::{inbox_acc_preimage, InboxKind, InboxMsgV1};
 use caravel_node::lane_toml::LaneFile;
 use caravel_node::replay::{self, CheckpointRecord, OnChainConfig, ReplaySource};
 use caravel_node::stellar_rpc::LastCheckpoint;
+use caravel_perps_node::PerpsApp;
 use caravel_runtime::checkpoint::{network_id, settlement_addr_hash, sha256, HeaderIds};
 use caravel_runtime::sequencer::{unhex, Core, Executor, InboxReport, SequencerConfig};
 use caravel_runtime::store::{CheckpointStatus, Store};
 use caravel_runtime::WasmExecutor;
-use caravel_types::batch::BatchV1;
-use caravel_types::checkpoint::CheckpointHeaderV1;
-use caravel_types::inbox::{inbox_acc_preimage, InboxKind, InboxMsgV1};
 use caravel_types::oracle::OracleUpdateV1;
 use caravel_types::tx::{LaneTxV1, PlaceOrder, Side, SigScheme, Tif, TxBody};
 use caravel_types::vectors::{key, pk};
@@ -57,7 +58,7 @@ fn ids(wasm_hash: [u8; 32]) -> HeaderIds {
 }
 
 /// A native sequencer core that produced 25 blocks (checkpoints 1 and 2).
-fn produced() -> (Core, [u8; 32]) {
+fn produced() -> (Core<PerpsApp>, [u8; 32]) {
     let lane = lane();
     let (_, config_bytes, genesis) = caravel_node::lane_toml::genesis(&lane).unwrap();
     let config_hash = sha256(&config_bytes);
@@ -70,7 +71,7 @@ fn produced() -> (Core, [u8; 32]) {
         mempool_max: 1000,
         mempool_max_per_account: 100,
     };
-    let mut core = Core::open(Executor::Native, store, config_hash, cfg).unwrap();
+    let mut core = Core::open(PerpsApp, Executor::Native, store, config_hash, cfg).unwrap();
     let lane_id = lane.lane_id();
     let mut now = T0;
     let mut acc = [0u8; 32];
@@ -85,7 +86,7 @@ fn produced() -> (Core, [u8; 32]) {
         acc = sha256(&inbox_acc_preimage(&acc, &msg.encode()));
         assert_eq!(core.report_inbox(msg, acc).unwrap(), InboxReport::Added);
     }
-    let oracle = |core: &mut Core, now: u64| {
+    let oracle = |core: &mut Core<PerpsApp>, now: u64| {
         let mut u = OracleUpdateV1 {
             market_id: 1,
             price: 65_000_000,
@@ -96,12 +97,12 @@ fn produced() -> (Core, [u8; 32]) {
         u.signature = key(0x31)
             .sign(&sha256(&u.signing_preimage(&lane_id)))
             .to_bytes();
-        assert!(core.report_oracle(u).unwrap());
+        assert!(core.report_feed(&u.encode()).unwrap());
     };
     oracle(&mut core, now);
     core.produce_block(now).unwrap();
     now += 1000;
-    let tx = |core: &Core, seed: u8, nonce: u64, body: TxBody, now: u64| {
+    let tx = |core: &Core<PerpsApp>, seed: u8, nonce: u64, body: TxBody, now: u64| {
         let mut tx = LaneTxV1 {
             lane_id,
             account: pk(seed),
@@ -117,7 +118,7 @@ fn produced() -> (Core, [u8; 32]) {
             .to_bytes();
         tx.encode()
     };
-    let nonce = |core: &Core, seed: u8| {
+    let nonce = |core: &Core<PerpsApp>, seed: u8| {
         core.state()
             .accounts
             .iter()
@@ -170,7 +171,7 @@ struct FakeStellar {
 }
 
 impl FakeStellar {
-    fn from(core: &Core, wasm_hash: [u8; 32], n: u64) -> Self {
+    fn from(core: &Core<PerpsApp>, wasm_hash: [u8; 32], n: u64) -> Self {
         let (_, config_bytes, genesis) = caravel_node::lane_toml::genesis(&lane()).unwrap();
         let checkpoints = (1..=n)
             .map(|s| {

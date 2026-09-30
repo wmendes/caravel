@@ -1840,7 +1840,7 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings      # plus deny(clippy::float_arithmetic) in consensus crates
 ./scripts/build-contracts.sh                                # builds both Wasm, checks size limits and recorded hashes (before the tests)
 cargo test --workspace --locked                             # includes the parity gate on scenarios and 1,000 random blocks
-cargo test --locked -p caravel-runtime --test parity -- --ignored   # the 10,000-block parity gate (INV-P5)
+cargo test --locked -p caravel-perps-node --test parity -- --ignored   # the 10,000-block parity gate (INV-P5)
 npm --prefix platform/relayer ci && npm --prefix platform/relayer test
 npm --prefix lanes/perps/web ci && npm --prefix lanes/perps/web test && npm --prefix lanes/perps/web run build
 ```
@@ -2027,7 +2027,7 @@ The plan of record is `~/.claude/plans/ok-but-now-i-lucky-hoare.md` (architectur
 | P-02 | Frozen perps engine workspace `lanes/perps/engine/` (byte-identical Wasm, tree-hash check) | P-01 | review |
 | P-03 | Moves into `platform/` and `lanes/perps/` (runtime, node, settlement, configs, web, relayer) | P-02 | review |
 | P-04 | `caravel-core`: generic codecs over the same bytes (opaque bodies, feeds, receipts, state frame) + compatibility tests | P-03 | review |
-| P-05 | Runtime on `LaneApp` + `PerpsApp`: golden trace byte for byte, parity gate, fixture store opens | P-04 | todo |
+| P-05 | Runtime on `LaneApp` + `PerpsApp`: golden trace byte for byte, parity gate, fixture store opens | P-04 | review |
 | P-06 | Node on `NodeApp`, lane-file split, `caravel-perps-node`, relayer feed module: API snapshots identical, dependency guard | P-05 | todo |
 | P-07 | Live VM upgrade to `caravel-perps-node` (check-store, shadow validator, replay) — **Gate P1** | P-06 | todo |
 | P-08 | `caravel-app-sdk` + `testapp`, conformance with perps' standard kinds | P-07 | todo |
@@ -2177,6 +2177,17 @@ Reinterpreted, **bytes unchanged**:
 **Consensus is unchanged.** The engine Wasm still decodes strictly, the app's mempool check stays strict, and the generic decoder accepts everything the strict one does. `lanes/perps/node/tests/format_compat.rs` checks it on every frozen vector, the 70-block golden trace, the fixture store's states, and a 512-case byte-flip property test.
 
 `scripts/check-deps.mjs` (CI) fails if a platform package reaches `lanes/`. It lists the three remaining M0 couplings as exceptions that must shrink: `caravel-runtime` (P-05), `caravel-node` (P-06), `settlement` (P-09) | A platform that runs any app has to read blocks, receipts and states without the app's types. Reading the same bytes, instead of new formats, keeps lane #1 and its history valid | An app whose state does not fit the frame (it would need a new frame version) |
+| DEC-053 | **M0.5 (P-05).** The runtime runs any app through one trait, `caravel_runtime::LaneApp`, with static dispatch: each app's node binary links its own implementation (P-06 adds the node half, `NodeApp`, and the binaries). The runtime reads the state frame, blocks, receipts and commitments itself (DEC-052). The trait gives it the rest:
+- the decoded state, its limits, account nonces and pending-withdrawal count, to build blocks;
+- a strict transaction check (`tx_decodes`), so the mempool takes only what the engine decodes;
+- a native genesis and step that name the fatal entry, to quarantine it (the Wasm path does not report it);
+- strict receipt decoding and event text, for acceptance and views;
+- each account's escape equity, for the account leaves;
+- optional feeds: decode (slot, publish time, payload), the engine's fatal checks, inclusion, and the validator's live flag. An app without feeds refuses every feed.
+
+`lanes/perps/node` (`caravel-perps-node`) holds `PerpsApp`, the M0 rules as they were: oracle updates are feeds with the market id as slot, a configured key and a valid signature to be admitted, and the 60 s live window. The perps views (accounts, markets, books, fills), the account leaves from margin equity, the runtime's tests, the golden trace, the fixture store and `bench_full_caps` moved there too.
+
+Checked on the split: the M0 golden trace and API snapshots are byte for byte the P-01 ones, without regenerating; the fixture store opens at the trace's end state; the parity gate passes; the engine and settlement hashes are unchanged. Two texts change, neither in consensus nor in the API: a quarantined feed's incident source reads `Feed(m)` instead of `Oracle(m)` in the logs, and `Reject::Decode` keeps its M0 message ("does not decode as LaneTxV1") until P-06 lets the app word it. `caravel-runtime` no longer depends on any lane, so its check-deps exception is gone. `caravel-node` now depends on `caravel-perps-node` until P-06 | Static dispatch keeps the hot path free of trait objects and lets the app's state be a real type. The Wasm stays the only consensus path (DEC-002); the native calls are for diagnosis and tests | A process that must run several apps at once (hosted trials run one process per lane, DEC-057) |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

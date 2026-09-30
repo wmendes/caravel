@@ -6,12 +6,12 @@
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
+use caravel_core::block::{BlockInputV1, BlockRecordV1};
+use caravel_perps_node::PerpsApp;
 use caravel_runtime::checkpoint::{self, sha256, HeaderIds};
 use caravel_runtime::sequencer::hex;
 use caravel_runtime::store::Store;
-use caravel_runtime::WasmExecutor;
-use caravel_types::block::{BlockInputV1, BlockRecordV1};
-use caravel_types::state::StateV1;
+use caravel_runtime::{LaneApp, WasmExecutor};
 use serde::Serialize;
 
 use crate::lane_toml::LaneFile;
@@ -62,9 +62,10 @@ pub fn check_store(
                 .map_err(|_| anyhow::anyhow!("block {height} does not decode"))?
                 .checkpoint_end
             {
-                let st =
-                    StateV1::decode(&state).map_err(|_| anyhow::anyhow!("state after {height}"))?;
-                let (_, header) = checkpoint::assemble(ids, prev_header, &batch, &st, &state)
+                PerpsApp
+                    .decode_state(&state)
+                    .ok_or_else(|| anyhow::anyhow!("state after {height}"))?;
+                let (_, header) = checkpoint::assemble(ids, prev_header, &batch, &state)
                     .map_err(|e| anyhow::anyhow!("checkpoint at {height}: {e:?}"))?;
                 if let Some(row) = store.checkpoint(header.seq)? {
                     if row.header != header.encode().to_vec() {

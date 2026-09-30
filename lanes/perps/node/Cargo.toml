@@ -1,6 +1,6 @@
 [package]
 name = "caravel-perps-node"
-description = "Caravel Perps node plugin: the perps app on the platform runtime (M0.5; format compatibility tests for now)"
+description = "Caravel Perps node plugin: the perps app on the platform runtime (M0.5)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,12 +9,17 @@ publish.workspace = true
 
 [dependencies]
 caravel-core = { workspace = true, features = ["native"] }
+caravel-types = { workspace = true }
+caravel-perps = { workspace = true, features = ["native"] }
+caravel-runtime = { workspace = true }
+serde = { version = "1.0.229", features = ["derive"] }
 
 [dev-dependencies]
-caravel-types = { workspace = true }
+caravel-types = { workspace = true, features = ["gen-vectors"] }
 caravel-merkle = { workspace = true, features = ["alloc", "native"] }
-caravel-runtime = { workspace = true }
 caravel-testkit = { workspace = true }
+ed25519-dalek = { workspace = true }
 proptest = "1.11.0"
 serde_json = "1.0.151"
+soroban-env-host = { workspace = true, features = ["testutils"] }
 tempfile = "3.27.0"

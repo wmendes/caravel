@@ -1,16 +1,15 @@
-//! The sequencer's FIFO mempool and pre-validation (spec §14.1).
+//! The sequencer's FIFO mempool and pre-validation (spec §14.1), for any app.
 //!
-//! A bad signature on a user transaction or an oracle update is fatal to the
+//! A bad signature on a user transaction or a feed update is fatal to the
 //! whole block (spec §8.3), so every signature is checked here with the
 //! engine's own rule (`verify_strict`) before anything reaches a block.
 
 use std::collections::{HashSet, VecDeque};
 
-use caravel_perps::native::verify_strict;
-use caravel_types::oracle::OracleUpdateV1;
-use caravel_types::state::StateV1;
-use caravel_types::tx::{sep53_preimage, sep53_tx_message, LaneTxV1, SigScheme};
+use caravel_core::state::StateFrameV1;
+use caravel_core::tx::{sep53_preimage, sep53_tx_message, SigScheme, TxEnvelopeV1};
 
+use crate::app::LaneApp;
 use crate::checkpoint::sha256;
 
 /// Why a transaction was refused at the API (`POST /v1/tx` 400 `{error, code}`).
@@ -58,13 +57,23 @@ impl Reject {
     }
 }
 
+/// ed25519 `verify_strict` over a 32-byte message, the host's rule (spec §8.4).
+/// A key that does not decode is simply not valid.
+pub fn verify_strict(key: &[u8; 32], msg: &[u8], sig: &[u8; 64]) -> bool {
+    let Ok(vk) = ed25519_dalek::VerifyingKey::from_bytes(key) else {
+        return false;
+    };
+    vk.verify_strict(msg, &ed25519_dalek::Signature::from_bytes(sig))
+        .is_ok()
+}
+
 /// `H(TAG_TX || config_hash || unsigned tx)`.
-pub fn tx_hash(tx: &LaneTxV1, config_hash: &[u8; 32]) -> [u8; 32] {
+pub fn tx_hash(tx: &TxEnvelopeV1, config_hash: &[u8; 32]) -> [u8; 32] {
     sha256(&tx.tx_hash_preimage(config_hash))
 }
 
 /// The engine's signature check for a user transaction (spec §11.3).
-pub fn tx_signature_ok(tx: &LaneTxV1, config_hash: &[u8; 32]) -> bool {
+pub fn tx_signature_ok(tx: &TxEnvelopeV1, config_hash: &[u8; 32]) -> bool {
     let hash = tx_hash(tx, config_hash);
     match tx.sig_scheme {
         SigScheme::RawEd25519 => verify_strict(&tx.signer, &hash, &tx.signature),
@@ -75,29 +84,20 @@ pub fn tx_signature_ok(tx: &LaneTxV1, config_hash: &[u8; 32]) -> bool {
     }
 }
 
-/// The engine's fatal oracle checks (spec §11.5): a configured key and a valid signature.
-pub fn oracle_ok(u: &OracleUpdateV1, state: &StateV1) -> bool {
-    state
-        .config
-        .oracle_keys
-        .binary_search(&u.oracle_key)
-        .is_ok()
-        && verify_strict(
-            &u.oracle_key,
-            &sha256(&u.signing_preimage(&state.lane_id)),
-            &u.signature,
-        )
-}
-
 /// Pre-validates encoded transaction bytes against the current state.
-pub fn prevalidate(
+pub fn prevalidate<A: LaneApp>(
+    app: &A,
     bytes: &[u8],
-    state: &StateV1,
+    state: &A::State,
+    frame: &StateFrameV1,
     config_hash: &[u8; 32],
     now_ms: u64,
-) -> Result<([u8; 32], LaneTxV1), Reject> {
-    let tx = LaneTxV1::decode(bytes).map_err(|_| Reject::Decode)?;
-    if tx.lane_id != state.lane_id {
+) -> Result<([u8; 32], TxEnvelopeV1), Reject> {
+    let tx = TxEnvelopeV1::decode(bytes).map_err(|_| Reject::Decode)?;
+    if !app.tx_decodes(&tx) {
+        return Err(Reject::Decode);
+    }
+    if tx.lane_id != frame.lane_id {
         return Err(Reject::WrongLane);
     }
     if !tx_signature_ok(&tx, config_hash) {
@@ -106,10 +106,10 @@ pub fn prevalidate(
     if tx.expiry_ms <= now_ms {
         return Err(Reject::Expired);
     }
-    let Some(account) = state.accounts.iter().find(|a| a.key == tx.account) else {
+    let Some(next_nonce) = app.next_nonce(state, &tx.account) else {
         return Err(Reject::UnknownAccount);
     };
-    if tx.nonce < account.next_nonce {
+    if tx.nonce < next_nonce {
         return Err(Reject::StaleNonce);
     }
     Ok((tx_hash(&tx, config_hash), tx))
@@ -118,7 +118,7 @@ pub fn prevalidate(
 #[derive(Clone, Debug)]
 pub struct Queued {
     pub hash: [u8; 32],
-    pub tx: LaneTxV1,
+    pub tx: TxEnvelopeV1,
 }
 
 /// FIFO by arrival, deduplicated by tx hash.
@@ -156,7 +156,7 @@ impl Mempool {
         self.hashes.contains(hash)
     }
 
-    pub fn push(&mut self, hash: [u8; 32], tx: LaneTxV1) -> Result<(), Reject> {
+    pub fn push(&mut self, hash: [u8; 32], tx: TxEnvelopeV1) -> Result<(), Reject> {
         if self.hashes.contains(&hash) {
             return Err(Reject::Duplicate);
         }

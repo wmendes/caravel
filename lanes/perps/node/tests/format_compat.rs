@@ -417,7 +417,7 @@ fn the_state_frame_is_the_m0_state_header() {
     let tmp = tempfile::tempdir().unwrap();
     let db = tmp.path().join("lane.sqlite");
     std::fs::copy(
-        root().join("platform/crates/caravel-runtime/tests/fixtures/m0-sequencer.sqlite"),
+        root().join("lanes/perps/node/tests/fixtures/m0-sequencer.sqlite"),
         &db,
     )
     .unwrap();
@@ -454,10 +454,8 @@ use caravel_testkit::Executor as _;
 #[test]
 fn the_golden_trace_reads_generically() {
     let trace: Value = serde_json::from_str(
-        &std::fs::read_to_string(
-            root().join("platform/crates/caravel-runtime/tests/golden/m0-trace.json"),
-        )
-        .unwrap(),
+        &std::fs::read_to_string(root().join("lanes/perps/node/tests/golden/m0-trace.json"))
+            .unwrap(),
     )
     .unwrap();
     let blocks = trace["blocks"].as_array().unwrap();

@@ -1,6 +1,6 @@
 //! The node's SQLite store (spec §14.1, §15): blocks, receipts, the current
 //! state, a snapshot at every checkpoint, checkpoints and their signatures,
-//! the inbox as Stellar recorded it, the latest oracle updates, and (for
+//! the inbox as Stellar recorded it, the latest feed updates, and (for
 //! validators) every header signed.
 //!
 //! A block, its receipts, the new state and (at a `CHECKPOINT_END`) the
@@ -9,8 +9,8 @@
 
 use std::path::Path;
 
-use caravel_types::block::BlockRecordV1;
-use caravel_types::inbox::InboxMsgV1;
+use caravel_core::block::BlockRecordV1;
+use caravel_core::inbox::InboxMsgV1;
 use rusqlite::{params, Connection, OptionalExtension};
 
 pub use rusqlite::Error as SqlError;
@@ -479,7 +479,7 @@ impl Store {
         Ok(v.map(u))
     }
 
-    // --- Inbox and oracle ----------------------------------------------------------
+    // --- Inbox and feeds -----------------------------------------------------------
 
     /// Records inbox message `index` as reported from Stellar. Re-reporting
     /// the same message is fine; a different one is a conflict.
@@ -552,26 +552,29 @@ impl Store {
     pub fn cum_deposits(&self, through: u64) -> Result<i128> {
         let mut total = 0i128;
         for (m, _) in self.inbox_from(0, through as usize)? {
-            if m.index < through && m.kind == caravel_types::inbox::InboxKind::Deposit {
+            if m.index < through && m.kind == caravel_core::inbox::InboxKind::Deposit {
                 total += m.amount;
             }
         }
         Ok(total)
     }
 
-    pub fn put_oracle(&mut self, market_id: u16, update: &[u8]) -> Result<()> {
+    /// Keeps the latest feed update for `slot`. The table is still called
+    /// `oracle` (its M0 name, keyed by market id), so M0 stores open as they are.
+    pub fn put_feed(&mut self, slot: u32, update: &[u8]) -> Result<()> {
         self.conn.execute(
             "INSERT INTO oracle (market_id, update_bytes) VALUES (?1, ?2) ON CONFLICT(market_id) DO UPDATE SET update_bytes = excluded.update_bytes",
-            params![market_id, update],
+            params![slot, update],
         )?;
         Ok(())
     }
 
-    pub fn oracle_updates(&self) -> Result<Vec<(u16, Vec<u8>)>> {
+    /// The latest update of every feed slot, by slot.
+    pub fn feed_updates(&self) -> Result<Vec<(u32, Vec<u8>)>> {
         let mut stmt = self
             .conn
             .prepare("SELECT market_id, update_bytes FROM oracle ORDER BY market_id")?;
-        let rows = stmt.query_map([], |r| Ok((r.get::<_, u16>(0)?, r.get::<_, Vec<u8>>(1)?)))?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, Vec<u8>>(1)?)))?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
