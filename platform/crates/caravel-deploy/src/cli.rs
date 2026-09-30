@@ -20,6 +20,18 @@ use clap::Subcommand;
 use crate::deploy;
 use crate::ops::DestroyOptions;
 
+/// Where `apply` takes the release from.
+#[derive(clap::Args, Debug, Clone, Default)]
+pub struct ReleaseArgs {
+    /// A CI release artifact to install; defaults to this checkout's builds.
+    #[arg(long)]
+    pub release_dir: Option<PathBuf>,
+    /// Take the Wasm from here instead (the CI `contracts-wasm` artifact, the
+    /// builds of record), with this checkout's binaries.
+    #[arg(long)]
+    pub wasm_dir: Option<PathBuf>,
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Command {
     /// Show what `apply` would change, on Stellar and on the host, for one of
@@ -30,9 +42,8 @@ pub enum Command {
         /// The deployment, `[env.<name>]`.
         #[arg(long)]
         env: String,
-        /// A CI release artifact to install; defaults to this checkout's builds.
-        #[arg(long)]
-        release_dir: Option<PathBuf>,
+        #[command(flatten)]
+        release: ReleaseArgs,
         /// Also show each file it would write as a diff against the host's.
         #[arg(long)]
         diff: bool,
@@ -43,8 +54,8 @@ pub enum Command {
         lane: PathBuf,
         #[arg(long)]
         env: String,
-        #[arg(long)]
-        release_dir: Option<PathBuf>,
+        #[command(flatten)]
+        release: ReleaseArgs,
         /// Apply without asking.
         #[arg(long)]
         yes: bool,
@@ -56,8 +67,8 @@ pub enum Command {
         lane: PathBuf,
         #[arg(long)]
         env: String,
-        #[arg(long)]
-        release_dir: Option<PathBuf>,
+        #[command(flatten)]
+        release: ReleaseArgs,
         /// Print JSON, for scripts.
         #[arg(long)]
         json: bool,
@@ -69,8 +80,8 @@ pub enum Command {
         lane: PathBuf,
         #[arg(long)]
         env: String,
-        #[arg(long)]
-        release_dir: Option<PathBuf>,
+        #[command(flatten)]
+        release: ReleaseArgs,
         /// Don't ask (the lane can't be restarted afterwards).
         #[arg(long)]
         yes: bool,
@@ -99,10 +110,10 @@ pub fn run<A: NodeApp>(app: A, cmd: Command) -> Result<()> {
             Command::Plan {
                 lane,
                 env,
-                release_dir,
+                release,
                 diff,
             } => {
-                let p = deploy::prepare(&app, &lane, &env, release_dir.as_deref(), false).await?;
+                let p = deploy::prepare(&app, &lane, &env, &release, false).await?;
                 for n in &p.notes {
                     eprintln!("note: {n}");
                 }
@@ -116,10 +127,10 @@ pub fn run<A: NodeApp>(app: A, cmd: Command) -> Result<()> {
             Command::Apply {
                 lane,
                 env,
-                release_dir,
+                release,
                 yes,
             } => {
-                let p = deploy::prepare(&app, &lane, &env, release_dir.as_deref(), true).await?;
+                let p = deploy::prepare(&app, &lane, &env, &release, true).await?;
                 for n in &p.notes {
                     eprintln!("note: {n}");
                 }
@@ -137,8 +148,7 @@ pub fn run<A: NodeApp>(app: A, cmd: Command) -> Result<()> {
                 }
                 p.apply(&plan).await?;
                 // Read everything back: a finished apply leaves nothing to do.
-                let again =
-                    deploy::prepare(&app, &lane, &env, release_dir.as_deref(), true).await?;
+                let again = deploy::prepare(&app, &lane, &env, &release, true).await?;
                 let left = again.plan();
                 if left.is_empty() {
                     println!("\nApplied. The lane matches the lane file.");
@@ -153,10 +163,10 @@ pub fn run<A: NodeApp>(app: A, cmd: Command) -> Result<()> {
             Command::Status {
                 lane,
                 env,
-                release_dir,
+                release,
                 json,
             } => {
-                let p = deploy::prepare(&app, &lane, &env, release_dir.as_deref(), false).await?;
+                let p = deploy::prepare(&app, &lane, &env, &release, false).await?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&p.status_json().await)?);
                 } else {
@@ -167,14 +177,14 @@ pub fn run<A: NodeApp>(app: A, cmd: Command) -> Result<()> {
             Command::Destroy {
                 lane,
                 env,
-                release_dir,
+                release,
                 yes,
                 no_wait,
                 stop_validators,
                 pay_out,
                 wipe,
             } => {
-                let p = deploy::prepare(&app, &lane, &env, release_dir.as_deref(), true).await?;
+                let p = deploy::prepare(&app, &lane, &env, &release, true).await?;
                 print!("{}", p.render_status().await);
                 if !yes && !deploy::confirm_destroy(&p.desired.lane_name)? {
                     println!("Nothing done.");

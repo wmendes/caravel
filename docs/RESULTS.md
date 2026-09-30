@@ -173,3 +173,17 @@ Lane #1's deployment is now the `[env.testnet]` table of its lane file (DEC-070)
   - BTC, ETH and XLM oracle prices were 2 to 9 s old;
   - the web app answers 200;
   - `status` shows every node up and the relayer at 9,535.76 XLM.
+
+## A payments lane on testnet, from its lane file (M0.5 P-17, 2026-09-30)
+
+`E2E_NETWORK=testnet E2E_TEMPLATE=payments E2E_WASM_DIR=<CI contracts-wasm> ./scripts/e2e-local.sh` passed in 215 s. It used the `local` provider against Stellar testnet with the Wasm of record (DEC-071).
+
+| Step | Result |
+|---|---|
+| `caravel apply` | Settlement `CDVVLXV6T5LBIQUS2KHYD7C6UMUBMIOLG4O27G6UMMQXYGJTTPXO47PX` at its derived address, build `fb68ee32…`; a second plan shows no changes |
+| Users | 1,000 USDC deposits each (Circle's testnet USDC from the DEX); a 100 USDC transfer with the 0.01 USDC fee to the treasury; a 100 USDC withdrawal claimed |
+| Rotation from the lane file | Epoch 2 with validators 1, 2 and 4; checkpoints 6 and 7 accepted under epoch 2, 6 after being signed again by the new set |
+| Forced withdrawal | 50 USDC asked for on Stellar, processed by the lane, claimed |
+| `caravel destroy` | Drained, stopped, exported `exit.json`, triggered, frozen 10 s later (20 s window) |
+| Escape | Alice 799.99 USDC and Bob 1,050 USDC at payout 1:1 (vault 1,850 USDC; the treasury's 0.01 USDC stays unclaimed) |
+| Replay | OK over 11 checkpoints from Stellar data alone, with the same escape proof as `exit.json` |

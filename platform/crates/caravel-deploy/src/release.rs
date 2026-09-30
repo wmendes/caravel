@@ -99,6 +99,32 @@ impl Release {
         Ok(())
     }
 
+    /// Takes the contracts from `dir` (the CI `contracts-wasm` artifact).
+    /// The release's name then covers them too.
+    pub fn use_wasm_from(&mut self, dir: &Path) -> Result<()> {
+        if !dir.join("settlement.wasm").exists() {
+            bail!("{} has no settlement.wasm", dir.display());
+        }
+        self.contracts = dir.to_path_buf();
+        let mut all = hash_file(&self.node_binary)?.to_vec();
+        for e in std::fs::read_dir(dir)?.flatten() {
+            if e.path().extension().is_some_and(|x| x == "wasm") {
+                all.extend(hash_file(&e.path())?);
+            }
+        }
+        if self.commit.starts_with("local-") {
+            let h = sha256(&all);
+            self.commit = format!(
+                "local-{}",
+                h[..4]
+                    .iter()
+                    .map(|b| format!("{b:02x}"))
+                    .collect::<String>()
+            );
+        }
+        Ok(())
+    }
+
     /// The hash of a contract in the release.
     pub fn wasm_hash(&self, file: &str) -> Result<Key> {
         hash_file(&self.contracts.join(file))

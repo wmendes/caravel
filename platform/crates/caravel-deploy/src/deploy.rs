@@ -57,7 +57,7 @@ pub async fn prepare<A: NodeApp>(
     app: &A,
     lane_path: &Path,
     env: &str,
-    release_dir: Option<&Path>,
+    source: &crate::cli::ReleaseArgs,
     for_apply: bool,
 ) -> Result<Prepared> {
     Cli::check_version()?;
@@ -75,10 +75,13 @@ pub async fn prepare<A: NodeApp>(
         .engine_wasm_hash()?
         .ok_or_else(|| anyhow!("[app] engine_wasm_sha256 is required"))?;
 
-    let release = match release_dir {
+    let mut release = match &source.release_dir {
         Some(d) => Release::from_dir(d, &template)?,
         None => Release::from_checkout(&release::find_repo()?, &template)?,
     };
+    if let Some(w) = &source.wasm_dir {
+        release.use_wasm_from(w)?;
+    }
     if release.wasm_hash(&engine_file(&template))? != engine_wasm_hash {
         bail!(
             "the release's {} is not the engine the lane file names",
