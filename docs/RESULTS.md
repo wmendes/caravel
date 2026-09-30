@@ -101,3 +101,21 @@ The rejections are the load mix hitting `TOO_MANY_OPEN_ORDERS` (32 per account),
 
   One friendbot account (10,000 XLM) lasts about 22, 6.8 and 3 days respectively (top-up: `docs/RUNBOOK.md` §8).
 - **Storage:** under load the sequencer's store grew by about 15 KB per block (19.2 MB at height 3,670, 32.7 MB at 5,056). Each validator's store is the same size. At height 5,056 the four stores took 131 MB of the VM's 19 GB disk.
+
+## Freeze drill on testnet (T-016, 2026-09-29)
+
+The spec §24 freeze drill, run with `E2E_NETWORK=testnet SETTLEMENT_WASM=<CI settlement.wasm> ./scripts/e2e-local.sh`. It ran on a throwaway settlement contract of its own, so the demo lane's contract was not frozen. The contract ran the settlement Wasm of record (`8a2fafbd…`) with a 30 s escape timeout, and the lane was the local lane file (fixture oracle key, fixed prices) with its sequencer, 3 validators and relayer on a laptop. It passed in 202 s.
+
+| Step | Transaction (testnet) |
+|---|---|
+| Drill contract | [`CDAHFCPAJIL3BXB2OS5SYSZUERU2ZW5PQ7QL3MGBG5KTZ2NLF2VDUOGC`](https://stellar.expert/explorer/testnet/contract/CDAHFCPAJIL3BXB2OS5SYSZUERU2ZW5PQ7QL3MGBG5KTZ2NLF2VDUOGC) |
+| 1. Deposits of 1,000 USDC (Circle's testnet USDC) for A and B | [`e3e418b1…`](https://stellar.expert/explorer/testnet/tx/e3e418b19673442ff606d5e14bd2ab1909b85a6fcd86ebba81ce3dad8cf5ba40), [`33acade7…`](https://stellar.expert/explorer/testnet/tx/33acade708c78dfa6eb6441061c2f5b34e34c93742e7702fdc34770bc526f409) |
+| 3. First checkpoint accepted | [`21768485…`](https://stellar.expert/explorer/testnet/tx/2176848566e61ab62e430332e31bb778d226bfc8be101cc6b0601e6f580a600d) |
+| 4. A claims a 100 USDC withdrawal | [`351df6ad…`](https://stellar.expert/explorer/testnet/tx/351df6ad876541c67db162fdb5d595dfa139416d1405c47b7982bc9feb039022) |
+| 4b. Validator 3 rotated to a new key (`admin_rotate_signers`) | [`a909bf29…`](https://stellar.expert/explorer/testnet/tx/a909bf29e3e8a02cbb585eaefa7401efe0c7d6a0fd883875fda58311d06de9d3) |
+| 4b. Checkpoint 5 (signed under epoch 1, re-signed under epoch 2) and 6 accepted | [`d1873c88…`](https://stellar.expert/explorer/testnet/tx/d1873c8883d6d9fb8e1fc898d4c317fcc2dec586f0d9d5a8bd84ef6af9955083), [`796a3e2f…`](https://stellar.expert/explorer/testnet/tx/796a3e2fcb145fb8dad033002efb730f0a6728132c202b1c51a960881354e408) |
+| 5. The sequencer stops; `freeze` after the escape timeout | [`db37a01f…`](https://stellar.expert/explorer/testnet/tx/db37a01f98b740dc532e0d648052edacdd8ade9fbb5052384efbd2ccfba566b0) |
+| 5. A and B escape: 900 and 999.987 USDC, payout ratio 1,900 / 1,900 | [`17760671…`](https://stellar.expert/explorer/testnet/tx/177606712ac6662bca8cb68c810f2ee23521f11cc20b65861526da39bf0f690b), [`939bc60c…`](https://stellar.expert/explorer/testnet/tx/939bc60c32fa196740813413599b1738f863fd6e55f8c07e7c07e0153fd42228) |
+| 6. `caravel-node replay` from testnet data only, after the freeze | `OK seq=1..6 final_state_hash=b1e696c6…aa87` |
+
+Each escape paid the account's equity in the last accepted checkpoint times the payout ratio, and the payouts did not exceed the vault. The escape proofs came from validator 1, and replay's proof for A matched it.
