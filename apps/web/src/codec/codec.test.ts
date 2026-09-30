@@ -8,7 +8,7 @@ import { verify } from "./merkle";
 import { encodeSigned, sep53Hash, sep53Message, signingBytes, txHash, type LaneTx, type TxBody } from "./tx";
 
 type V = { name: string; fields: Record<string, unknown>; hex: string; hash: string };
-const file = (name: string) => JSON.parse(readFileSync(join(import.meta.dirname, "../../../../test-vectors", name), "utf8")) as { context?: Record<string, string>; vectors: V[] };
+const file = (name: string) => JSON.parse(readFileSync(join(import.meta.dirname, "../../../../lanes/perps/engine/test-vectors", name), "utf8")) as { context?: Record<string, string>; vectors: V[] };
 
 function body(kind: string, b: Record<string, string | boolean>): TxBody {
   switch (kind) {

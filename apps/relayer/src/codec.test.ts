@@ -8,7 +8,7 @@ import { encodeInboxMsg, encodeOracleUpdate, fromHex, inboxAccAfter, oracleSigni
 
 type Vector = { name: string; fields: Record<string, string>; hex: string; hash: string };
 const vectors = (file: string) =>
-  JSON.parse(readFileSync(fileURLToPath(new URL(`../../../test-vectors/${file}`, import.meta.url)), "utf8")) as { context?: Record<string, string>; vectors: Vector[] };
+  JSON.parse(readFileSync(fileURLToPath(new URL(`../../../lanes/perps/engine/test-vectors/${file}`, import.meta.url)), "utf8")) as { context?: Record<string, string>; vectors: Vector[] };
 
 describe("InboxMsgV1 (test-vectors/inbox_msg.json)", () => {
   for (const v of vectors("inbox_msg.json").vectors) {

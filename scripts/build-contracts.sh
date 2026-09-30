@@ -24,10 +24,11 @@ if [[ "$have_cli" != "$want_cli" ]]; then
 fi
 
 rm -rf "$OUT_DIR"
-# Only the contracts of record (contracts/engine-profile is a profiling tool).
-for pkg in perps-engine settlement; do
-  stellar contract build --locked --package "$pkg" --out-dir "$OUT_DIR" --quiet
-done
+# Only the contracts of record (engine-profile is a profiling tool). The perps
+# engine builds from its frozen workspace (DEC-051), the settlement contract
+# from the root workspace.
+stellar contract build --locked --manifest-path lanes/perps/engine/Cargo.toml --package perps-engine --out-dir "$OUT_DIR" --quiet
+stellar contract build --locked --package settlement --out-dir "$OUT_DIR" --quiet
 
 sha256() { shasum -a 256 "$1" | awk '{print $1}'; }
 # The recorded hash, or empty while versions.json still has a placeholder.

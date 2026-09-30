@@ -29,6 +29,8 @@ jobs:
         with:
           node-version: "22"
       - run: node scripts/check-versions.mjs
+      # DEC-051: the perps engine of record is frozen under lanes/perps/engine.
+      - run: ./scripts/check-frozen.sh
 
   rust:
     runs-on: ubuntu-latest
@@ -51,6 +53,9 @@ jobs:
       - run: stellar --version
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      # The frozen perps engine workspace (DEC-051): checked, never reformatted.
+      - run: cargo fmt --all --manifest-path lanes/perps/engine/Cargo.toml -- --check
+      - run: cargo clippy --workspace --all-targets --manifest-path lanes/perps/engine/Cargo.toml -- -D warnings
       # The parity tests load the Wasm of record, so build it first. This also
       # checks sizes and that the hashes match versions.json (INV-D7).
       - run: ./scripts/build-contracts.sh
@@ -63,10 +68,12 @@ jobs:
           path: target/contracts/*.wasm
           if-no-files-found: ignore
       - run: cargo test --workspace --locked
+      - name: Frozen perps engine tests (vectors, scenarios, properties)
+        run: cargo test --workspace --locked --manifest-path lanes/perps/engine/Cargo.toml
       - name: Parity gate, 10,000 random blocks (INV-P5)
         run: cargo test --locked -p caravel-lane --test parity -- --ignored
       - name: Consensus crates build without std
-        run: cargo build --locked -p caravel-types -p caravel-merkle -p caravel-perps --target wasm32v1-none
+        run: cargo build --locked --manifest-path lanes/perps/engine/Cargo.toml -p caravel-types -p caravel-merkle -p caravel-perps --target wasm32v1-none
 
   apps:
     runs-on: ubuntu-latest
