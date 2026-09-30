@@ -1,5 +1,7 @@
 //! A sequencer core on a fake clock, for the sequencer and validator tests.
 
+use caravel_core::inbox::{inbox_acc_preimage, InboxKind, InboxMsgV1};
+use caravel_perps_node::PerpsApp;
 use caravel_runtime::checkpoint::{network_id, settlement_addr_hash, sha256, HeaderIds};
 use caravel_runtime::sequencer::{self, Core, Executor, InboxReport, SequencerConfig};
 use caravel_runtime::store::Store;
@@ -7,7 +9,7 @@ use caravel_testkit::lane::{
     config, seeds, BTC, BTC_PRICE, ETH, ETH_PRICE, T0, TICK, USDC, XLM, XLM_PRICE,
 };
 use caravel_testkit::Lane;
-use caravel_types::inbox::{inbox_acc_preimage, InboxKind, InboxMsgV1};
+use caravel_types::state::StateV1;
 use caravel_types::tx::{LaneTxV1, PlaceOrder, Side, SigScheme, Tif, TxBody};
 use caravel_types::vectors::pk;
 
@@ -31,7 +33,7 @@ pub fn seq_config() -> SequencerConfig {
 
 /// A core plus a testkit lane used only to sign transactions and oracle updates.
 pub struct T {
-    pub core: Core,
+    pub core: Core<PerpsApp>,
     pub signer: Lane,
     pub now: u64,
     pub inbox_n: u64,
@@ -52,7 +54,7 @@ pub fn store_in_memory() -> Store {
 impl T {
     pub fn with(exec: Executor, store: Store) -> Self {
         let (_, config_hash) = genesis();
-        let core = Core::open(exec, store, config_hash, seq_config()).unwrap();
+        let core = Core::open(PerpsApp, exec, store, config_hash, seq_config()).unwrap();
         let inbox_n = core.inbox_reported();
         let inbox_acc = match inbox_n {
             0 => [0; 32],
@@ -96,7 +98,7 @@ impl T {
     pub fn prices(&mut self) {
         for (m, p) in [(BTC, BTC_PRICE), (ETH, ETH_PRICE), (XLM, XLM_PRICE)] {
             let u = self.signer.oracle_update(seeds::ORACLE, m, p, self.now);
-            assert!(self.core.report_oracle(u).unwrap());
+            assert!(self.core.report_feed(&u.encode()).unwrap());
         }
     }
 
@@ -154,7 +156,7 @@ impl T {
         )
     }
 
-    pub fn block(&mut self) -> sequencer::Produced {
+    pub fn block(&mut self) -> sequencer::Produced<StateV1> {
         let p = self.core.produce_block(self.now).unwrap();
         self.now += 1000;
         p

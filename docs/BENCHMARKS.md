@@ -15,7 +15,7 @@ Reproduce with:
 ```sh
 ./scripts/build-contracts.sh
 BENCH_ACCOUNTS=256 BENCH_ORDERS_PER_SIDE=128 BENCH_BLOCK_BYTES=12000 \
-  cargo run --release -p caravel-runtime --example bench_full_caps
+  cargo run --release -p caravel-perps-node --example bench_full_caps
 ```
 
 ## Full caps of the testnet lane (DEC-028)
@@ -102,7 +102,7 @@ What is left scales with state size, at about 70M for decoding and encoding 1,02
 
 ## Random workloads
 
-`cargo test -p caravel-runtime --test parity -- --ignored` runs 10,050 random blocks across 50 seeded lanes. On them:
+`cargo test -p caravel-perps-node --test parity -- --ignored` runs 10,050 random blocks across 50 seeded lanes. On them:
 - the Wasm and native paths produced identical state and receipt bytes at every block;
 - the heaviest block used 18.5M host CPU instructions, since these states are small.
 

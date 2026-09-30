@@ -37,12 +37,12 @@ Toolchain: Rust 1.93.0 + `wasm32v1-none` (from `rust-toolchain.toml`), Stellar C
 node scripts/check-versions.mjs         # versions.json pins, Cargo.lock/package-lock, placeholders (§7)
 ./scripts/build-contracts.sh            # builds Wasm with the pinned CLI, checks size and recorded hashes (DEC-020; hashes of record are x86_64 Linux builds from CI, DEC-033); run before the tests
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace --locked
-cargo test --locked -p caravel-runtime --test parity -- --ignored      # 10,000-block native/Wasm parity gate (INV-P5)
+cargo test --locked -p caravel-perps-node --test parity -- --ignored      # 10,000-block native/Wasm parity gate (INV-P5)
 ./scripts/check-frozen.sh               # the perps engine of record is frozen under lanes/perps/engine (DEC-051)
 node scripts/check-deps.mjs             # platform/ never depends on lanes/ (M0.5; listed exceptions shrink to none)
 cargo test --workspace --locked --manifest-path lanes/perps/engine/Cargo.toml   # its vectors, scenarios and properties
 cargo build --locked --manifest-path lanes/perps/engine/Cargo.toml -p caravel-types -p caravel-merkle -p caravel-perps --target wasm32v1-none   # consensus crates stay no_std
-BENCH_ACCOUNTS=256 BENCH_ORDERS_PER_SIDE=128 BENCH_BLOCK_BYTES=12000 cargo run --release -p caravel-runtime --example bench_full_caps   # docs/BENCHMARKS.md
+BENCH_ACCOUNTS=256 BENCH_ORDERS_PER_SIDE=128 BENCH_BLOCK_BYTES=12000 cargo run --release -p caravel-perps-node --example bench_full_caps   # docs/BENCHMARKS.md
 CARAVEL_INTERNAL_TOKEN=$(openssl rand -hex 16) cargo run --release -p caravel-node -- sequencer --config lanes/perps/config/sequencer.local.toml   # local sequencer (local lane, DEC-037)
 cargo run --release -p caravel-node -- validator --config lanes/perps/config/validator-1.local.toml   # a validator (key in keys/, never in git)
 cargo run --release -p caravel-node -- check-store --config lanes/perps/config/sequencer.local.toml   # replay a node's store through the Wasm
@@ -64,13 +64,13 @@ Git: one branch and PR per task (`t-0xx-short-name`, and `p-0x-short-name` for M
 
 M0.5 is splitting the repo into the platform (Caravel) and its first lane (Caravel Perps), spec §20.3. Current state:
 - `lanes/perps/engine/`: **frozen** nested workspace, the perps engine of record (DEC-051). Never edit it. It holds caravel-types, caravel-merkle, caravel-perps (engine logic), caravel-testkit (test-only: lane simulator, scenarios, `cargo gen-vectors`), contracts/perps-engine and test-vectors/.
-- `platform/` (Caravel, app-agnostic; the runtime and node are still perps-coupled until P-05 and P-06):
+- `platform/` (Caravel, app-agnostic; the node is still perps-coupled until P-06):
   - `crates/caravel-core` (the formats every lane shares, read without the app, DEC-052);
-  - `crates/caravel-runtime` (executor, store, sequencer and validator cores, checkpoints; formerly caravel-lane);
+  - `crates/caravel-runtime` (executor, store, sequencer and validator cores, checkpoints; any app through the `LaneApp` trait, DEC-053; formerly caravel-lane);
   - `crates/caravel-node` (sequencer / validator / replay / genesis);
   - `contracts/settlement`;
   - `relayer/` (TS);
   - `test-vectors/` (the platform formats' golden vectors).
-- `lanes/perps/` (Caravel Perps, lane #1): `engine/` (frozen, above), `node/` (caravel-perps-node: the perps plugin, format compatibility tests for now), `config/` (lane TOML files and local node configs), `deploy/testnet/` (the VM), `web/` (the trading app).
+- `lanes/perps/` (Caravel Perps, lane #1): `engine/` (frozen, above), `node/` (caravel-perps-node: `PerpsApp`, the perps views, the golden trace and fixture store, the sequencer/validator/parity tests, format compatibility tests, `bench_full_caps`), `config/` (lane TOML files and local node configs), `deploy/testnet/` (the VM), `web/` (the trading app).
 - `scripts/`: shared build, check, deploy and e2e scripts; `infra/gcp/`: the billing cap.
 - `site/`: the landing page (Vercel project `caravel`, https://caravel-tau.vercel.app).

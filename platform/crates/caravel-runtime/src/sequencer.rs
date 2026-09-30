@@ -4,15 +4,14 @@
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
-use caravel_perps::native::DiagnosticCrypto;
-use caravel_types::block::{BlockInputV1, BlockRecordV1};
-use caravel_types::checkpoint::CheckpointHeaderV1;
-use caravel_types::fatal::BLOCK_LEVEL;
-use caravel_types::inbox::{inbox_acc_preimage, InboxMsgV1};
-use caravel_types::oracle::OracleUpdateV1;
-use caravel_types::receipts::Receipts;
-use caravel_types::state::StateV1;
+use caravel_core::block::{BlockInputV1, BlockRecordV1};
+use caravel_core::checkpoint::CheckpointHeaderV1;
+use caravel_core::codes::fatal::BLOCK_LEVEL;
+use caravel_core::inbox::{inbox_acc_preimage, InboxMsgV1};
+use caravel_core::receipts::ReceiptsV1;
+use caravel_core::state::StateFrameV1;
 
+use crate::app::{FeedUpdate, LaneApp, StepOutput};
 use crate::builder::{self, BuildInput, Built, Source};
 use crate::checkpoint::{self, block_hash, sha256, BatchBudget, HeaderIds};
 use crate::executor::{ExecError, Metering, WasmExecutor};
@@ -20,23 +19,26 @@ use crate::mempool::{self, Mempool, Reject};
 use crate::store::{CheckpointRow, CheckpointStatus, Store, StoreError};
 
 /// How blocks are executed. Only `Wasm` is consensus (DEC-002); `Native` is
-/// for debugging and refused in production (spec §14.5).
+/// the app's native engine, for debugging and tests, and refused in
+/// production (spec §14.5).
 pub enum Executor {
     Wasm(WasmExecutor),
     Native,
 }
 
 impl Executor {
-    pub fn step(
+    pub fn step<A: LaneApp>(
         &self,
+        app: &A,
         state: &[u8],
         block: &[u8],
-    ) -> Result<(caravel_perps::StepOutput, Metering), ExecError> {
+    ) -> Result<(StepOutput, Metering), ExecError> {
         match self {
             Self::Wasm(w) => w.step(state, block),
-            // The diagnostic crypto reports a bad signature as fatal 17
+            // The app's diagnostic run reports a bad signature as a fatal
             // instead of panicking, like the Wasm path's trap.
-            Self::Native => caravel_perps::step(state, block, &DiagnosticCrypto)
+            Self::Native => app
+                .native_step(state, block)
                 .map(|o| (o, Metering::default()))
                 .map_err(|f| ExecError::Fatal(f.code)),
         }
@@ -103,13 +105,12 @@ pub enum Incident {
 }
 
 /// One produced block.
-#[derive(Clone, Debug)]
-pub struct Produced {
+pub struct Produced<S> {
     pub height: u64,
     pub record: BlockRecordV1,
-    pub receipts: Receipts,
+    pub receipts: ReceiptsV1,
     pub receipts_bytes: Vec<u8>,
-    pub state: Arc<StateV1>,
+    pub state: Arc<S>,
     pub metering: Metering,
     /// Set when this block sealed a checkpoint.
     pub checkpoint: Option<CheckpointRow>,
@@ -129,13 +130,15 @@ pub enum InboxReport {
     Mismatch,
 }
 
-pub struct Core {
+pub struct Core<A: LaneApp> {
+    app: A,
     exec: Executor,
     store: Store,
     cfg: SequencerConfig,
     config_hash: [u8; 32],
     state_bytes: Vec<u8>,
-    state: Arc<StateV1>,
+    state: Arc<A::State>,
+    frame: StateFrameV1,
     prev_block_hash: [u8; 32],
     pub mempool: Mempool,
     /// Reported inbox messages not yet in a block, from `state.inbox_through`.
@@ -144,22 +147,28 @@ pub struct Core {
     inbox_reported: u64,
     inbox_fold: [u8; 32],
     inbox_halted: bool,
-    oracle: BTreeMap<u16, OracleUpdateV1>,
+    feeds: BTreeMap<u32, FeedUpdate>,
     budget: BatchBudget,
     last_header_hash: [u8; 32],
     backpressure: bool,
 }
 
-impl Core {
+impl<A: LaneApp> Core<A> {
     /// Opens the core on a store, resuming from its head.
     pub fn open(
+        app: A,
         exec: Executor,
         store: Store,
         config_hash: [u8; 32],
         cfg: SequencerConfig,
     ) -> Result<Self, CoreError> {
         let (height, state_bytes) = store.head()?;
-        let state = StateV1::decode(&state_bytes).map_err(|_| CoreError::Corrupt("head state"))?;
+        let state = app
+            .decode_state(&state_bytes)
+            .ok_or(CoreError::Corrupt("head state"))?;
+        let frame =
+            StateFrameV1::read(&state_bytes).map_err(|_| CoreError::Corrupt("head state"))?;
+        let limits = app.limits(&state);
         let prev_block_hash = if height == 0 {
             [0; 32]
         } else {
@@ -169,15 +178,14 @@ impl Core {
             block_hash(&record)
         };
         // The open batch: blocks after the last CHECKPOINT_END.
-        let mut budget =
-            BatchBudget::new(cfg.max_batch_bytes, state.config.max_block_bytes as usize);
-        let batch_start = state.last_commitment.last_block_height + 1;
+        let mut budget = BatchBudget::new(cfg.max_batch_bytes, limits.max_block_bytes as usize);
+        let batch_start = frame.last_commitment.last_block_height + 1;
         if batch_start <= height {
             for (record, _) in store.blocks(batch_start, height)? {
                 budget.add(record.input.len());
             }
         }
-        let last_header_hash = match state.checkpoint_seq {
+        let last_header_hash = match frame.checkpoint_seq {
             0 => [0; 32],
             seq => sha256(
                 &store
@@ -194,39 +202,50 @@ impl Core {
                 .ok_or(CoreError::Corrupt("inbox acc"))?,
         };
         let inbox = store
-            .inbox_from(state.inbox_through, usize::MAX >> 1)?
+            .inbox_from(frame.inbox_through, usize::MAX >> 1)?
             .into_iter()
             .map(|(m, _)| m)
             .collect();
-        let mut oracle = BTreeMap::new();
-        for (market, bytes) in store.oracle_updates()? {
-            if let Ok(u) = OracleUpdateV1::decode(&bytes) {
-                oracle.insert(market, u);
+        let mut feeds = BTreeMap::new();
+        for (slot, bytes) in store.feed_updates()? {
+            if let Some(u) = app.decode_feed(&bytes) {
+                feeds.insert(slot, u);
             }
         }
         let mempool = Mempool::new(cfg.mempool_max, cfg.mempool_max_per_account);
         Ok(Self {
+            app,
             exec,
             store,
             cfg,
             config_hash,
             state_bytes,
             state: Arc::new(state),
+            frame,
             prev_block_hash,
             mempool,
             inbox,
             inbox_reported,
             inbox_fold,
             inbox_halted: false,
-            oracle,
+            feeds,
             budget,
             last_header_hash,
             backpressure: false,
         })
     }
 
-    pub fn state(&self) -> Arc<StateV1> {
+    pub fn app(&self) -> &A {
+        &self.app
+    }
+
+    pub fn state(&self) -> Arc<A::State> {
         self.state.clone()
+    }
+
+    /// The platform's view of the head state.
+    pub fn frame(&self) -> &StateFrameV1 {
+        &self.frame
     }
 
     pub fn state_bytes(&self) -> &[u8] {
@@ -238,7 +257,7 @@ impl Core {
     }
 
     pub fn height(&self) -> u64 {
-        self.state.height
+        self.frame.height
     }
 
     pub fn config_hash(&self) -> [u8; 32] {
@@ -286,7 +305,14 @@ impl Core {
 
     /// `POST /v1/tx`: pre-validates and queues a transaction.
     pub fn submit_tx(&mut self, bytes: &[u8], now_ms: u64) -> Result<[u8; 32], Reject> {
-        let (hash, tx) = mempool::prevalidate(bytes, &self.state, &self.config_hash, now_ms)?;
+        let (hash, tx) = mempool::prevalidate(
+            &self.app,
+            bytes,
+            &self.state,
+            &self.frame,
+            &self.config_hash,
+            now_ms,
+        )?;
         self.mempool.push(hash, tx)?;
         Ok(hash)
     }
@@ -321,35 +347,40 @@ impl Core {
         self.store.put_inbox(&msg, &acc_after)?;
         self.inbox_reported += 1;
         self.inbox_fold = fold;
-        if msg.index >= self.state.inbox_through {
+        if msg.index >= self.frame.inbox_through {
             self.inbox.push(msg);
         }
         Ok(InboxReport::Added)
     }
 
-    /// `POST /internal/oracle`: keeps the newest valid update per market.
-    pub fn report_oracle(&mut self, u: OracleUpdateV1) -> Result<bool, CoreError> {
-        if !mempool::oracle_ok(&u, &self.state) {
+    /// `POST /internal/<feed>`: keeps the newest admissible update per slot.
+    /// `false` if the app cannot decode it or would not accept it.
+    pub fn report_feed(&mut self, bytes: &[u8]) -> Result<bool, CoreError> {
+        let Some(u) = self.app.decode_feed(bytes) else {
+            return Ok(false);
+        };
+        if !self.app.feed_admissible(&self.state, &u) {
             return Ok(false);
         }
         if self
-            .oracle
-            .get(&u.market_id)
+            .feeds
+            .get(&u.slot)
             .is_some_and(|old| old.publish_time_ms >= u.publish_time_ms)
         {
             return Ok(true);
         }
-        self.store.put_oracle(u.market_id, &u.encode())?;
-        self.oracle.insert(u.market_id, u);
+        self.store.put_feed(u.slot, &u.bytes)?;
+        self.feeds.insert(u.slot, u);
         Ok(true)
     }
 
     /// Builds, executes and stores the next block. A fatal block is
     /// diagnosed, the offending entry quarantined, and the block rebuilt at
     /// the same height (spec §14.1).
-    pub fn produce_block(&mut self, now_ms: u64) -> Result<Produced, CoreError> {
-        let max_block = self.state.config.max_block_bytes as usize;
-        let mut user_cap = self.state.config.max_entries_per_block as usize;
+    pub fn produce_block(&mut self, now_ms: u64) -> Result<Produced<A::State>, CoreError> {
+        let limits = self.app.limits(&self.state);
+        let max_block = limits.max_block_bytes as usize;
+        let mut user_cap = limits.max_entries_per_block as usize;
         let mut incidents = Vec::new();
         let mut include_inbox = !self.inbox_halted;
         for _attempt in 0..16 {
@@ -358,11 +389,13 @@ impl Core {
                 byte_budget = byte_budget.min(max_block / 4);
             }
             let mut built = builder::build(&BuildInput {
+                app: &self.app,
                 state: &self.state,
+                frame: &self.frame,
                 prev_block_hash: self.prev_block_hash,
                 now_ms,
                 inbox: &self.inbox,
-                oracle: &self.oracle,
+                feeds: &self.feeds,
                 mempool: &self.mempool,
                 byte_budget,
                 user_cap,
@@ -372,15 +405,15 @@ impl Core {
                 &self.budget,
                 built.encoded_len,
                 self.cfg.checkpoint_every_blocks,
-                self.state.pending.len(),
-                self.state.config.max_pending_withdrawals as usize,
+                self.app.pending_withdrawals(&self.state),
+                limits.max_pending_withdrawals as usize,
             );
             built.block.checkpoint_end = end;
             let bytes = built
                 .block
                 .encode()
                 .map_err(|_| CoreError::Corrupt("block encoding"))?;
-            match self.exec.step(&self.state_bytes, &bytes) {
+            match self.exec.step(&self.app, &self.state_bytes, &bytes) {
                 Ok((out, metering)) => return self.accept(built, bytes, out, metering, incidents),
                 Err(ExecError::BudgetExceeded) => {
                     let users = built
@@ -395,7 +428,7 @@ impl Core {
                     user_cap = users / 2;
                 }
                 Err(_) => {
-                    let diag = caravel_perps::step(&self.state_bytes, &bytes, &DiagnosticCrypto);
+                    let diag = self.app.native_step(&self.state_bytes, &bytes);
                     match diag {
                         Err(f) if (f.entry_index as usize) < built.sources.len() => {
                             let i = f.entry_index as usize;
@@ -409,8 +442,8 @@ impl Core {
                             });
                             match source {
                                 Source::User(h) => self.mempool.remove(&HashSet::from([h])),
-                                Source::Oracle(m) => {
-                                    self.oracle.remove(&m);
+                                Source::Feed(slot) => {
+                                    self.feeds.remove(&slot);
                                 }
                                 // Inbox entries cannot be skipped: stop taking them.
                                 Source::Inbox(_) => {
@@ -437,7 +470,7 @@ impl Core {
                                 / 2;
                             if user_cap == 0 {
                                 include_inbox = false;
-                                self.oracle.clear();
+                                self.feeds.clear();
                             }
                         }
                     }
@@ -446,7 +479,7 @@ impl Core {
         }
         Err(CoreError::Halted(format!(
             "block {} did not execute after 16 attempts: {incidents:?}",
-            self.state.height + 1
+            self.frame.height + 1
         )))
     }
 
@@ -454,21 +487,28 @@ impl Core {
         &mut self,
         built: Built,
         bytes: Vec<u8>,
-        out: caravel_perps::StepOutput,
+        out: StepOutput,
         metering: Metering,
         mut incidents: Vec<Incident>,
-    ) -> Result<Produced, CoreError> {
-        let new_state =
-            StateV1::decode(&out.state).map_err(|_| CoreError::Corrupt("engine output state"))?;
+    ) -> Result<Produced<A::State>, CoreError> {
+        let new_state = self
+            .app
+            .decode_state(&out.state)
+            .ok_or(CoreError::Corrupt("engine output state"))?;
+        let new_frame = StateFrameV1::read(&out.state)
+            .map_err(|_| CoreError::Corrupt("engine output state"))?;
+        if !self.app.receipts_decode(&out.receipts) {
+            return Err(CoreError::Corrupt("engine receipts"));
+        }
         let receipts =
-            Receipts::decode(&out.receipts).map_err(|_| CoreError::Corrupt("engine receipts"))?;
+            ReceiptsV1::decode(&out.receipts).map_err(|_| CoreError::Corrupt("engine receipts"))?;
         let height = built.block.height;
         let record = BlockRecordV1 {
             input: bytes,
             state_hash_after: sha256(&out.state),
         };
         let end = built.block.checkpoint_end;
-        let seq = end.then_some(new_state.checkpoint_seq);
+        let seq = end.then_some(new_frame.checkpoint_seq);
         self.store
             .commit_block(height, &record, &out.receipts, &out.state, seq)?;
 
@@ -477,9 +517,10 @@ impl Core {
         let mut done = built.included.clone();
         done.extend(built.dropped.iter().copied());
         self.mempool.remove(&done);
-        self.inbox.retain(|m| m.index >= new_state.inbox_through);
+        self.inbox.retain(|m| m.index >= new_frame.inbox_through);
         self.state_bytes = out.state;
         self.state = Arc::new(new_state);
+        self.frame = new_frame;
 
         let checkpoint = if end {
             let row = self.seal(height, &mut incidents)?;
@@ -506,21 +547,20 @@ impl Core {
         last_height: u64,
         incidents: &mut Vec<Incident>,
     ) -> Result<CheckpointRow, CoreError> {
-        let first = self.state.last_commitment.last_block_height - self.budget.blocks() as u64 + 1;
+        let first = self.frame.last_commitment.last_block_height - self.budget.blocks() as u64 + 1;
         let blocks = self.store.blocks(first, last_height)?;
         let records: Vec<BlockRecordV1> = blocks.iter().map(|(r, _)| r.clone()).collect();
         let (batch, header) = checkpoint::assemble(
             &self.cfg.ids,
             self.last_header_hash,
             &records,
-            &self.state,
             &self.state_bytes,
         )
         .map_err(|_| CoreError::Corrupt("checkpoint assembly"))?;
-        let decoded: Vec<(BlockRecordV1, Receipts)> = blocks
+        let decoded: Vec<(BlockRecordV1, ReceiptsV1)> = blocks
             .into_iter()
             .map(|(r, rc)| {
-                Receipts::decode(&rc)
+                ReceiptsV1::decode(&rc)
                     .map(|rc| (r, rc))
                     .map_err(|_| CoreError::Corrupt("stored receipts"))
             })
@@ -555,17 +595,17 @@ impl Core {
     /// What the contract will check, so validators are never asked to sign a
     /// header Stellar would reject (spec §14.3 step 3).
     pub fn precheck(&self, header: &CheckpointHeaderV1, batch_len: usize) -> Result<(), String> {
-        if header.encode().len() != caravel_types::checkpoint::CHECKPOINT_HEADER_LEN {
+        if header.encode().len() != caravel_core::checkpoint::CHECKPOINT_HEADER_LEN {
             return Err("header length".into());
         }
         if header.network_id != self.cfg.ids.network_id
             || header.settlement_addr_hash != self.cfg.ids.settlement_addr_hash
             || header.engine_wasm_hash != self.cfg.ids.engine_wasm_hash
-            || header.lane_id != self.state.lane_id
+            || header.lane_id != self.frame.lane_id
         {
             return Err("identity fields".into());
         }
-        if batch_len > caravel_types::batch::MAX_BATCH_BYTES {
+        if batch_len > caravel_core::batch::MAX_BATCH_BYTES {
             return Err(format!("batch is {batch_len} bytes"));
         }
         let reported = match header.inbox_through {
@@ -584,10 +624,10 @@ impl Core {
             .store
             .cum_deposits(header.inbox_through)
             .map_err(|e| e.to_string())?;
-        if self.state.withdrawals_committed_total > cum {
+        if self.frame.withdrawals_committed_total > cum {
             return Err(format!(
                 "solvency: committed {} > deposits {cum}",
-                self.state.withdrawals_committed_total
+                self.frame.withdrawals_committed_total
             ));
         }
         Ok(())
@@ -603,12 +643,7 @@ impl Core {
 }
 
 fn entry_bytes(block: &BlockInputV1, i: usize) -> Vec<u8> {
-    use caravel_types::block::Entry;
-    match &block.entries[i] {
-        Entry::Inbox(m) => m.encode().to_vec(),
-        Entry::Oracle(u) => u.encode().to_vec(),
-        Entry::User(tx) => tx.encode(),
-    }
+    block.entries[i].payload().unwrap_or_default()
 }
 
 pub fn hex(b: &[u8]) -> String {

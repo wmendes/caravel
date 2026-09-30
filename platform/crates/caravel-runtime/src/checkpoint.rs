@@ -3,16 +3,15 @@
 //! validators and replay all build headers with this code, so they agree byte
 //! for byte.
 
-use caravel_merkle::{MerkleTree, NativeSha256};
-use caravel_types::batch::{BatchV1, BATCH_HEADER_LEN, BATCH_PER_BLOCK_OVERHEAD};
-use caravel_types::block::{block_hash_preimage, BlockInputV1, BlockRecordV1, Entry};
-use caravel_types::checkpoint::CheckpointHeaderV1;
-use caravel_types::codes;
-use caravel_types::inbox::InboxKind;
-use caravel_types::preimage::{account_leaf_preimage, withdrawal_leaf_preimage};
-use caravel_types::receipts::{DepositOutcome, Event, Receipts};
-use caravel_types::state::StateV1;
-use caravel_types::tx::TxBody;
+use caravel_core::batch::{BatchV1, BATCH_HEADER_LEN, BATCH_PER_BLOCK_OVERHEAD};
+use caravel_core::block::{block_hash_preimage, BlockInputV1, BlockRecordV1, Entry};
+use caravel_core::checkpoint::CheckpointHeaderV1;
+use caravel_core::inbox::InboxKind;
+use caravel_core::merkle::{MerkleTree, NativeSha256};
+use caravel_core::preimage::{account_leaf_preimage, withdrawal_leaf_preimage};
+use caravel_core::receipts::{DepositOutcome, PlatformEvent, ReceiptsV1};
+use caravel_core::state::StateFrameV1;
+use caravel_core::tx::StandardBody;
 use sha2::{Digest, Sha256};
 
 /// Room kept at the end of a batch (spec §14.2).
@@ -120,15 +119,15 @@ pub enum AssembleError {
 }
 
 /// Builds `BatchV1` and `CheckpointHeaderV1` for the blocks since the last
-/// checkpoint. `state` is the state after the last of `records`, which is
-/// the `CHECKPOINT_END` block.
+/// checkpoint. `state_bytes` is the state after the last of `records`, which
+/// is the `CHECKPOINT_END` block; only its frame is read.
 pub fn assemble(
     ids: &HeaderIds,
     prev_header_hash: [u8; 32],
     records: &[BlockRecordV1],
-    state: &StateV1,
     state_bytes: &[u8],
 ) -> Result<(Vec<u8>, CheckpointHeaderV1), AssembleError> {
+    let state = StateFrameV1::read(state_bytes).map_err(|_| AssembleError::Encode)?;
     let last = records.last().ok_or(AssembleError::NotAtCheckpoint)?;
     let last_input = BlockInputV1::decode(&last.input).map_err(|_| AssembleError::Encode)?;
     let c = state.last_commitment;
@@ -194,7 +193,7 @@ pub enum LeafError {
 /// header, so a wrong rebuild is never served.
 pub fn withdrawal_leaves(
     header: &CheckpointHeaderV1,
-    blocks: &[(BlockRecordV1, Receipts)],
+    blocks: &[(BlockRecordV1, ReceiptsV1)],
 ) -> Result<Vec<Leaf>, LeafError> {
     let mut pending: Vec<([u8; 32], i128)> = Vec::new();
     for (record, receipts) in blocks {
@@ -206,25 +205,26 @@ pub fn withdrawal_leaves(
             match entry {
                 Entry::Inbox(msg) => {
                     for e in &rc.events {
-                        match (msg.kind, e) {
+                        let Some(e) = e.platform() else { continue };
+                        match (msg.kind, e.map_err(|_| LeafError::Decode)?) {
                             (
                                 InboxKind::Deposit,
-                                Event::Deposit {
+                                PlatformEvent::Deposit {
                                     key,
                                     amount,
                                     outcome: DepositOutcome::Bounced,
                                 },
-                            ) => pending.push((*key, *amount)),
+                            ) => pending.push((key, amount)),
                             (
                                 InboxKind::ForcedWithdrawal,
-                                Event::ForcedWithdrawalProcessed { key, amount },
-                            ) if *amount > 0 => pending.push((*key, *amount)),
+                                PlatformEvent::ForcedWithdrawalProcessed { key, amount },
+                            ) if amount > 0 => pending.push((key, amount)),
                             _ => {}
                         }
                     }
                 }
-                Entry::User(tx) if rc.code == codes::OK => {
-                    if let TxBody::Withdraw { amount } = tx.body {
+                Entry::User(tx) if !rc.rejected() => {
+                    if let Some(Ok(StandardBody::Withdraw { amount })) = tx.standard_body() {
                         pending.push((tx.account, amount));
                     }
                 }
@@ -253,7 +253,8 @@ pub fn withdrawal_leaves(
             ))
         })
         .collect();
-    let root = caravel_merkle::root(&NativeSha256, &hashes).map_err(|_| LeafError::Mismatch)?;
+    let root =
+        caravel_core::merkle::root(&NativeSha256, &hashes).map_err(|_| LeafError::Mismatch)?;
     let total: i128 = leaves.iter().map(|l| l.amount).sum();
     if root != header.withdrawals_root
         || leaves.len() != header.withdrawal_count as usize
@@ -264,22 +265,22 @@ pub fn withdrawal_leaves(
     Ok(leaves)
 }
 
-/// The account leaves of a checkpoint, from the state right after it.
+/// The account leaves of a checkpoint, from the app's `(key, escape equity)`
+/// list for the state right after it (`LaneApp::escape_leaves`), checked
+/// against the header.
 pub fn account_leaves(
     header: &CheckpointHeaderV1,
-    state: &StateV1,
+    escape: &[([u8; 32], i128)],
 ) -> Result<Vec<Leaf>, LeafError> {
-    let mut leaves = Vec::with_capacity(state.accounts.len());
-    for (j, a) in state.accounts.iter().enumerate() {
-        let equity = caravel_perps::margin::equity(state, j)
-            .map_err(|_| LeafError::Decode)?
-            .max(0);
-        leaves.push(Leaf {
+    let leaves: Vec<Leaf> = escape
+        .iter()
+        .enumerate()
+        .map(|(j, (key, equity))| Leaf {
             index: j as u32,
-            key: a.key,
-            amount: equity,
-        });
-    }
+            key: *key,
+            amount: *equity,
+        })
+        .collect();
     let hashes: Vec<[u8; 32]> = leaves
         .iter()
         .map(|l| {
@@ -292,7 +293,8 @@ pub fn account_leaves(
             ))
         })
         .collect();
-    let root = caravel_merkle::root(&NativeSha256, &hashes).map_err(|_| LeafError::Mismatch)?;
+    let root =
+        caravel_core::merkle::root(&NativeSha256, &hashes).map_err(|_| LeafError::Mismatch)?;
     if root != header.accounts_root || leaves.len() != header.account_count as usize {
         return Err(LeafError::Mismatch);
     }

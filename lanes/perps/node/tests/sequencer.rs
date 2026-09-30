@@ -6,17 +6,20 @@ mod common;
 
 use common::harness::*;
 
+use caravel_core::batch::BatchV1;
+use caravel_core::block::{BlockInputV1, Entry};
+use caravel_core::checkpoint::CheckpointHeaderV1;
+use caravel_core::inbox::{InboxKind, InboxMsgV1};
+use caravel_core::state::StateFrameV1;
+use caravel_core::tx::TxEnvelopeV1;
+use caravel_perps_node::{app, PerpsApp};
 use caravel_runtime::builder::{self, BuildInput};
 use caravel_runtime::checkpoint::{self, settlement_addr_hash, sha256, BatchBudget};
 use caravel_runtime::mempool::{Mempool, Reject};
 use caravel_runtime::sequencer::{self, Executor, InboxReport, Incident};
 use caravel_runtime::store::{CheckpointStatus, Store};
 use caravel_testkit::lane::{config, seeds, BTC, BTC_PRICE, TICK, USDC};
-use caravel_types::batch::BatchV1;
-use caravel_types::block::{BlockInputV1, Entry};
-use caravel_types::checkpoint::CheckpointHeaderV1;
 use caravel_types::fatal;
-use caravel_types::inbox::{InboxKind, InboxMsgV1};
 use caravel_types::state::StateV1;
 use caravel_types::tx::{LaneTxV1, PlaceOrder, Side, SigScheme, Tif, TxBody};
 use caravel_types::vectors::pk;
@@ -36,9 +39,7 @@ fn replay(store: &Store, height: u64) -> ([u8; 32], Vec<CheckpointHeaderV1>) {
         state = out.state;
         batch.push(record.clone());
         if BlockInputV1::decode(&record.input).unwrap().checkpoint_end {
-            let st = StateV1::decode(&state).unwrap();
-            let (_, header) =
-                checkpoint::assemble(&ids(), prev_header, &batch, &st, &state).unwrap();
+            let (_, header) = checkpoint::assemble(&ids(), prev_header, &batch, &state).unwrap();
             prev_header = sha256(&header.encode());
             headers.push(header);
             batch.clear();
@@ -142,9 +143,11 @@ fn oracle_updates_need_a_configured_key_and_a_valid_signature() {
     let mut forged = good;
     forged.signature[0] ^= 1;
     let stranger = t.signer.oracle_update(seeds::A, BTC, BTC_PRICE, t.now);
-    assert!(!t.core.report_oracle(forged).unwrap());
-    assert!(!t.core.report_oracle(stranger).unwrap());
-    assert!(t.core.report_oracle(good).unwrap());
+    assert!(!t.core.report_feed(&forged.encode()).unwrap());
+    assert!(!t.core.report_feed(&stranger.encode()).unwrap());
+    assert!(t.core.report_feed(&good.encode()).unwrap());
+    // Bytes that are not an oracle update are refused too.
+    assert!(!t.core.report_feed(&[1, 2, 3]).unwrap());
 }
 
 #[test]
@@ -210,7 +213,7 @@ fn withdrawal_proofs_verify_against_the_header() {
     ));
     // Escape leaves from the snapshot give the header's accounts root.
     let (_, snap) = t.core.store().snapshot(1).unwrap().unwrap();
-    let accounts = checkpoint::account_leaves(&header, &StateV1::decode(&snap).unwrap()).unwrap();
+    let accounts = app::account_leaves(&header, &StateV1::decode(&snap).unwrap()).unwrap();
     assert_eq!(accounts.len() as u32, header.account_count);
 }
 
@@ -228,7 +231,10 @@ fn a_fatal_entry_is_quarantined_and_the_block_rebuilt() {
         TxBody::CancelAll { market_id: BTC },
     );
     bad.signature[5] ^= 1;
-    t.core.mempool.push([0xBA; 32], bad).unwrap();
+    t.core
+        .mempool
+        .push([0xBA; 32], TxEnvelopeV1::decode(&bad.encode()).unwrap())
+        .unwrap();
     let good = t.order(seeds::B, BTC, Side::Buy, BTC_PRICE - 10 * TICK, 1);
     let height = t.core.height() + 1;
     let p = t.block();
@@ -392,18 +398,21 @@ fn builder_respects_byte_and_entry_budgets() {
         t
     };
     let st = t.core.state();
-    let oracle = Default::default();
+    let frame = StateFrameV1::read(t.core.state_bytes()).unwrap();
+    let feeds = Default::default();
     let mut mempool = Mempool::new(100, 100);
     for q in t.core.mempool.iter() {
-        mempool.push(q.hash, q.tx).unwrap();
+        mempool.push(q.hash, q.tx.clone()).unwrap();
     }
     let build = |byte_budget: usize, user_cap: usize| {
         builder::build(&BuildInput {
+            app: &PerpsApp,
             state: &st,
+            frame: &frame,
             prev_block_hash: [0; 32],
             now_ms: t.now,
             inbox: &[],
-            oracle: &oracle,
+            feeds: &feeds,
             mempool: &mempool,
             byte_budget,
             user_cap,

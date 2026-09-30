@@ -468,8 +468,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "caravel-core",
  "caravel-merkle",
  "caravel-perps",
+ "caravel-perps-node",
  "caravel-runtime",
  "caravel-testkit",
  "caravel-types",
@@ -506,11 +508,15 @@ version = "0.1.0"
 dependencies = [
  "caravel-core",
  "caravel-merkle",
+ "caravel-perps",
  "caravel-runtime",
  "caravel-testkit",
  "caravel-types",
+ "ed25519-dalek",
  "proptest",
+ "serde",
  "serde_json",
+ "soroban-env-host",
  "tempfile",
 ]
 
@@ -518,10 +524,7 @@ dependencies = [
 name = "caravel-runtime"
 version = "0.1.0"
 dependencies = [
- "caravel-merkle",
- "caravel-perps",
- "caravel-testkit",
- "caravel-types",
+ "caravel-core",
  "ed25519-dalek",
  "rusqlite",
  "serde",

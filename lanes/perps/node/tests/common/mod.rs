@@ -17,6 +17,14 @@ pub fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
 }
 
+/// The runtime's step output as the perps crate's.
+pub fn perps_out(o: caravel_runtime::StepOutput) -> StepOutput {
+    StepOutput {
+        state: o.state,
+        receipts: o.receipts,
+    }
+}
+
 pub fn versions() -> serde_json::Value {
     serde_json::from_str(&std::fs::read_to_string(root().join("versions.json")).unwrap()).unwrap()
 }
@@ -77,7 +85,10 @@ impl Executor for Wasm {
     }
 
     fn step(&self, state: &[u8], block: &[u8]) -> Result<StepOutput, Fatal> {
-        self.0.step(state, block).map(|(o, _)| o).map_err(as_fatal)
+        self.0
+            .step(state, block)
+            .map(|(o, _)| perps_out(o))
+            .map_err(as_fatal)
     }
 
     fn reports_entry_index(&self) -> bool {

@@ -18,6 +18,10 @@ path = "src/main.rs"
 caravel-types = { workspace = true }
 caravel-perps = { workspace = true, features = ["native"] }
 caravel-runtime = { workspace = true }
+# Until P-06 splits the node into the platform library and a perps binary,
+# the node runs the perps app (check-deps exception).
+caravel-perps-node = { workspace = true }
+caravel-core = { workspace = true, features = ["native"] }
 ed25519-dalek = { workspace = true }
 stellar-strkey = { workspace = true }
 stellar-xdr = { workspace = true, features = ["std", "base64"] }

@@ -14,18 +14,20 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use caravel_perps::native::verify_strict;
+use caravel_core::block::{BlockInputV1, Entry};
+use caravel_core::inbox::InboxMsgV1;
+use caravel_perps_node::views::{self as perps_views, FillView};
+use caravel_perps_node::PerpsApp;
 use caravel_runtime::checkpoint::sha256;
-use caravel_runtime::mempool::tx_hash;
+use caravel_runtime::mempool::{tx_hash, verify_strict};
 use caravel_runtime::sequencer::{
     hex, unhex, Core, Executor, InboxReport, Incident, Produced, SequencerConfig as CoreConfig,
 };
 use caravel_runtime::store::{CheckpointRow, CheckpointStatus, Store};
-use caravel_runtime::views::{self, FillView};
+use caravel_runtime::views;
+use caravel_runtime::LaneApp;
 use caravel_runtime::WasmExecutor;
-use caravel_types::block::{BlockInputV1, Entry};
-use caravel_types::inbox::InboxMsgV1;
-use caravel_types::oracle::OracleUpdateV1;
+use caravel_types::receipts::Receipts;
 use caravel_types::state::StateV1;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -43,10 +45,10 @@ pub fn now_ms() -> u64 {
 }
 
 /// What the stream sends after each block or checkpoint change.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum StreamEvent {
     Block {
-        produced: Arc<Produced>,
+        produced: Arc<Produced<StateV1>>,
         fills: Vec<FillView>,
         config_hash: [u8; 32],
     },
@@ -57,7 +59,7 @@ pub enum StreamEvent {
 }
 
 pub struct App {
-    pub core: Mutex<Core>,
+    pub core: Mutex<Core<PerpsApp>>,
     pub snapshot: RwLock<Arc<StateV1>>,
     fills: Mutex<BTreeMap<u16, VecDeque<FillView>>>,
     pub events: broadcast::Sender<StreamEvent>,
@@ -82,7 +84,7 @@ impl App {
         self.snapshot.read().expect("snapshot lock").clone()
     }
 
-    fn publish(&self, produced: Produced, config_hash: [u8; 32]) {
+    fn publish(&self, produced: Produced<StateV1>, config_hash: [u8; 32]) {
         for i in &produced.incidents {
             match i {
                 Incident::Quarantined { .. }
@@ -92,7 +94,10 @@ impl App {
             }
         }
         let ts = BlockInputV1::decode(&produced.record.input).map_or(0, |b| b.timestamp_ms);
-        let fills = views::fills(&produced.state, produced.height, ts, &produced.receipts);
+        let fills = Receipts::decode(&produced.receipts_bytes).map_or_else(
+            |_| Vec::new(),
+            |r| perps_views::fills(&produced.state, produced.height, ts, &r),
+        );
         {
             let mut kept = self.fills.lock().expect("fills lock");
             for f in &fills {
@@ -181,7 +186,7 @@ pub async fn start(cfg: &SequencerConfig) -> Result<(Arc<App>, Router)> {
         mempool_max: cfg.mempool_max,
         mempool_max_per_account: cfg.mempool_max_per_account,
     };
-    let core = Core::open(exec, store, config_hash, core_cfg)?;
+    let core = Core::open(PerpsApp, exec, store, config_hash, core_cfg)?;
     tracing::info!(height = core.height(), state_hash = %hex(&core.state_hash()), lane = %cfg.lane.lane.name, "sequencer starting");
     if cfg.signers.is_none() {
         tracing::warn!("no [signers]: checkpoints are sealed but never signed");
@@ -500,7 +505,7 @@ async fn post_tx(State(app): AppState, headers: HeaderMap, body: Bytes) -> ApiRe
 
 async fn status(State(app): AppState) -> ApiResult {
     let core = app.core.lock().expect("core lock");
-    let st = core.state();
+    let st = core.frame();
     let store = core.store();
     let last = |s| store.last_checkpoint_with(s).map_err(ApiError::internal);
     let seq = |v: Option<u64>| v.map(|s| s.to_string());
@@ -543,12 +548,12 @@ async fn status(State(app): AppState) -> ApiResult {
 
 async fn account(State(app): AppState, Path(account): Path<String>) -> ApiResult {
     let key = api::parse_account(&account)?;
-    ok(views::account(&app.state(), &key)
+    ok(perps_views::account(&app.state(), &key)
         .ok_or_else(|| ApiError::not_found("no lane account for this key"))?)
 }
 
 async fn markets(State(app): AppState) -> ApiResult {
-    ok(views::markets(&app.state()))
+    ok(perps_views::markets(&app.state()))
 }
 
 #[derive(Deserialize)]
@@ -558,10 +563,8 @@ struct Depth {
 
 async fn book(State(app): AppState, Path(id): Path<u16>, Query(q): Query<Depth>) -> ApiResult {
     let depth = q.depth.unwrap_or(50).clamp(1, 500);
-    ok(
-        views::book(&app.state(), id, depth)
-            .ok_or_else(|| ApiError::not_found("no such market"))?,
-    )
+    ok(perps_views::book(&app.state(), id, depth)
+        .ok_or_else(|| ApiError::not_found("no such market"))?)
 }
 
 #[derive(Deserialize)]
@@ -684,13 +687,18 @@ async fn internal_oracle(
     Json(j): Json<OracleJson>,
 ) -> ApiResult {
     authorized(&app, &headers)?;
-    let u = OracleUpdateV1::decode(&api::unhex(&j.update, "update")?)
-        .map_err(|_| ApiError::bad_request("DECODE", "update is not an OracleUpdateV1"))?;
+    let bytes = api::unhex(&j.update, "update")?;
+    if PerpsApp.decode_feed(&bytes).is_none() {
+        return Err(ApiError::bad_request(
+            "DECODE",
+            "update is not an OracleUpdateV1",
+        ));
+    }
     let accepted = app
         .core
         .lock()
         .expect("core lock")
-        .report_oracle(u)
+        .report_feed(&bytes)
         .map_err(ApiError::internal)?;
     if accepted {
         ok(json!({ "status": "queued" }))
@@ -842,15 +850,18 @@ fn messages(ev: &StreamEvent, sub: &Subscription, account: Option<&[u8; 32]>) ->
                 out.push(v);
             }
             for m in &sub.markets {
-                if let Some(b) = views::book(&p.state, *m, 20) {
+                if let Some(b) = perps_views::book(&p.state, *m, 20) {
                     let mut v = serde_json::to_value(b).unwrap_or_default();
                     v["type"] = "book".into();
                     out.push(v);
                 }
             }
             if let Some(key) = account {
+                let events = PerpsApp
+                    .render_events(&p.receipts_bytes)
+                    .unwrap_or_default();
                 if let Some(input) = &input {
-                    for rc in &p.receipts.receipts {
+                    for (i, rc) in p.receipts.receipts.iter().enumerate() {
                         if let Some(Entry::User(tx)) = input.entries.get(rc.entry_index as usize) {
                             if tx.account == *key {
                                 out.push(json!({
@@ -859,13 +870,13 @@ fn messages(ev: &StreamEvent, sub: &Subscription, account: Option<&[u8; 32]>) ->
                                     "tx_hash": hex(&tx_hash(tx, config_hash)),
                                     "nonce": tx.nonce.to_string(),
                                     "code": rc.code,
-                                    "events": rc.events.iter().map(|e| format!("{e:?}")).collect::<Vec<_>>(),
+                                    "events": events.get(i).cloned().unwrap_or_default(),
                                 }));
                             }
                         }
                     }
                 }
-                if let Some(a) = views::account(&p.state, key) {
+                if let Some(a) = perps_views::account(&p.state, key) {
                     let mut v = serde_json::to_value(a).unwrap_or_default();
                     v["type"] = "account".into();
                     out.push(v);
