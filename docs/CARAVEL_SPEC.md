@@ -1774,10 +1774,11 @@ Node ≥ 22 with `@stellar/stellar-sdk 17.2.0`. Contract calls go through `rpc.S
 
 The perps lane's feed module, `lanes/perps/relayer-feeds` (DEC-053). The relayer config lists it under `feeds`, and it reads the oracle key from `CARAVEL_ORACLE_SECRET`. It posts to the perps node's feed route, `/internal/oracle`.
 
-- Sources, in priority:
-  1. Reflector SEP-40 feeds on testnet: `lastprice(asset)`. The "External CEXs & DEXs" testnet feed is `CCYOZJCOPG34LLQQ7N24YXBM7LL62R7ONMZ3G6WZAAYPB5OYKOMJRN63`, 14 decimals, 300 s resolution (developers.stellar.org "Oracle Providers", 2026-09-08, and on-chain `decimals()`/`resolution()`, 2026-09-29; DEC-041).
-  2. A public spot API as fallback. The source is configured per market.
-- Every 2s per market:
+- Sources, in priority, configured per market (DEC-058):
+  1. Coinbase's public WebSocket, `wss://ws-feed.exchange.coinbase.com`, on the `ticker` and `heartbeat` channels. A quote is fresh for 5 s from its trade, or from a heartbeat that names that trade as the product's last (for up to 120 s after the trade).
+  2. Coinbase's public spot API.
+  3. Reflector SEP-40 feeds on testnet: `lastprice(asset)`. The "External CEXs & DEXs" testnet feed is `CCYOZJCOPG34LLQQ7N24YXBM7LL62R7ONMZ3G6WZAAYPB5OYKOMJRN63`, 14 decimals, 300 s resolution (developers.stellar.org "Oracle Providers", 2026-09-08, and on-chain `decimals()`/`resolution()`, 2026-09-29; DEC-041).
+- Every block (`intervalMs` 1,000 on testnet) per market:
   1. Fetch the USD price.
   2. Convert to stroops per lot:
      `price_per_lot = round_half_even(usd_price × 10^7 × display_lot_base_units / 10^display_base_decimals)`;
@@ -2037,7 +2038,10 @@ The plan of record is `~/.claude/plans/ok-but-now-i-lucky-hoare.md` (architectur
 | P-05 | Runtime on `LaneApp` + `PerpsApp`: golden trace byte for byte, parity gate, fixture store opens | P-04 | review |
 | P-06 | Node on `NodeApp`, lane-file split, `caravel-perps-node`, relayer feed module: API snapshots identical, dependency guard | P-05 | review |
 | P-07 | Live VM upgrade to `caravel-perps-node` (check-store, shadow validator, replay) — **Gate P1** | P-06 | review |
+| P-07a | Perps oracle: Coinbase's public WebSocket ticker as the first source, once per 1 s block (DEC-058) | P-07 | doing |
+| P-07b | Stellar Wallets Kit replaces Freighter in the perps web app, with a local SEP-53 check (DEC-059) | P-07a | todo |
 | P-08 | `caravel-app-sdk` + `testapp`, conformance with perps' standard kinds | P-07 | todo |
+| P-08b | Pyth Pro feed verified in-engine in the SDK (needs format approval and a Pyth Pro subscription) | P-08 | todo |
 | P-09 | `caravel-harness`; settlement tests move off perps; new settlement build of record | P-08 | todo |
 | P-10 | Payments template: engine, vectors, scenarios, INV-PAY1, parity, node, e2e — **Gate P2** | P-09 | todo |
 | P-11 | Lane registry contract + tests | P-10 | todo |
@@ -2235,6 +2239,14 @@ Changed outside consensus:
 - **Engine check:** a node refuses an engine Wasm other than `[app] engine_wasm_sha256` (sequencer and validator config load, replay, witness).
 
 The lane file is a node input, not a consensus format. The bytes it produces are unchanged | Every template needs the same generic settings, and a node must know which app a file is for before parsing the rest | `AppGenesisV1` (Phase 2) gives the generic sections their own bytes |
+| DEC-058 | **M0.5 (P-07a).** The perps oracle's first source is Coinbase's public WebSocket ticker, instead of Reflector (DEC-041), and the feed runs every block (1 s) instead of every 2 s.
+- **The stream** (`lanes/perps/relayer-feeds/src/coinbase.ts`): one connection, the `ticker` and `heartbeat` channels for every product. It reconnects with backoff, and after 30 s of silence.
+- **Freshness:** a quote is fresh for 5 s from its trade (`PriceSource.maxAgeSecs`, which `firstFresh` now honours). A heartbeat whose `last_trade_id` is the quote's trade refreshes it, for up to 120 s after the trade, so a quiet market such as XLM-USD stays priced between trades. A missed trade, a dead stream or an old trade falls through to Coinbase's spot API, then Reflector.
+- **Checked 2026-09-30 on the live feed:** 38 ticker messages in 5 s for BTC, ETH and XLM, with no key; heartbeats about once a second per product. The channel is `heartbeat`, singular: `heartbeats` is refused.
+- **Publishing:** the one-tick and 10 s heartbeat rules are unchanged, so a market moves at most once per block. The engine's staleness, circuit-breaker and future-time rules are unchanged.
+- **Trust:** prices are still signed by the team's oracle key, and the web app says they come from Coinbase.
+
+Pyth was the first choice. Hermes has required a Pyth Terminal API key since 2026-08-26 (it answered 401 when checked), and Pyth Pro needs a subscription. Both are paid after a trial, so the human chose Coinbase. Pyth Pro verified in-engine stays planned for new lanes (P-08b) | Free and sub-second, with no key and no new paid resource. The fallbacks keep a price when the stream drops | A subscription to a signed oracle (Pyth Pro, P-08b), or sub-second blocks, since one price per market per block caps what a faster feed can add |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

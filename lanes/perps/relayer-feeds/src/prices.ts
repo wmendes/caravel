@@ -49,6 +49,8 @@ export interface Quote {
 
 export interface PriceSource {
   readonly name: string;
+  /** How old a quote may be, in seconds; the feed's `maxSourceAgeSecs` when unset. */
+  readonly maxAgeSecs?: number;
   quote(): Promise<Quote>;
 }
 
@@ -122,15 +124,16 @@ export class ReflectorPrice implements PriceSource {
 }
 
 /**
- * The first source whose quote is recent enough (spec §17.3: Reflector first,
- * a public spot API as fallback). Errors and stale quotes fall through.
+ * The first source whose quote is recent enough (spec §17.3, DEC-058: the
+ * Coinbase stream, then its spot API, then Reflector). A source's own
+ * `maxAgeSecs` overrides the feed's. Errors and stale quotes fall through.
  */
 export async function firstFresh(sources: PriceSource[], maxAgeSecs: number, nowSecs: number): Promise<Quote> {
   const problems: string[] = [];
   for (const s of sources) {
     try {
       const q = await s.quote();
-      if (nowSecs - q.observedAt <= maxAgeSecs) return q;
+      if (nowSecs - q.observedAt <= (s.maxAgeSecs ?? maxAgeSecs)) return q;
       problems.push(`${s.name}: ${nowSecs - q.observedAt}s old`);
     } catch (e) {
       problems.push(String(e));

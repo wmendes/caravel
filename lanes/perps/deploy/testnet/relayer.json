@@ -15,33 +15,42 @@
   "feeds": [
     {
       "module": "/opt/caravel/relayer-feeds/perps/dist/index.js",
-      "intervalMs": 2000,
+      "intervalMs": 1000,
       "options": {
         "maxSourceAgeSecs": 900,
         "reflectorContract": "CCYOZJCOPG34LLQQ7N24YXBM7LL62R7ONMZ3G6WZAAYPB5OYKOMJRN63",
         "markets": {
           "1": [
             {
-              "reflector": "BTC"
+              "coinbaseStream": "BTC-USD"
             },
             {
               "coinbase": "BTC-USD"
+            },
+            {
+              "reflector": "BTC"
             }
           ],
           "2": [
             {
-              "reflector": "ETH"
+              "coinbaseStream": "ETH-USD"
             },
             {
               "coinbase": "ETH-USD"
+            },
+            {
+              "reflector": "ETH"
             }
           ],
           "3": [
             {
-              "reflector": "XLM"
+              "coinbaseStream": "XLM-USD"
             },
             {
               "coinbase": "XLM-USD"
+            },
+            {
+              "reflector": "XLM"
             }
           ]
         }
