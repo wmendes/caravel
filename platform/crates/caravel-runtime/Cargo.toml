@@ -1,0 +1,27 @@
+[package]
+name = "caravel-runtime"
+description = "Caravel lane runtime: soroban-env-host executor, block and batch builders, store"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+caravel-types = { workspace = true }
+caravel-merkle = { workspace = true, features = ["alloc", "native"] }
+caravel-perps = { workspace = true, features = ["native"] }
+ed25519-dalek = { workspace = true }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+stellar-strkey = { workspace = true }
+# `testutils` provides the test host, contract registration and explicit
+# per-call budget limits (DEC-027).
+soroban-env-host = { workspace = true, features = ["testutils"] }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+caravel-testkit = { workspace = true }
+caravel-types = { workspace = true, features = ["gen-vectors"] }
+tempfile = "3.27.0"

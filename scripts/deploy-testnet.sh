@@ -21,13 +21,13 @@ WASM_DIR="${WASM_DIR:?set WASM_DIR to the CI contracts-wasm artifact}"
 NET=(--network testnet)
 RPC="https://soroban-testnet.stellar.org"
 PASS="Test SDF Network ; September 2015"
-LANE="$ROOT/config/lane.caravel-perps.testnet.toml"
+LANE="$ROOT/lanes/perps/config/lane.caravel-perps.testnet.toml"
 USDC_SAC="CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"
 LOG="$(mktemp)"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 sc() { stellar "$@" 2>> "$LOG"; }
 pk() { sc keys public-key "$1"; }
-raw() { node -e 'const {StrKey}=require(process.argv[1]);console.log(Buffer.from(StrKey.decodeEd25519PublicKey(process.argv[2])).toString("hex"))' "$ROOT/apps/relayer/node_modules/@stellar/stellar-sdk" "$1"; }
+raw() { node -e 'const {StrKey}=require(process.argv[1]);console.log(Buffer.from(StrKey.decodeEd25519PublicKey(process.argv[2])).toString("hex"))' "$ROOT/platform/relayer/node_modules/@stellar/stellar-sdk" "$1"; }
 recorded() { node -p "require('./versions.json').$1"; }
 
 echo "== Wasm of record"

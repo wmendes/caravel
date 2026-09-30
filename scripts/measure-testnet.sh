@@ -28,7 +28,7 @@ PROJECT="${PROJECT:-caravel-testnet}"
 ZONE="${ZONE:-us-central1-a}"
 VM="${VM:-caravel-1}"
 WORK="${WORK:-$ROOT/target/measure-testnet}"
-LANE="$ROOT/config/lane.caravel-perps.testnet.toml"
+LANE="$ROOT/lanes/perps/config/lane.caravel-perps.testnet.toml"
 USDC=10000000
 mkdir -p "$WORK/keys/load" "$WORK/logs"
 chmod 700 "$WORK/keys" "$WORK/keys/load"
@@ -39,7 +39,7 @@ RPC="$(node -p 'require("./versions.json").testnet.rpc_url')"
 SETTLEMENT="$(node -p 'require("./versions.json").testnet.settlement_contract')"
 [[ "$(node -p 'require("./versions.json").testnet.network_passphrase')" == "Test SDF Network ; September 2015" ]] || { echo "not testnet" >&2; exit 1; }
 USDC_ASSET="USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
-SDK="$ROOT/apps/relayer/node_modules/@stellar/stellar-sdk"
+SDK="$ROOT/platform/relayer/node_modules/@stellar/stellar-sdk"
 
 log() { printf '\n== %s\n' "$*"; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -59,7 +59,7 @@ until_ok() {
 
 log "tools and lane"
 command -v jq > /dev/null || fail "jq is required"
-[[ -d "$SDK" ]] || npm --prefix apps/relayer ci --silent
+[[ -d "$SDK" ]] || npm --prefix platform/relayer ci --silent
 cargo build --release --locked -p caravel-node --example loadgen
 status="$(curl -sf "$API/v1/status")" || fail "no lane at $API"
 jq -c '{lane_name, height, executor, checkpoints}' <<< "$status"

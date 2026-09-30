@@ -220,18 +220,18 @@ Consequences, used throughout this spec:
                         └──────────────┬──────────────────────────────────────────────▲──────────────────────────┘
                                        │ checkpoint tx (header + full batch + sigs)    │ inbox messages, oracle prices
                                        ▼                                               │
-                     Relayer (apps/relayer, TypeScript)  ──────────────────────────────┘
+                     Relayer (platform/relayer, TypeScript)  ──────────────────────────────┘
                        ├ inbox watcher (Stellar events → sequencer)
                        ├ checkpoint submitter (sequencer → Stellar)
                        └ oracle feeder (Reflector/CEX → signed OracleUpdateV1 → sequencer)
                                        │
                                        ▼
  ┌────────────────────────────── STELLAR (testnet, ~5s ledgers) ─────────────────────────────┐
- │ Settlement contract (contracts/settlement)                                                │
+ │ Settlement contract (platform/contracts/settlement)                                                │
  │   USDC vault · inbox (deposits, forced withdrawals, hash accumulator)                     │
  │   checkpoints (verify header, batch hash, ed25519 weighted threshold)                     │
  │   claim_withdrawal (Merkle proof) · freeze · escape_claim · refund_unprocessed_deposit    │
- │ Engine contract (contracts/perps-engine) deployed for Wasm-hash identity + witness tx     │
+ │ Engine contract (lanes/perps/engine/contracts/perps-engine) deployed for Wasm-hash identity + witness tx     │
  │ USDC SAC                                                                                  │
  └───────────────────────────────────────────────────────────────────────────────────────────┘
                                        │ RPC (contract data + transactions)
@@ -243,15 +243,15 @@ Consequences, used throughout this spec:
 
 | Component | Path | Language | Role |
 |---|---|---|---|
-| Types & codecs | `crates/caravel-types` | Rust `no_std` | All §9 encodings, fixed-point helpers, domain tags |
-| Merkle | `crates/caravel-merkle` | Rust `no_std` | Tree build/verify (§9.9) shared by engine, nodes, settlement contract |
-| Perps core | `crates/caravel-perps` | Rust `no_std` + `alloc` | Deterministic engine logic (§11), generic over a `Crypto` trait |
-| Engine contract | `contracts/perps-engine` | Soroban | Thin wrapper: `genesis`, `step`, `version` (§12) |
-| Settlement contract | `contracts/settlement` | Soroban | §13 |
-| Lane runtime | `crates/caravel-lane` | Rust std | soroban-env-host executor, block/batch builders, SQLite store |
-| Node | `crates/caravel-node` | Rust std (bin) | `sequencer`, `validator`, `replay`, `genesis`, `keys` subcommands (§14–§16) |
-| Relayer | `apps/relayer` | TypeScript (Node ≥ 22) | §17 |
-| Web app | `apps/web` | TypeScript, React, Vite | §18 |
+| Types & codecs | `lanes/perps/engine/crates/caravel-types` | Rust `no_std` | All §9 encodings, fixed-point helpers, domain tags |
+| Merkle | `lanes/perps/engine/crates/caravel-merkle` | Rust `no_std` | Tree build/verify (§9.9) shared by engine, nodes, settlement contract |
+| Perps core | `lanes/perps/engine/crates/caravel-perps` | Rust `no_std` + `alloc` | Deterministic engine logic (§11), generic over a `Crypto` trait |
+| Engine contract | `lanes/perps/engine/contracts/perps-engine` | Soroban | Thin wrapper: `genesis`, `step`, `version` (§12) |
+| Settlement contract | `platform/contracts/settlement` | Soroban | §13 |
+| Lane runtime | `platform/crates/caravel-runtime` | Rust std | soroban-env-host executor, block/batch builders, SQLite store |
+| Node | `platform/crates/caravel-node` | Rust std (bin) | `sequencer`, `validator`, `replay`, `genesis`, `keys` subcommands (§14–§16) |
+| Relayer | `platform/relayer` | TypeScript (Node ≥ 22) | §17 |
+| Web app | `lanes/perps/web` | TypeScript, React, Vite | §18 |
 
 ### 4.3 Trust model (M0)
 
@@ -788,7 +788,7 @@ Genesis validation. `genesis()` returns `Fatal(BAD_CONFIG)` unless every rule ho
   - `impact_lots > 0`;
   - `symbol` is ASCII.
 
-### 10.3 M0 lane file (`config/lane.caravel-perps.testnet.toml`)
+### 10.3 M0 lane file (`lanes/perps/config/lane.caravel-perps.testnet.toml`)
 
 `caravel-node genesis` converts this to `GenesisConfigV1` and prints `config_hash`, `genesis_state_hash` and the state size.
 
@@ -896,7 +896,7 @@ What this shows about "configurable lanes" (for the demo and docs):
 
 ---
 
-## 11. Perps engine (`crates/caravel-perps`)
+## 11. Perps engine (`lanes/perps/engine/crates/caravel-perps`)
 
 Pure, deterministic, `no_std + alloc`. Generic over:
 
@@ -1300,7 +1300,7 @@ Receipts are part of the parity gate (INV-P5) but are not hashed into checkpoint
 
 ---
 
-## 12. Engine contract (`contracts/perps-engine`)
+## 12. Engine contract (`lanes/perps/engine/contracts/perps-engine`)
 
 ### 12.1 Interface
 
@@ -1345,7 +1345,7 @@ Checked 2026-09-29: plain `cargo build --target wasm32v1-none` is **not** an opt
 
 ---
 
-## 13. Settlement contract (`contracts/settlement`)
+## 13. Settlement contract (`platform/contracts/settlement`)
 
 Soroban contract, `soroban-sdk =28.0.0`. One instance per lane.
 
@@ -1640,7 +1640,7 @@ All JSON uses:
 
 The sequencer must keep state history to serve proofs and replays: all blocks, plus a state snapshot at every checkpoint. It MAY prune other snapshots.
 
-### 14.5 Executor (`crates/caravel-lane::executor`)
+### 14.5 Executor (`platform/crates/caravel-runtime::executor`)
 
 This is SoroDOOM's runner pattern, pinned to `soroban-env-host =28.0.2` (verify each call against docs.rs for that version):
 
@@ -1745,7 +1745,7 @@ Document this in RUNBOOK.
 
 ---
 
-## 17. Relayer (`apps/relayer`, TypeScript)
+## 17. Relayer (`platform/relayer`, TypeScript)
 
 Node ≥ 22 with `@stellar/stellar-sdk 17.2.0`. Contract calls go through `rpc.Server` with explicit `ScVal`s, not generated clients (DEC-040). Three loops in one process, each with its own key where signing is needed.
 
@@ -1781,11 +1781,11 @@ Node ≥ 22 with `@stellar/stellar-sdk 17.2.0`. Contract calls go through `rpc.S
 
 ---
 
-## 18. Web app (`apps/web`)
+## 18. Web app (`lanes/perps/web`)
 
 ### 18.1 Stack and brand
 
-- React + Vite + TypeScript, with `@stellar/stellar-sdk` 17.2.0, `@stellar/freighter-api` 6.0.1, `@noble/ed25519` 3.2.0 and `@noble/hashes` 2.4.0. Use `lightweight-charts` 5.2.1 for the price chart (versions pinned in `versions.json` and `apps/web/package.json`).
+- React + Vite + TypeScript, with `@stellar/stellar-sdk` 17.2.0, `@stellar/freighter-api` 6.0.1, `@noble/ed25519` 3.2.0 and `@noble/hashes` 2.4.0. Use `lightweight-charts` 5.2.1 for the price chart (versions pinned in `versions.json` and `lanes/perps/web/package.json`).
 - Brand: the Caravel design system.
   - Font: Schibsted Grotesk 400/700.
   - Dark theme ("Stage") by default. Tokens:
@@ -1827,7 +1827,7 @@ Node ≥ 22 with `@stellar/stellar-sdk 17.2.0`. Contract calls go through `rpc.S
 
 ### 18.4 TS codec
 
-`apps/web/src/codec/` implements `LaneTxV1` encode, `tx_hash`, SEP-53 message building and Merkle proof verification (for display). Tests run against `test-vectors/*.json`, the same files the Rust tests use.
+`lanes/perps/web/src/codec/` implements `LaneTxV1` encode, `tx_hash`, SEP-53 message building and Merkle proof verification (for display). Tests run against `test-vectors/*.json`, the same files the Rust tests use.
 
 ---
 
@@ -1840,9 +1840,9 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings      # plus deny(clippy::float_arithmetic) in consensus crates
 ./scripts/build-contracts.sh                                # builds both Wasm, checks size limits and recorded hashes (before the tests)
 cargo test --workspace --locked                             # includes the parity gate on scenarios and 1,000 random blocks
-cargo test --locked -p caravel-lane --test parity -- --ignored   # the 10,000-block parity gate (INV-P5)
-npm --prefix apps/relayer ci && npm --prefix apps/relayer test
-npm --prefix apps/web ci && npm --prefix apps/web test && npm --prefix apps/web run build
+cargo test --locked -p caravel-runtime --test parity -- --ignored   # the 10,000-block parity gate (INV-P5)
+npm --prefix platform/relayer ci && npm --prefix platform/relayer test
+npm --prefix lanes/perps/web ci && npm --prefix lanes/perps/web test && npm --prefix lanes/perps/web run build
 ```
 
 ### 19.2 Golden vectors (`test-vectors/`)
@@ -1925,16 +1925,16 @@ Status values: `todo`, `doing`, `review`, `done`. Agents update the Status cell 
 | T-001 | `caravel-types`: all §9 codecs, tags, reason and fatal codes, fixed-point helpers; golden vector generator | T-000 | §8, §9, §10.2, §11 (codes), §11.10 | done |
 | T-002 | `caravel-merkle`: build + verify + proof generation; native and Soroban hashers | T-000 | §9.9 | done |
 | T-003 | `caravel-perps`: genesis + step (§11 complete) + scenarios 1–18 + property tests (native) | T-001, T-002 | §8, §9.10, §10, §11 | done |
-| T-004 | `contracts/perps-engine`: wrapper, size budget, reproducible build, hash in versions.json | T-003 | §12 | done |
+| T-004 | `lanes/perps/engine/contracts/perps-engine`: wrapper, size budget, reproducible build, hash in versions.json | T-003 | §12 | done |
 | T-005 | `caravel-lane::executor`: soroban-env-host runner; parity gate (10k blocks + scenarios); cpu/mem benchmark at full caps | T-004 | §8.2, §12.2, §14.5 | done |
-| T-006 | `contracts/settlement`: all of §13 + tests in §13.7 | T-001, T-002 | §9, §11.8, §13 | done |
+| T-006 | `platform/contracts/settlement`: all of §13 + tests in §13.7 | T-001, T-002 | §9, §11.8, §13 | done |
 | T-007 | `caravel-node sequencer`: mempool, block loop, SQLite store, API/WS, checkpoint policy + assembly | T-005 | §14 | done |
 | T-008 | `caravel-node validator`: follow, re-execute, sign, never-equivocate store | T-005 | §15 | done |
-| T-009 | `apps/relayer`: inbox watcher, checkpoint submitter, oracle feeder | T-006, T-007 | §17 | done |
+| T-009 | `platform/relayer`: inbox watcher, checkpoint submitter, oracle feeder | T-006, T-007 | §17 | done |
 | T-010 | `caravel-node replay` | T-005, T-006 | §16 | done |
 | T-011 | Local compose + `scripts/e2e-local.sh` (§19.5 steps 1–6) | T-007…T-010 | §19.5 | done |
 | T-012 | Testnet deploy script; deploy engine + settlement; one **witness** `step` transaction on testnet with a small state, byte-equal to the executor output | T-011 | §3, §12, §13 | review |
-| T-013 | `apps/web` (§18) against local, then testnet | T-007, T-009 | §18 | review |
+| T-013 | `lanes/perps/web` (§18) against local, then testnet | T-007, T-009 | §18 | review |
 | T-014 | Measurements (§19.6) + `docs/RESULTS.md` with dated numbers | T-012 | §19.6 | review |
 | T-015 | `docs/RUNBOOK.md`: run locally, run a validator, deploy, rotate keys, freeze drill, replay | T-012 | all | review |
 | T-016 | Security pass: walk §24 checklist, fix or file each item | T-012 | §24 | review |
@@ -2025,7 +2025,7 @@ The plan of record is `~/.claude/plans/ok-but-now-i-lucky-hoare.md` (architectur
 |---|---|---|---|
 | P-01 | Baseline: tag `perps-m0`; golden sequencer trace, fixture store, API and genesis snapshots | T-016 | review |
 | P-02 | Frozen perps engine workspace `lanes/perps/engine/` (byte-identical Wasm, tree-hash check) | P-01 | review |
-| P-03 | Moves into `platform/` and `lanes/perps/` (runtime, node, settlement, configs, web, relayer) | P-02 | todo |
+| P-03 | Moves into `platform/` and `lanes/perps/` (runtime, node, settlement, configs, web, relayer) | P-02 | review |
 | P-04 | `caravel-core`: generic codecs over the same bytes (opaque bodies, feeds, receipts, state frame) + compatibility tests | P-03 | todo |
 | P-05 | Runtime on `LaneApp` + `PerpsApp`: golden trace byte for byte, parity gate, fixture store opens | P-04 | todo |
 | P-06 | Node on `NodeApp`, lane-file split, `caravel-perps-node`, relayer feed module: API snapshots identical, dependency guard | P-05 | todo |
@@ -2115,19 +2115,19 @@ For lanes that need classic Stellar operations or SCP among many validators:
 | DEC-022 | `caravel-types` checks encoding only and never hashes. Block decode errors are split into header errors (the engine reports `BAD_BLOCK_ENCODING`) and entry errors with the entry index (`BAD_ENTRY_ENCODING`). Entry order, one-oracle-per-market and the size and count caps are left to the engine, which reports them with their own codes (§11.2). Receipt decoding requires `status` to match `code` and rejects unknown codes | Keeps the fatal codes in §11 distinct and attributable. Preimage builders (tx hash, SEP-53, inbox acc, leaves, signers, rotation) let the engine, nodes and the contract share exact bytes with their own SHA-256 | — |
 | DEC-023 | `Crypto` gains a defaulted `check_ed25519(..) -> Result<(), InvalidSignature>` that the engine calls. The default traps through `ed25519_verify`, as the host does; `DiagnosticCrypto` overrides it so a bad signature becomes `Fatal { BAD_SIGNATURE, entry_index }` | §14.1 needs the entry index of a bad signature; the trait in §11 had no fallible path | — |
 | DEC-024 | **Accepted at Gate 1 (2026-09-29).** Where the spec is silent (each choice changes state or receipt bytes, so scenario hashes depend on it): (a) an IOC remainder never gets an order id, so its `ORDER_CANCELED` has `order_id 0`; (b) `CANCEL_ALL` with a market id that is neither `0xFFFF` nor configured is rejected `UNKNOWN_MARKET` (nonce consumed); (c) `FORCED_WITHDRAWAL` for a missing account emits no event, otherwise the event carries the amount actually queued (0 if none); (d) `LIQUIDATION.deficit` is the non-negative amount the backstop absorbed; (e) arithmetic overflow in `PLACE_ORDER` checks 8–9 or `WITHDRAW` check 5 rejects with that check's code, while overflow in a state transition is fatal `ARITHMETIC_OVERFLOW`; (f) duplicate account keys in a decoded state are `BAD_STATE_ENCODING`; (g) more than 2^20 accounts or pending withdrawals at a commitment is `ARITHMETIC_OVERFLOW` (§10.2 does not cap `max_accounts` at the Merkle depth) | Deterministic answers where §11 does not say; none touches a frozen format, an invariant, a settlement check or a claim | — |
-| DEC-025 | New test-only crate `crates/caravel-testkit`: an `Executor` trait (native now, Wasm from T-005), a `Lane` simulator that signs real blocks and checks INV-P1…P4, P7, P8 after each one, the §19.3 scenarios, and the `gen-vectors` binary | Scenarios and vectors need the engine, which depends on `caravel-types`, so the generator cannot live there; one harness runs every scenario on both execution paths | — |
+| DEC-025 | New test-only crate `lanes/perps/engine/crates/caravel-testkit`: an `Executor` trait (native now, Wasm from T-005), a `Lane` simulator that signs real blocks and checks INV-P1…P4, P7, P8 after each one, the §19.3 scenarios, and the `gen-vectors` binary | Scenarios and vectors need the engine, which depends on `caravel-types`, so the generator cannot live there; one harness runs every scenario on both execution paths | — |
 | DEC-026 | The engine contract uses `soroban-sdk`'s `alloc` feature (bump allocator) and copies `Bytes` in and out with `to_alloc_vec` / `from_slice`. `scripts/build-contracts.sh` fails when a built hash differs from the one in `versions.json` | `caravel-perps` is `no_std + alloc` by design (§4.2); the host charges linear memory to the per-call budget, which T-005 measures. The hash check makes INV-D7 continuous: an engine change must update the recorded hash in the same PR | T-005 benchmark shows memory pressure |
 | DEC-027 | **Accepted at Gate 2 (2026-09-29).** Contracts build with `opt-level = 2` instead of `"z"` | The engine runs interpreted inside `soroban-env-host`. `"z"` avoids inlining, and at full caps that made decoding 4.6× and margin scans 2.7× more expensive (T-005 profile). `2` matches `3` on cost and is smaller: 84,764 bytes, within the 120,000 budget. The T-004 `"z"` build also hashed differently on Linux and macOS; that is host-dependent symbol order, not the opt level (DEC-033) | Wasm size approaches 120 KB |
 | DEC-028 | **Accepted at Gate 2 (2026-09-29).** Testnet lane caps: `max_accounts 256`, `max_orders_per_side 128`, `max_block_bytes 12,000`, `exec_cpu_limit 200,000,000` (from 1,024 / 256 / 24,000 / 400M). Genesis hashes updated | §12.2: at 1,024 / 256 / 24,000 the worst block measured 270M even after optimization. 256 / 128 / 12,000 is the largest tested set with every block shape ≤ 100M (worst 95.8M). The CPU limit leaves 2× headroom over the worst block. About 56 orders per block still covers the 50 tx/s load test | Engine gets cheaper, or M1 state layout (T-M1-02) |
 | DEC-029 | The executor enables `soroban-env-host`'s `testutils` feature and runs every call in a fresh `Host::test_host_with_recording_footprint()` with the fixed lane `LedgerInfo` (`network_id = H("CARAVEL/LANE-EXEC/V1")`) | `testutils` holds the test host, contract registration and `Budget::reset_limits`, and adds only `arbitrary` and recording mode. A fresh host per call keeps memory bounded and metering independent of history, and parity plus identical metering under two ledger infos are tested. The ungated `Budget::try_from_configs` + `invoke_function` path is left for M1 | M1 executor (T-M1-02) |
 | DEC-030 | `refund_unprocessed_deposit` emits a `Refund` event, topics `("refund", index)`, data `from, amount` | §13.2 lists no refund event, but after a freeze indexers and the web app have to show which deposits went back, just as `Claimed` and `EscapeClaimed` show payouts | — |
 | DEC-031 | Settlement edge rules: (a) `admin_rotate_signers` applies the same install as `rotate_signers`: a set used before is refused (`SignersReused`) and `LastRotationAt = now`; (b) `escape_claim` marks the account claimed and emits `EscapeClaimed` even when its share is 0 (`payout_den == 0`, or `payout_num ≤ 0` because the vault is fully owed to committed withdrawals) and transfers only a positive amount; (c) `MAX_BATCH_BYTES` comes from `caravel-types`, so the contract and the lane codec share one constant | (a) "same effect" in §13.2, and a reused set could replay old rotation signatures; (b) a zero share is a valid outcome and must not be claimable again; (c) one source for a consensus limit | — |
-| DEC-032 | Settlement contract error codes: 1–2 constructor and signer sets, 10–13 deposits and forced withdrawals, 20–39 one code per `submit_checkpoint` check in §13.3 order, 40–41 rotation, 50–54 claims, 60–63 freeze, escape and refund (`contracts/settlement/src/types.rs`, also in the contract spec). An invalid signature traps in `ed25519_verify` and has no code | §13.3 asks for a `contracterror` per rejection without numbering them; the relayer and the web app need stable codes to explain a failure | New checks get new codes; codes are never reused |
+| DEC-032 | Settlement contract error codes: 1–2 constructor and signer sets, 10–13 deposits and forced withdrawals, 20–39 one code per `submit_checkpoint` check in §13.3 order, 40–41 rotation, 50–54 claims, 60–63 freeze, escape and refund (`platform/contracts/settlement/src/types.rs`, also in the contract spec). An invalid signature traps in `ed25519_verify` and has no code | §13.3 asks for a `contracterror` per rejection without numbering them; the relayer and the web app need stable codes to explain a failure | New checks get new codes; codes are never reused |
 | DEC-033 | **Accepted at Gate 2 (2026-09-29).** The Wasm of record is built on an **x86_64 Linux** host: the CI `rust` job (toolchain from `rust-toolchain.toml`, the pinned CLI release binary with its GitHub digest). CI uploads the files as the `contracts-wasm` artifact, and deploys (T-012) use those files. `build-contracts.sh` fails on a hash mismatch on x86_64 Linux and only warns on other hosts | On other hosts the same source builds to different bytes of the same size. The settlement Wasm is `8a2fafbd…` on Linux and `8280828f…` on macOS; the T-004 engine at `"z"` was `95814212…` vs `04c731d0…`; the engine at `2` happens to match (`4571cd25…`). Cause: cargo 1.93 mixes every dependency's metadata hash into a crate's `-C metadata`, and proc-macro and build-script dependencies are host units whose hash includes the `host:` line of `rustc -vV` (`compute_metadata`, `hash_rustc_version` in cargo's `compilation_files.rs`). So every mangled symbol hash differs between hosts (checked on unstripped builds: same names in the same order, different hashes), and rustc can order some items by symbol name. The `type`, `func` and `code` sections differ; data, metadata and contract spec do not. Both settlement builds pass the same 73 tests with identical metering. INV-D7 holds with the host as part of the pinned toolchain | A Docker builder for local runs (with T-011), or cargo no longer hashing the host into target units |
 | DEC-034 | Sequencer layout: `caravel-lane` holds the shared runtime: the SQLite store (`rusqlite 0.40`, bundled), the block builder, the mempool with pre-validation, checkpoint assembly and leaves, read-only views, and a synchronous `sequencer::Core`. `caravel-node` wraps it with `tokio 1.53`, `axum 0.8` (HTTP and WebSocket), `reqwest 0.13` (rustls) for validator calls and `tracing`. Node config is `config/sequencer.*.toml`: listen address, lane file, engine Wasm and hash, database, network passphrase (mainnet refused), settlement contract, `[signers]`, CORS origins, and the *name* of the environment variable that holds the internal bearer token. The `native` executor is refused with `production = true` | Validators and replay reuse the store, header assembly and views, so they agree byte for byte. A synchronous core is tested on a fake clock, including restart and quarantine | — |
 | DEC-035 | Withdrawal leaves are rebuilt when a checkpoint is sealed, from its blocks and receipts in entry order: a bounced deposit, a `ForcedWithdrawalProcessed` with amount > 0, and a `WITHDRAW` with code OK. They are checked against the header's root, count and total before they are stored or served. `/v1/proofs/withdrawals` lists leaves of checkpoints accepted on Stellar; whether one is claimed is read from the contract (`is_claimed`) | The engine clears `pending` at the commitment, so no stored state holds the list, but the receipts do. The header check means a wrong rebuild can never be served. The sequencer does not watch claims | The engine exposes the leaves (M1) |
 | DEC-036 | API details beyond §14.4: `/v1/status` also reports `state_hash`, `inbox.reported_acc` (the fold of every reported message, so tools can continue the chain), `mempool`, `backpressure`, `halted` and `host_metering` of the last `step` (labeled host metering, not fees). The stream also sends `subscribed`, `receipt` (the subscribed account's transactions and codes) and `lagged`. `/internal/oracle` takes `{update: hex}`; `/internal/inbox` answers 409 `INBOX_GAP` (send the expected index first) or `INBOX_MISMATCH` (inclusion halted). `/v1/tx` 400 codes: `DECODE`, `WRONG_LANE`, `BAD_SIGNATURE`, `EXPIRED`, `BAD_NONCE`, `UNKNOWN_ACCOUNT`, `DUPLICATE`, `MEMPOOL_FULL`, `ACCOUNT_QUEUE_FULL`; a transaction for an unknown account is refused rather than queued | The web app needs its receipts; the relayer needs to know what to resend; unknown-account transactions would only fill blocks with rejections | — |
-| DEC-037 | Local lane `config/lane.caravel-perps.local.toml`: the testnet parameters with the public fixture keys (seeds `0x21`, `0x22`, `0x31`) and the name `caravel-perps-local-0`, for development, `scripts/soak-sequencer.sh` and T-011. Never deployed. `caravel-node check-store` re-executes a node's store through the Wasm and rebuilds every checkpoint header; `crates/caravel-node/examples/loadgen.rs` drives the soak | The load test and the local e2e need an oracle key whose secret is known; a separate lane name keeps it from being mistaken for the testnet lane | — |
+| DEC-037 | Local lane `lanes/perps/config/lane.caravel-perps.local.toml`: the testnet parameters with the public fixture keys (seeds `0x21`, `0x22`, `0x31`) and the name `caravel-perps-local-0`, for development, `scripts/soak-sequencer.sh` and T-011. Never deployed. `caravel-node check-store` re-executes a node's store through the Wasm and rebuilds every checkpoint header; `platform/crates/caravel-node/examples/loadgen.rs` drives the soak | The load test and the local e2e need an oracle key whose secret is known; a separate lane name keeps it from being mistaken for the testnet lane | — |
 | DEC-038 | Validator layout: `caravel-lane::validator::Follower` (synchronous: apply a record, compute headers, sign) inside `caravel-node validator` (axum). It follows by polling the sequencer's `/v1/blocks/{h}` every `poll_ms`; a block is "live" when `now − timestamp_ms ≤ 10 s`. Config is `config/validator-*.toml` with the `S...` secret in a separate key file; the executor is always the Wasm. It stores its own receipts, keeps every checkpoint snapshot (M0 does not prune, which covers "at least the last 3 plus the one accepted"), and keeps live-check flags in SQLite until `caravel-node validator-clear --through H`. A halt lasts until restart; a restart that fetches the same bad block halts again. `/v1/sign` refusals: `HALTED`, `HEADER_MISMATCH`, `BATCH_MISMATCH`, `SUSPICIOUS_BLOCK`, `ALREADY_SIGNED` (409), `NOT_CAUGHT_UP` (503), `BAD_HEADER` (400) | The same store, assembly and views as the sequencer, so headers match byte for byte; flags and signatures survive restarts because they are in the store | Snapshot pruning, if stores grow |
 | DEC-039 | Validators learn which checkpoint Stellar accepted by reading the settlement contract's instance entry with RPC `getLedgerEntries`: `LastCkpt` is the key `Vec[Symbol("LastCkpt")]`, with `seq` (`U64`) and `header_hash` (32 `Bytes`) in its map. A settlement test pins that layout. A matching checkpoint (and every earlier one) is marked accepted | Independent of the sequencer, and needs no simulation or source account. The spec asks for acceptance "polled from `last_checkpoint()`"; this reads the same value from storage | Contract storage layout changes |
 | DEC-040 | Relayer inbox and client choices: the inbox watcher's cursor is the sequencer's own count of reported messages (`/v1/status` `inbox.reported`), and it reads each message with the `inbox(index)` view by simulation, instead of paging `getEvents` from a cursor file. Contract calls use `@stellar/stellar-sdk` 17.2.0 `rpc.Server` directly with explicit `ScVal`s (`Sig` as a map with sorted symbol keys), not generated bindings. Secrets come from `CARAVEL_INTERNAL_TOKEN`, `CARAVEL_RELAYER_SECRET` and `CARAVEL_ORACLE_SECRET`; `config/relayer.*.json` holds the rest. The relayer accepts testnet and a local quickstart network ("Standalone Network ; February 2017") and refuses everything else | The sequencer's count survives relayer restarts and needs no local state, so resuming can neither skip nor repeat out of order. Views read the contract's own record, which does not age out of RPC retention the way events do. Six calls do not justify a generated client, and explicit encodings are tested | Many more contract calls (then generate bindings) |

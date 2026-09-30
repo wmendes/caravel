@@ -39,7 +39,7 @@ case "$E2E_NETWORK" in
     USDC_ASSET="USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5" ;;
   *) echo "E2E_NETWORK is local or testnet" >&2; exit 1 ;;
 esac
-LANE="$ROOT/config/lane.caravel-perps.local.toml"
+LANE="$ROOT/lanes/perps/config/lane.caravel-perps.local.toml"
 BIN="$ROOT/target/release/caravel-node"
 SEQ_PORT=18080
 SEQ="http://127.0.0.1:$SEQ_PORT"
@@ -76,7 +76,7 @@ until_ok() {
 # CLI progress output goes to a log; failures print its tail.
 sc() { stellar "$@" 2>> "$WORK/logs/stellar-cli.log"; }
 pk() { sc keys public-key "$1"; }
-raw() { node -e 'const {StrKey}=require(process.argv[1]);console.log(Buffer.from(StrKey.decodeEd25519PublicKey(process.argv[2])).toString("hex"))' "$ROOT/apps/relayer/node_modules/@stellar/stellar-sdk" "$1"; }
+raw() { node -e 'const {StrKey}=require(process.argv[1]);console.log(Buffer.from(StrKey.decodeEd25519PublicKey(process.argv[2])).toString("hex"))' "$ROOT/platform/relayer/node_modules/@stellar/stellar-sdk" "$1"; }
 invoke() { local id="$1" src="$2"; shift 2; sc contract invoke --id "$id" --source-account "$src" "${NET[@]}" -- "$@"; }
 view() { local id="$1"; shift; sc contract invoke --id "$id" --source-account admin "${NET[@]}" --send=no -- "$@"; }
 num() { tr -d '"'; }
@@ -94,8 +94,8 @@ command -v jq > /dev/null || fail "jq is required"
 log "build"
 ./scripts/build-contracts.sh
 cargo build --release --locked -p caravel-node
-npm --prefix apps/relayer ci --silent
-npm --prefix apps/relayer run build --silent
+npm --prefix platform/relayer ci --silent
+npm --prefix platform/relayer run build --silent
 
 log "Stellar network ($E2E_NETWORK)"
 if [[ "$E2E_NETWORK" == local ]] && ! curl -sf -X POST "$RPC" -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"getHealth"}' | grep -q healthy; then
@@ -108,7 +108,7 @@ curl -s -X POST "$RPC" -H 'content-type: application/json' -d '{"jsonrpc":"2.0",
 log "accounts"
 # Friendbot comes up after RPC on a fresh quickstart, and `keys generate
 # --fund` reports a failed funding without failing, so check the account.
-exists() { node -e 'const {rpc}=require(process.argv[1]);new rpc.Server(process.argv[2],{allowHttp:true}).getAccount(process.argv[3]).then(()=>process.exit(0),()=>process.exit(1))' "$ROOT/apps/relayer/node_modules/@stellar/stellar-sdk" "$RPC" "$1"; }
+exists() { node -e 'const {rpc}=require(process.argv[1]);new rpc.Server(process.argv[2],{allowHttp:true}).getAccount(process.argv[3]).then(()=>process.exit(0),()=>process.exit(1))' "$ROOT/platform/relayer/node_modules/@stellar/stellar-sdk" "$RPC" "$1"; }
 fund() { sc keys fund "$1" "${NET[@]}" && exists "$(pk "$1")"; }
 for n in admin relayer issuer alice bob; do
   sc keys generate --overwrite "$n" > /dev/null
@@ -120,7 +120,7 @@ for i in 1 2 3; do
   sc keys secret "validator-$i" > "$WORK/keys/validator-$i.key"
 done
 # The local lane's oracle key is the public fixture key (seed [0x31; 32], DEC-037).
-ORACLE_SECRET="$(node -e 'const {Keypair}=require(process.argv[1]);console.log(Keypair.fromRawEd25519Seed(Buffer.alloc(32,0x31)).secret())' "$ROOT/apps/relayer/node_modules/@stellar/stellar-sdk")"
+ORACLE_SECRET="$(node -e 'const {Keypair}=require(process.argv[1]);console.log(Keypair.fromRawEd25519Seed(Buffer.alloc(32,0x31)).secret())' "$ROOT/platform/relayer/node_modules/@stellar/stellar-sdk")"
 chmod 600 "$WORK"/keys/*.key
 A="$(pk alice)"; B="$(pk bob)"; ISSUER="$(pk issuer)"
 
@@ -204,7 +204,7 @@ for i in 1 2 3; do
 done
 relayer() {
   CARAVEL_RELAYER_SECRET="$(cat "$WORK/keys/relayer.key")" CARAVEL_ORACLE_SECRET="$ORACLE_SECRET" \
-    node apps/relayer/dist/main.js --config "$WORK/relayer.json" >> "$WORK/logs/relayer.log" 2>&1 & PIDS+=($!); RELAYER_PID=$!
+    node platform/relayer/dist/main.js --config "$WORK/relayer.json" >> "$WORK/logs/relayer.log" 2>&1 & PIDS+=($!); RELAYER_PID=$!
 }
 relayer
 until_ok "the sequencer" lane_get /v1/status

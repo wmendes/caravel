@@ -71,7 +71,7 @@ jobs:
       - name: Frozen perps engine tests (vectors, scenarios, properties)
         run: cargo test --workspace --locked --manifest-path lanes/perps/engine/Cargo.toml
       - name: Parity gate, 10,000 random blocks (INV-P5)
-        run: cargo test --locked -p caravel-lane --test parity -- --ignored
+        run: cargo test --locked -p caravel-runtime --test parity -- --ignored
       - name: Consensus crates build without std
         run: cargo build --locked --manifest-path lanes/perps/engine/Cargo.toml -p caravel-types -p caravel-merkle -p caravel-perps --target wasm32v1-none
 
@@ -80,18 +80,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        app: [relayer, web]
+        app: [platform/relayer, lanes/perps/web]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: apps/${{ matrix.app }}/package-lock.json
-      - run: npm --prefix apps/${{ matrix.app }} ci
-      - run: npm --prefix apps/${{ matrix.app }} test
-      - if: matrix.app == 'web'
-        run: npm --prefix apps/web run build
+          cache-dependency-path: ${{ matrix.app }}/package-lock.json
+      - run: npm --prefix ${{ matrix.app }} ci
+      - run: npm --prefix ${{ matrix.app }} test
+      - if: matrix.app == 'lanes/perps/web'
+        run: npm --prefix lanes/perps/web run build
 
   # The local end-to-end (spec §19.5, T-011): quickstart in Docker, the lane
   # processes, steps 1-6. It needs a release build and a 2 GB image, so it runs
@@ -142,15 +142,15 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: ./scripts/build-contracts.sh
       - run: cargo build --release --locked -p caravel-node
-      - run: npm --prefix apps/relayer ci && npm --prefix apps/relayer run build
-      - run: npm --prefix apps/web ci && npm --prefix apps/web run build
+      - run: npm --prefix platform/relayer ci && npm --prefix platform/relayer run build
+      - run: npm --prefix lanes/perps/web ci && npm --prefix lanes/perps/web run build
       - name: Assemble the release
         run: |
           mkdir -p release/bin release/contracts release/relayer release/web
-          cp -r apps/web/dist/. release/web/
+          cp -r lanes/perps/web/dist/. release/web/
           cp target/release/caravel-node release/bin/
           cp target/contracts/*.wasm release/contracts/
-          cp -r apps/relayer/dist apps/relayer/package.json apps/relayer/package-lock.json release/relayer/
+          cp -r platform/relayer/dist platform/relayer/package.json platform/relayer/package-lock.json release/relayer/
           (cd release && sha256sum bin/* contracts/* > SHA256SUMS && echo "${GITHUB_SHA}" > COMMIT)
           cat release/SHA256SUMS
       - uses: actions/upload-artifact@v4
