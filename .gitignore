@@ -1,5 +1,6 @@
 # Build output
 /target/
+/lanes/perps/engine/target/
 node_modules/
 dist/
 

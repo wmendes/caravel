@@ -1,9 +1,12 @@
+# FROZEN (M0.5, DEC-051): the Caravel Perps engine of record. Do not edit
+# anything under lanes/perps/engine/. The deployed lane's settlement contract
+# stores this engine's Wasm hash (4571cd25…), and scripts/check-frozen.sh pins
+# this directory's git tree. This workspace keeps the M0 root workspace's
+# layout, manifest and lock subgraph so `stellar contract build` gives the same
+# bytes. The root workspace excludes it and uses its crates by path.
 [workspace]
 resolver = "2"
 members = ["crates/*", "contracts/*"]
-# The frozen Caravel Perps engine is its own workspace (DEC-051); the crates
-# here use it by path only.
-exclude = ["lanes/perps/engine"]
 
 [workspace.package]
 version = "0.1.0"
@@ -22,11 +25,10 @@ stellar-strkey = { version = "=0.0.16" }
 ed25519-dalek = { version = "=2.2.0", default-features = false }
 sha2 = { version = "=0.10.9", default-features = false }
 
-caravel-types = { path = "lanes/perps/engine/crates/caravel-types" }
-caravel-merkle = { path = "lanes/perps/engine/crates/caravel-merkle" }
-caravel-perps = { path = "lanes/perps/engine/crates/caravel-perps" }
-caravel-lane = { path = "crates/caravel-lane" }
-caravel-testkit = { path = "lanes/perps/engine/crates/caravel-testkit" }
+caravel-types = { path = "crates/caravel-types" }
+caravel-merkle = { path = "crates/caravel-merkle" }
+caravel-perps = { path = "crates/caravel-perps" }
+caravel-testkit = { path = "crates/caravel-testkit" }
 
 # §12.3: reproducible contract builds. opt-level 2, not "z": the engine runs
 # interpreted inside soroban-env-host, where "z" (no inlining) made decoding

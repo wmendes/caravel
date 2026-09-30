@@ -28,46 +28,53 @@ function depVersion(line) {
   return m ? { name: m[1], version: m[2] ?? m[3] } : null;
 }
 
-const cargoToml = read("Cargo.toml");
-const wsDeps = new Map();
-for (const line of tomlSection(cargoToml, "workspace.dependencies").split("\n")) {
-  const d = depVersion(line);
-  if (d) wsDeps.set(d.name, d.version);
-}
-for (const [name, want] of Object.entries(versions.crates)) {
-  if (want.startsWith("RESOLVE_IN_")) continue;
-  const have = wsDeps.get(name);
-  if (have === undefined) fail(`Cargo.toml [workspace.dependencies] is missing ${name} (versions.json: ${want})`);
-  else if (have !== want) fail(`Cargo.toml pins ${name} ${have}, versions.json says ${want}`);
-}
-
-// Members must inherit pinned crates from the workspace, never restate a version.
-const memberDirs = ["crates", "contracts"].flatMap((d) =>
-  existsSync(join(root, d)) ? readdirSync(join(root, d)).map((m) => join(d, m)) : [],
-);
-for (const dir of memberDirs) {
-  const manifest = join(dir, "Cargo.toml");
-  if (!existsSync(join(root, manifest))) continue;
-  for (const line of read(manifest).split("\n")) {
+// Two workspaces: the root and the frozen perps engine (DEC-051). Both pin
+// the same crates, and their locks resolve them to the same versions.
+function checkWorkspace(ws) {
+  const at = (p) => (ws === "." ? p : join(ws, p));
+  const cargoToml = read(at("Cargo.toml"));
+  const wsDeps = new Map();
+  for (const line of tomlSection(cargoToml, "workspace.dependencies").split("\n")) {
     const d = depVersion(line);
-    if (d && d.name in versions.crates) fail(`${manifest} sets a version for ${d.name}; use { workspace = true }`);
+    if (d) wsDeps.set(d.name, d.version);
+  }
+  for (const [name, want] of Object.entries(versions.crates)) {
+    if (want.startsWith("RESOLVE_IN_")) continue;
+    const have = wsDeps.get(name);
+    if (have === undefined) fail(`${at("Cargo.toml")} [workspace.dependencies] is missing ${name} (versions.json: ${want})`);
+    else if (have !== want) fail(`${at("Cargo.toml")} pins ${name} ${have}, versions.json says ${want}`);
+  }
+
+  // Members must inherit pinned crates from the workspace, never restate a version.
+  const memberDirs = ["crates", "contracts"].flatMap((d) =>
+    existsSync(join(root, at(d))) ? readdirSync(join(root, at(d))).map((m) => join(at(d), m)) : [],
+  );
+  for (const dir of memberDirs) {
+    const manifest = join(dir, "Cargo.toml");
+    if (!existsSync(join(root, manifest))) continue;
+    for (const line of read(manifest).split("\n")) {
+      const d = depVersion(line);
+      if (d && d.name in versions.crates) fail(`${manifest} sets a version for ${d.name}; use { workspace = true }`);
+    }
+  }
+
+  const lock = existsSync(join(root, at("Cargo.lock"))) ? read(at("Cargo.lock")) : "";
+  if (!lock) fail(`${at("Cargo.lock")} is missing`);
+  const locked = new Map();
+  for (const m of lock.matchAll(/\[\[package\]\]\nname = "([^"]+)"\nversion = "([^"]+)"/g)) {
+    if (!locked.has(m[1])) locked.set(m[1], []);
+    locked.get(m[1]).push(m[2]);
+  }
+  for (const [name, want] of Object.entries(versions.crates)) {
+    if (want.startsWith("RESOLVE_IN_")) continue;
+    const exact = want.replace(/^=/, "");
+    const have = locked.get(name) ?? [];
+    if (!have.includes(exact)) fail(`${at("Cargo.lock")} resolves ${name} to [${have.join(", ")}], versions.json says ${exact}`);
+    if (have.length > 1 && !ALLOWED_DUPLICATES.has(name)) fail(`${at("Cargo.lock")} has several versions of ${name}: ${have.join(", ")}`);
   }
 }
-
-const lock = existsSync(join(root, "Cargo.lock")) ? read("Cargo.lock") : "";
-if (!lock) fail("Cargo.lock is missing");
-const locked = new Map();
-for (const m of lock.matchAll(/\[\[package\]\]\nname = "([^"]+)"\nversion = "([^"]+)"/g)) {
-  if (!locked.has(m[1])) locked.set(m[1], []);
-  locked.get(m[1]).push(m[2]);
-}
-for (const [name, want] of Object.entries(versions.crates)) {
-  if (want.startsWith("RESOLVE_IN_")) continue;
-  const exact = want.replace(/^=/, "");
-  const have = locked.get(name) ?? [];
-  if (!have.includes(exact)) fail(`Cargo.lock resolves ${name} to [${have.join(", ")}], versions.json says ${exact}`);
-  if (have.length > 1 && !ALLOWED_DUPLICATES.has(name)) fail(`Cargo.lock has several versions of ${name}: ${have.join(", ")}`);
-}
+checkWorkspace(".");
+checkWorkspace("lanes/perps/engine");
 
 // --- Toolchain ---------------------------------------------------------------
 const toolchain = read("rust-toolchain.toml").match(/channel\s*=\s*"([^"]+)"/)?.[1];
