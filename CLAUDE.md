@@ -51,8 +51,8 @@ cargo run --release -p caravel-perps-node -- check-store --config lanes/perps/co
 cargo run --release -p caravel-perps-node -- export-proofs --config <validator.toml> [--out exit.json]   # every escape and withdrawal proof a validator holds (DEC-065)
 DURATION=3600 TPS=50 ./scripts/soak-sequencer.sh   # T-007 soak: 1 s blocks, 50 tx/s, restart halfway
 cargo run --release -p caravel-perps-node -- replay --rpc <url> --network-passphrase <p> --settlement C... --genesis-config lanes/perps/config/lane.<lane>.toml --engine-wasm target/contracts/perps_engine.wasm [--prove-escape G...]   # replay from Stellar only
-cargo build --release -p caravel-deploy -p caravel-payments-node && ./target/release/caravel plan lanes/payments/config/lane.caravel-payments.local.toml --env local   # the deploy tool (DEC-066, DEC-067); `apply` makes it so
-./scripts/e2e-local.sh                  # quickstart + sequencer + 3 validators + relayer (after T-011); E2E_TEMPLATE=payments for the payments lane
+cargo build --release -p caravel-deploy -p caravel-payments-node && ./target/release/caravel plan lanes/payments/config/lane.caravel-payments.local.toml --env local   # the deploy tool (DEC-066 to DEC-068): plan, apply, status [--json], destroy [--pay-out]
+./scripts/e2e-local.sh                  # the whole lifecycle through the deploy tool on a local quickstart (DEC-068); E2E_TEMPLATE=payments, E2E_NETWORK=testnet
 cargo run --release -p caravel-payments-node -- genesis --config lanes/payments/config/lane.caravel-payments.local.toml   # any template's genesis hashes
 TPS=20 DURATION=600 ./scripts/measure-testnet.sh   # §19.6 numbers on the live testnet lane (docs/RESULTS.md)
 npm --prefix platform/relayer ci && npm --prefix platform/relayer test

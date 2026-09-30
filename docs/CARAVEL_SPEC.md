@@ -2052,7 +2052,7 @@ This drops the lane registry contract, the console and its web packages, hosted 
 | P-11 | Node groundwork, one release for the VM: `[env]` tables set aside by the lane-file parser, identity fields in `/v1/status`, `export-proofs`, release with `COMMIT`, full `SHA256SUMS` and vendored relayer dependencies (DEC-065) | P-10 | review |
 | P-12 | `caravel-deploy`: the `[env]` schema, secret refusal, derived settlement address, and the pure plan engine with golden plans (DEC-066) | P-11 | review |
 | P-13 | `apply` on Stellar and the `local` provider: chain reader, generated node configs, the `caravel` dispatcher (DEC-067) | P-12 | review |
-| P-14 | `status` and `destroy`; `e2e-local.sh` driven by the tool for both templates — **Gate P3** | P-13 | todo |
+| P-14 | `status` and `destroy`; `e2e-local.sh` driven by the tool for both templates (DEC-068) — **Gate P3** | P-13 | review |
 | P-15 | The `ssh` provider: prerequisites check, IAP transport, systemd, Caddy, template extras, `--preflight` | P-14 | todo |
 | P-16 | Import lane #1: its plan shows no changes, and its next release goes through `apply --preflight` | P-15 | todo |
 | P-17 | A payments lane on testnet from its lane file, through the whole lifecycle; RESULTS; the `stellar-caravel` plugin | P-16 | todo |
@@ -2423,6 +2423,32 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - The payments lane came up from its lane file, its first checkpoint was accepted on Stellar, and a second apply showed "No changes".
   - Validator 3 was swapped for validator 4, and the apply was killed with `-9` twice: once after validator 4 started, once during the rotation. Each re-run finished the swap, ending at epoch 2 with validators 1, 2 and 4 and every signed checkpoint accepted.
   - Three bugs were found this way and fixed: network flags placed after `--`, validator ports taken from list position, and a health check another validator could answer | Idempotent steps that re-read Stellar and the host make an interrupted apply safe to re-run without a journal | — |
+| DEC-068 | **M0.5 (P-14).** `status` and `destroy`, and the e2e on the tool.
+- **`status [--json]`** shows:
+  - height and signer epoch;
+  - the last accepted checkpoint and its age;
+  - when anyone could freeze the lane: the earlier of the last checkpoint's `accepted_at + escape_timeout_secs`, and the oldest unprocessed inbox message's `enqueued_at + force_inclusion_window_secs`;
+  - the relayer's XLM;
+  - TTL horizons;
+  - each node, up or down;
+  - whether the deployment matches the lane file.
+- **`destroy`.** A contract can't be deleted, and nobody (the admin included) can freeze one at will. So destroy:
+  1. drains until every signed checkpoint is accepted;
+  2. stops the relayer and the sequencer;
+  3. runs `export-proofs` on a validator, so every escape and withdrawal leaf, checked against Stellar's `last_checkpoint()`, goes to `.caravel/<lane>/<env>/exit.json`;
+  4. triggers with a 1-stroop forced withdrawal of the admin's own lane account, which the stopped lane leaves unprocessed;
+  5. freezes once the force-inclusion window has passed (1 h with lane #1's params, not the 6 h escape timeout).
+
+  The validators keep serving proofs unless `--stop-validators` is given. `--pay-out` claims every exit for its owner: the contract pays only the lane account's owner and needs no authorization. `--no-wait` stops after the trigger and prints the time. `--wipe` removes host data. Each step checks what is done, so destroy can be run again. Without `--yes`, the operator types the lane's name.
+- **`scripts/e2e-local.sh`** now writes the template's lane file plus an `[env.e2e]` deployment (20 s window, 30 s timeout) and runs:
+  1. `caravel apply`, then a plan that must show no changes;
+  2. the user flows;
+  3. a validator swap made in the lane file and applied as a rotation, with a checkpoint signed by the old set but not yet submitted, which the new set signs again;
+  4. a forced withdrawal;
+  5. `caravel destroy`;
+  6. escapes paid from `exit.json` at the frozen ratio;
+  7. replay, whose escape proof must equal `exit.json`'s.
+- **Results on a local quickstart, 2026-09-30:** payments passed in 134 s and perps in 178 s | A lane's wind-down is part of its lifecycle. The fastest legitimate freeze is the censorship trigger the contract already has | Contract upgrades or a deletable settlement design |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

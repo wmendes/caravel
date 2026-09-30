@@ -259,6 +259,79 @@ impl Cli {
         .map(|_| ())
     }
 
+    /// `escape_claim` for one leaf of the last checkpoint, paid to the lane
+    /// account's owner; anyone may send it once the lane is frozen.
+    pub fn escape_claim(
+        &self,
+        source: &str,
+        contract: &Key,
+        owner: &Key,
+        index: u32,
+        equity: &str,
+        proof: &[String],
+    ) -> Result<()> {
+        run(&self.with_net(vec![
+            s("contract"),
+            s("invoke"),
+            s("--id"),
+            strkey(contract),
+            s("--source-account"),
+            s(source),
+            s("--send=yes"),
+            s("--"),
+            s("escape_claim"),
+            s("--recipient"),
+            g(owner),
+            s("--lane_account"),
+            hex(owner),
+            s("--index"),
+            index.to_string(),
+            s("--equity"),
+            s(equity),
+            s("--proof"),
+            serde_json::to_string(proof)?,
+        ]))
+        .map(|_| ())
+    }
+
+    /// `claim_withdrawal` for one withdrawal leaf, paid to its owner.
+    #[allow(clippy::too_many_arguments)]
+    pub fn claim_withdrawal(
+        &self,
+        source: &str,
+        contract: &Key,
+        owner: &Key,
+        seq: u64,
+        index: u32,
+        amount: &str,
+        proof: &[String],
+    ) -> Result<()> {
+        run(&self.with_net(vec![
+            s("contract"),
+            s("invoke"),
+            s("--id"),
+            strkey(contract),
+            s("--source-account"),
+            s(source),
+            s("--send=yes"),
+            s("--"),
+            s("claim_withdrawal"),
+            s("--recipient"),
+            g(owner),
+            s("--lane_account"),
+            hex(owner),
+            s("--seq"),
+            seq.to_string(),
+            s("--index"),
+            index.to_string(),
+            s("--amount"),
+            s(amount),
+            s("--proof"),
+            serde_json::to_string(proof)?,
+        ]))
+        .map(|_| ())
+    }
+
     /// `freeze()`: anyone may call it once the contract allows it.
     pub fn freeze(&self, source_identity: &str, contract: &Key) -> Result<()> {
         run(&self.with_net(vec![

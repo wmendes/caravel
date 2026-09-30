@@ -1,27 +1,30 @@
 #!/usr/bin/env bash
-# T-011 (spec §19.5): the whole lane on a local Stellar network, one command.
+# The whole lane on a local Stellar network (spec §19.5), driven by the deploy
+# tool (spec §20.3, P-14): one lane file with an [env.e2e] deployment.
 #
 #   ./scripts/e2e-local.sh                        # KEEP=1 leaves everything running
-#   E2E_TEMPLATE=payments ./scripts/e2e-local.sh  # the payments template (P-10) instead of perps
-#   E2E_NETWORK=testnet SETTLEMENT_WASM=<CI settlement.wasm> ./scripts/e2e-local.sh    # on Stellar testnet
+#   E2E_TEMPLATE=payments ./scripts/e2e-local.sh  # the payments template instead of perps
+#   E2E_NETWORK=testnet ./scripts/e2e-local.sh    # a throwaway lane on Stellar testnet
 #
-# With E2E_NETWORK=testnet the same lane runs against Stellar testnet with a
-# throwaway settlement contract of its own (the freeze drill of spec §24; the
-# demo lane's contract is never touched) and Circle's testnet USDC, bought
-# with friendbot XLM on the testnet DEX.
+# With E2E_NETWORK=testnet the lane gets a settlement contract of its own (the
+# demo lane's is never touched) and Circle's testnet USDC, bought with
+# friendbot XLM on the testnet DEX. It deploys this machine's settlement build
+# (pinned in the lane file) unless E2E_RELEASE_DIR names a CI release.
 #
-# A local quickstart (Docker, via `stellar container start`) with a local
-# USDC asset contract; the settlement contract with a 30 s escape timeout
-# (quickstart cannot move ledger time, DEC-043); the sequencer, 3 validators
-# and the relayer as local processes. Then §19.5 steps 1-6:
+#   0. `caravel apply`: accounts, USDC, the settlement contract at its derived
+#      address, node configs, 3 validators, the sequencer, the relayer;
+#      a second `caravel plan` shows no changes;
 #   1. deposit 1,000 USDC for A and B;
 #   2. perps: A rests a bid, B sells into it; the fill shows in the API;
 #      payments: A sends B 100 USDC, and the fee reaches the treasury;
 #   3. a checkpoint is accepted on Stellar;
 #   4. A withdraws 100 USDC and claims it on Stellar;
-#   4b. validator 3 is rotated to a new key (the RUNBOOK's admin rotation);
+#   4b. validator 3 is replaced by validator 4 in the lane file, and `caravel
+#       apply` rotates the signers; a checkpoint signed by the old set but not
+#       yet submitted is signed again by the new set;
 #   4c. B asks for a forced withdrawal on Stellar, the lane processes it, B claims it;
-#   5. the sequencer stops, anyone freezes, A and B escape pro rata;
+#   5. `caravel destroy`: drain, stop, export every exit to exit.json, freeze;
+#      A and B escape pro rata from exit.json;
 #   6. `<app>-node replay` from Stellar data reports OK.
 set -euo pipefail
 START_TIME=$(date +%s)
@@ -29,35 +32,34 @@ START_TIME=$(date +%s)
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 WORK="${WORK:-$(mktemp -d)}"
-mkdir -p "$WORK/keys" "$WORK/logs"
-chmod 700 "$WORK/keys"
+mkdir -p "$WORK/logs"
 # The Stellar CLI keeps its keys and settings here, not in your own config.
 export XDG_CONFIG_HOME="$WORK/xdg"
 E2E_NETWORK="${E2E_NETWORK:-local}"
 case "$E2E_NETWORK" in
   local)
-    NET=(--network local); RPC="http://localhost:8000/rpc"; PASS="Standalone Network ; February 2017" ;;
+    NET=(--network local); RPC="http://localhost:8000/rpc"; PASS="Standalone Network ; February 2017"; USDC_MODE=local ;;
   testnet)
-    NET=(--network testnet); RPC="$(node -p 'require("./versions.json").testnet.rpc_url')"; PASS="Test SDF Network ; September 2015"
+    NET=(--network testnet); RPC="$(node -p 'require("./versions.json").testnet.rpc_url')"; PASS="Test SDF Network ; September 2015"; USDC_MODE=circle
     USDC_ASSET="USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5" ;;
   *) echo "E2E_NETWORK is local or testnet" >&2; exit 1 ;;
 esac
 E2E_TEMPLATE="${E2E_TEMPLATE:-perps}"
 case "$E2E_TEMPLATE" in
-  perps)
-    LANE="$ROOT/lanes/perps/config/lane.caravel-perps.local.toml"; NODE=caravel-perps-node
-    ENGINE_WASM=target/contracts/perps_engine.wasm; ENGINE_OF_RECORD=artifacts.engine_wasm_sha256; BALANCE=collateral ;;
-  payments)
-    LANE="$ROOT/lanes/payments/config/lane.caravel-payments.local.toml"; NODE=caravel-payments-node
-    ENGINE_WASM=target/contracts/payments_engine.wasm; ENGINE_OF_RECORD=lanes.payments.engine_wasm_sha256; BALANCE=balance ;;
+  perps)    LANE_SRC="$ROOT/lanes/perps/config/lane.caravel-perps.local.toml"; BALANCE=collateral ;;
+  payments) LANE_SRC="$ROOT/lanes/payments/config/lane.caravel-payments.local.toml"; BALANCE=balance ;;
   *) echo "E2E_TEMPLATE is perps or payments" >&2; exit 1 ;;
 esac
+NODE="caravel-$E2E_TEMPLATE-node"
 BIN="$ROOT/target/release/$NODE"
+CARAVEL="$ROOT/target/release/caravel"
+LANE="$WORK/lane.toml"
 SEQ_PORT=18080
 SEQ="http://127.0.0.1:$SEQ_PORT"
+V1="http://127.0.0.1:$((SEQ_PORT + 1))"
 USDC=10000000
-PIDS=()
-STARTED_CONTAINER=0
+RELEASE=()
+[[ -n "${E2E_RELEASE_DIR:-}" ]] && RELEASE=(--release-dir "$E2E_RELEASE_DIR")
 
 log() { printf '\n== %s\n' "$*"; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -65,12 +67,12 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 cleanup() {
   local code=$?
   if [[ "${KEEP:-0}" != "1" ]]; then
-    for p in "${PIDS[@]:-}"; do [[ -n "$p" ]] && kill "$p" 2>/dev/null || true; done
-    if (( STARTED_CONTAINER )); then stellar container stop caravel-e2e > /dev/null 2>&1 || true; fi
+    for f in "$WORK"/.caravel/*/*/run/*.pid; do [[ -f "$f" ]] && kill "$(cat "$f")" 2>/dev/null || true; done
+    [[ "$E2E_NETWORK" == local ]] && stellar container stop local > /dev/null 2>&1 || true
   fi
   if (( code != 0 )); then
     echo "logs and state: $WORK" >&2
-    for f in "$WORK"/logs/*.log; do [[ -f "$f" ]] && { echo "--- $(basename "$f")" >&2; tail -15 "$f" >&2; }; done
+    for f in "$WORK"/.caravel/*/*/logs/*.log; do [[ -f "$f" ]] && { echo "--- $(basename "$f")" >&2; tail -15 "$f" >&2; }; done
   fi
 }
 trap cleanup EXIT
@@ -93,6 +95,9 @@ invoke() { local id="$1" src="$2"; shift 2; sc contract invoke --id "$id" --sour
 view() { local id="$1"; shift; sc contract invoke --id "$id" --source-account admin "${NET[@]}" --send=no -- "$@"; }
 num() { tr -d '"'; }
 lane_get() { curl -sf "$SEQ$1"; }
+# The deploy tool runs from $WORK, so its state (.caravel/) stays there.
+caravel() { local cmd="$1"; shift; (cd "$WORK" && "$CARAVEL" "$cmd" "$LANE" --env e2e ${RELEASE[@]+"${RELEASE[@]}"} "$@"); }
+status() { caravel status --json 2>> "$WORK/logs/caravel.log"; }
 
 log "tools"
 if [[ "$E2E_NETWORK" == local ]]; then
@@ -105,7 +110,7 @@ command -v jq > /dev/null || fail "jq is required"
 
 log "build"
 ./scripts/build-contracts.sh
-cargo build --release --locked -p "$NODE"
+cargo build --release --locked -p "$NODE" -p caravel-deploy
 npm --prefix platform/relayer ci --silent
 npm --prefix platform/relayer run build --silent
 if [[ "$E2E_TEMPLATE" == perps ]]; then
@@ -113,127 +118,102 @@ if [[ "$E2E_TEMPLATE" == perps ]]; then
   npm --prefix lanes/perps/relayer-feeds run build --silent
 fi
 
-log "Stellar network ($E2E_NETWORK)"
-if [[ "$E2E_NETWORK" == local ]] && ! curl -sf -X POST "$RPC" -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"getHealth"}' | grep -q healthy; then
-  stellar container start local --name caravel-e2e --limits testnet > "$WORK/logs/container.log" 2>&1
-  STARTED_CONTAINER=1
-  TIMEOUT=180 until_ok "local RPC" sh -c "curl -sf -X POST $RPC -H 'content-type: application/json' -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getHealth\"}' | grep -q healthy"
-fi
-curl -s -X POST "$RPC" -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"getNetwork"}' | jq -c .result
-
-log "accounts"
-# Friendbot comes up after RPC on a fresh quickstart, and `keys generate
-# --fund` reports a failed funding without failing, so check the account.
-exists() { node -e 'const {rpc}=require(process.argv[1]);new rpc.Server(process.argv[2],{allowHttp:true}).getAccount(process.argv[3]).then(()=>process.exit(0),()=>process.exit(1))' "$ROOT/platform/relayer/node_modules/@stellar/stellar-sdk" "$RPC" "$1"; }
-fund() { sc keys fund "$1" "${NET[@]}" && exists "$(pk "$1")"; }
-for n in admin relayer issuer alice bob; do
+log "identities"
+for n in admin relayer alice bob validator-1 validator-2 validator-3 validator-4; do
   sc keys generate --overwrite "$n" > /dev/null
-  TIMEOUT=180 until_ok "funding $n" fund "$n"
-  sc keys secret "$n" > "$WORK/keys/$n.key"
 done
-for i in 1 2 3; do
-  sc keys generate --overwrite "validator-$i" > /dev/null
-  sc keys secret "validator-$i" > "$WORK/keys/validator-$i.key"
-done
-# The local lane's oracle key is the public fixture key (seed [0x31; 32], DEC-037).
-ORACLE_SECRET="$(node -e 'const {Keypair}=require(process.argv[1]);console.log(Keypair.fromRawEd25519Seed(Buffer.alloc(32,0x31)).secret())' "$ROOT/platform/relayer/node_modules/@stellar/stellar-sdk")"
-chmod 600 "$WORK"/keys/*.key
-A="$(pk alice)"; B="$(pk bob)"; ISSUER="$(pk issuer)"
+# The local perps lane's oracle key is the public fixture key (seed [0x31; 32], DEC-037).
+node -e 'const {Keypair}=require(process.argv[1]);console.log(Keypair.fromRawEd25519Seed(Buffer.alloc(32,0x31)).secret())' "$ROOT/platform/relayer/node_modules/@stellar/stellar-sdk" \
+  | sc keys add oracle --secret-key > /dev/null
+A="$(pk alice)"; B="$(pk bob)"
 
-log "USDC"
+log "lane file"
+# The template's lane file with an [env.e2e] deployment: short timeouts, so the
+# freeze in step 5 comes within a minute (spec §24's drill uses the same idea).
+PIN=""
+[[ "$E2E_NETWORK" == testnet && -z "${E2E_RELEASE_DIR:-}" ]] && PIN="settlement_wasm = \"$(shasum -a 256 target/contracts/settlement.wasm | awk '{print $1}')\""
+{
+  cat "$LANE_SRC"
+  cat <<EOF
+
+[env.e2e]
+network = "$E2E_NETWORK"
+admin = "admin"
+usdc = "$USDC_MODE"
+threshold = 2
+$PIN
+
+[env.e2e.settlement_params]
+force_inclusion_window_secs = 20
+escape_timeout_secs = 30
+min_rotation_delay_secs = 3600
+signer_retention_epochs = 2
+
+[[env.e2e.validators]]
+name = "1"
+key = "validator-1"
+
+[[env.e2e.validators]]
+name = "2"
+key = "validator-2"
+
+[[env.e2e.validators]]
+name = "3"
+key = "validator-3"
+
+[env.e2e.sequencer]
+port = $SEQ_PORT
+
+[env.e2e.validator_polling]
+stellar_secs = 2
+
+[env.e2e.relayer]
+account = "relayer"
+intervals_ms = { inbox = 1000, checkpoints = 1000 }
+EOF
+  if [[ "$E2E_TEMPLATE" == perps ]]; then
+    cat <<'EOF'
+feed_keys = { CARAVEL_ORACLE_SECRET = "oracle" }
+feeds = [{ module = "relayer-feeds/perps/dist/index.js", intervalMs = 2000, options = { maxSourceAgeSecs = 900, markets = { "1" = [{ fixed = "65000" }], "2" = [{ fixed = "3500" }], "3" = [{ fixed = "0.40" }] } } }]
+EOF
+  fi
+  cat <<'EOF'
+
+[env.e2e.host]
+provider = "local"
+EOF
+} > "$LANE"
+
+log "0. caravel apply"
+caravel apply --yes > "$WORK/logs/apply.log" 2>&1 || { tail -30 "$WORK/logs/apply.log"; fail "caravel apply"; }
+grep -E '^\+|^~|^-|→|Applied' "$WORK/logs/apply.log" | sed 's/^/   /'
+caravel plan 2>/dev/null | grep -q "No changes." || fail "a second plan still has changes"
+st="$(status)"
+SETTLEMENT="$(jq -r .settlement <<< "$st")"; USDC_ID="$(jq -r .usdc <<< "$st")"
+echo "settlement $SETTLEMENT, USDC $USDC_ID"
+lane_get /v1/status | jq -e ".template == \"$E2E_TEMPLATE\"" > /dev/null || fail "the sequencer runs another template"
+if [[ "$E2E_TEMPLATE" == perps ]]; then
+  until_ok "oracle prices" sh -c "curl -sf $SEQ/v1/markets | jq -e '.[0].oracle_price == \"65000000\"'"
+fi
+
+log "USDC for A and B"
+exists() { node -e 'const {rpc}=require(process.argv[1]);new rpc.Server(process.argv[2],{allowHttp:true}).getAccount(process.argv[3]).then(()=>process.exit(0),()=>process.exit(1))' "$ROOT/platform/relayer/node_modules/@stellar/stellar-sdk" "$RPC" "$1"; }
+for n in alice bob; do
+  TIMEOUT=180 until_ok "funding $n" sh -c "stellar keys fund $n ${NET[*]} && true"
+  until_ok "$n on the network" exists "$(pk "$n")"
+done
 if [[ "$E2E_NETWORK" == local ]]; then
-  USDC_ID="$(sc contract asset deploy --asset "USDC:$ISSUER" --source-account issuer "${NET[@]}")"
   for n in alice bob; do
-    sc tx new change-trust --source-account "$n" --line "USDC:$ISSUER" "${NET[@]}" > /dev/null
-    invoke "$USDC_ID" issuer mint --to "$(pk "$n")" --amount $(( 2000 * USDC )) > /dev/null
+    sc tx new change-trust --source-account "$n" --line "USDC:$(pk admin)" "${NET[@]}" > /dev/null
+    invoke "$USDC_ID" admin mint --to "$(pk "$n")" --amount $(( 2000 * USDC )) > /dev/null
   done
 else
-  USDC_ID="$(node -p 'require("./versions.json").testnet.usdc_sac')"
   for n in alice bob; do
     sc tx new change-trust --source-account "$n" --line "$USDC_ASSET" "${NET[@]}" > /dev/null
     sc tx new path-payment-strict-send --source-account "$n" --send-asset native --send-amount $(( 1200 * USDC )) \
       --destination "$(pk "$n")" --dest-asset "$USDC_ASSET" --dest-min $(( 1100 * USDC )) "${NET[@]}" > /dev/null \
       || fail "the testnet DEX did not give 1,100 USDC for 1,200 XLM"
   done
-fi
-echo "USDC $USDC_ID"
-
-log "settlement contract"
-genesis="$("$BIN" genesis --config "$LANE")"
-LANE_ID="$(jq -r .lane_id <<< "$genesis")"
-ENGINE_HASH="$(shasum -a 256 "$ENGINE_WASM" | awk '{print $1}')"
-[[ "$ENGINE_HASH" == "$(node -p "require('./versions.json').$ENGINE_OF_RECORD")" ]] || fail "the engine Wasm is not the one of record"
-signers="$(for i in 1 2 3; do raw "$(pk "validator-$i")"; done | sort | jq -R '{key: ., weight: 1}' | jq -sc '{signers: ., threshold: 2}')"
-params='{"force_inclusion_window_secs":20,"escape_timeout_secs":30,"min_rotation_delay_secs":3600,"signer_retention_epochs":2,"min_deposit":"10000000"}'
-# SETTLEMENT_WASM: e.g. the x86_64 Linux build of record from CI (DEC-033), checked against versions.json.
-SETTLEMENT_WASM="${SETTLEMENT_WASM:-target/contracts/settlement.wasm}"
-if [[ "$SETTLEMENT_WASM" != target/contracts/settlement.wasm ]]; then
-  [[ "$(shasum -a 256 "$SETTLEMENT_WASM" | awk '{print $1}')" == "$(node -p 'require("./versions.json").artifacts.settlement_wasm_sha256')" ]] || fail "$SETTLEMENT_WASM is not the settlement Wasm of record"
-fi
-SETTLEMENT="$(sc contract deploy --wasm "$SETTLEMENT_WASM" --source-account admin "${NET[@]}" -- \
-  --admin "$(pk admin)" --usdc "$USDC_ID" --lane_id "$LANE_ID" --engine_wasm_hash "$ENGINE_HASH" \
-  --genesis_state_hash "$(jq -r .genesis_state_hash <<< "$genesis")" --config_hash "$(jq -r .config_hash <<< "$genesis")" \
-  --signers "$signers" --params "$params")"
-echo "settlement $SETTLEMENT"
-
-log "configs"
-common() {
-  cat <<EOF
-lane = "$LANE"
-engine_wasm = "$ROOT/$ENGINE_WASM"
-engine_wasm_sha256 = "$ENGINE_HASH"
-network_passphrase = "$PASS"
-settlement_contract = "$SETTLEMENT"
-EOF
-}
-# sequencer_config EPOCH NAME... : validator N of the list listens on SEQ_PORT + N.
-sequencer_config() {
-  local epoch="$1" n=0; shift
-  echo "[sequencer]"; echo "listen = \"127.0.0.1:$SEQ_PORT\""; common; echo "db = \"$WORK/sequencer.sqlite\""
-  echo; echo "[signers]"; echo "epoch = $epoch"; echo "threshold = 2"; echo "validators = ["
-  for v in "$@"; do n=$((n + 1)); echo "  { url = \"http://127.0.0.1:$((SEQ_PORT + n))\", key = \"$(pk "$v")\" },"; done
-  echo "]"
-}
-# validator_config NAME PORT
-validator_config() {
-  echo "[validator]"; echo "listen = \"127.0.0.1:$2\""; echo "sequencer_url = \"$SEQ\""
-  echo "key_file = \"keys/$1.key\""; common; echo "db = \"$WORK/$1.sqlite\""
-  echo "rpc_url = \"$RPC\""; echo "stellar_poll_secs = 2"; echo "poll_ms = 100"
-}
-sequencer_config 1 validator-1 validator-2 validator-3 > "$WORK/sequencer.toml"
-for i in 1 2 3; do validator_config "validator-$i" $((SEQ_PORT + i)) > "$WORK/validator-$i.toml"; done
-# The perps oracle runs as the lane's feed module (DEC-053); payments has no feed.
-if [[ "$E2E_TEMPLATE" == perps ]]; then
-  feeds="$(jq -n --arg m "$ROOT/lanes/perps/relayer-feeds/dist/index.js" '[{module: $m, intervalMs: 2000,
-    options: {maxSourceAgeSecs: 900, markets: {"1": [{fixed: "65000"}], "2": [{fixed: "3500"}], "3": [{fixed: "0.40"}]}}}]')"
-else
-  feeds='[]'
-fi
-jq -n --arg rpc "$RPC" --arg pass "$PASS" --arg s "$SETTLEMENT" --arg seq "$SEQ" --argjson feeds "$feeds" '{
-  rpcUrl: $rpc, networkPassphrase: $pass, settlementContract: $s, sequencerUrl: $seq,
-  metricsFile: "relayer-checkpoints.jsonl",
-  loops: {inbox: true, checkpoints: true},
-  intervalsMs: {inbox: 1000, checkpoints: 1000},
-  feeds: $feeds
-}' > "$WORK/relayer.json"
-
-log "lane processes"
-CARAVEL_INTERNAL_TOKEN="$(openssl rand -hex 16)"
-export CARAVEL_INTERNAL_TOKEN
-RUST_LOG=info "$BIN" sequencer --config "$WORK/sequencer.toml" > "$WORK/logs/sequencer.log" 2>&1 & PIDS+=($!); SEQ_PID=$!
-VAL_PIDS=()
-for i in 1 2 3; do
-  RUST_LOG=info "$BIN" validator --config "$WORK/validator-$i.toml" > "$WORK/logs/validator-$i.log" 2>&1 & PIDS+=($!); VAL_PIDS+=($!)
-done
-relayer() {
-  CARAVEL_RELAYER_SECRET="$(cat "$WORK/keys/relayer.key")" CARAVEL_ORACLE_SECRET="$ORACLE_SECRET" \
-    node platform/relayer/dist/main.js --config "$WORK/relayer.json" >> "$WORK/logs/relayer.log" 2>&1 & PIDS+=($!); RELAYER_PID=$!
-}
-relayer
-until_ok "the sequencer" lane_get /v1/status
-lane_get /v1/status | jq -e ".template == \"$E2E_TEMPLATE\"" > /dev/null || fail "the sequencer runs another template"
-if [[ "$E2E_TEMPLATE" == perps ]]; then
-  until_ok "oracle prices" sh -c "curl -sf $SEQ/v1/markets | jq -e '.[0].oracle_price == \"65000000\"'"
 fi
 
 log "1. deposits"
@@ -244,7 +224,7 @@ for g in "$A" "$B"; do
   until_ok "lane credit for $g" sh -c "curl -sf $SEQ/v1/accounts/$g | jq -e '.$BALANCE == \"$(( 1000 * USDC ))\"'"
 done
 
-tx() { local who="$1"; shift; "$BIN" tx --lane "$LANE" --key-file "$WORK/keys/$who.key" --sequencer "$SEQ" "$@"; }
+tx() { local who="$1"; shift; sc keys secret "$who" > "$WORK/$who.key"; chmod 600 "$WORK/$who.key"; "$BIN" tx --lane "$LANE" --key-file "$WORK/$who.key" --sequencer "$SEQ" "$@"; }
 if [[ "$E2E_TEMPLATE" == perps ]]; then
   log "2. A rests a bid, B sells into it"
   tx alice place-order --market 1 --side buy --tif gtc --price 65000000 --lots 10 > /dev/null
@@ -278,31 +258,24 @@ after="$(view "$USDC_ID" balance --id "$A" | num)"
 (( after - before == 100 * USDC )) || fail "A's USDC went from $before to $after"
 echo "A's USDC balance +$(( (after - before) / USDC )) USDC"
 
-log "4b. rotate validator 3 to a new key (testnet-only admin rotation, RUNBOOK)"
+log "4b. validator 3 replaced by validator 4 in the lane file; caravel apply rotates"
 # Hold the relayer until a checkpoint is signed by the old set but not
-# submitted: after the rotation, the restarted sequencer must have it signed
-# again by the new set (older epochs are invalid at once).
-kill -INT "$RELAYER_PID"; wait "$RELAYER_PID" 2>/dev/null || true
+# submitted: after the rotation, the sequencer must have it signed again by the
+# new set (older epochs are invalid at once).
+RUN="$WORK/.caravel/$(awk -F'"' '/^name/ {print $2; exit}' "$LANE")/e2e"
+kill -INT "$(cat "$RUN/run/relayer.pid")"
 until_ok "a checkpoint signed but not submitted" sh -c "curl -sf $SEQ/v1/status | jq -e '(.checkpoints.signed // \"0\" | tonumber) > (.checkpoints.accepted // \"0\" | tonumber)'"
 stale="$(lane_get /v1/status | jq -r .checkpoints.signed)"
-sc keys generate --overwrite validator-4 > /dev/null
-sc keys secret validator-4 > "$WORK/keys/validator-4.key"; chmod 600 "$WORK/keys/validator-4.key"
-new_signers="$(for v in validator-1 validator-2 validator-4; do raw "$(pk "$v")"; done | sort | jq -R '{key: ., weight: 1}' | jq -sc '{signers: ., threshold: 2}')"
-invoke "$SETTLEMENT" admin admin_rotate_signers --new "$new_signers" > /dev/null
-[[ "$(view "$SETTLEMENT" epoch | num)" == 2 ]] || fail "the contract epoch after the rotation"
-kill -INT "$SEQ_PID" "${VAL_PIDS[2]}"; wait "$SEQ_PID" "${VAL_PIDS[2]}" 2>/dev/null || true
-# The new validator starts from an empty store on validator 3's port and catches up.
-validator_config validator-4 $((SEQ_PORT + 3)) > "$WORK/validator-4.toml"
-RUST_LOG=info "$BIN" validator --config "$WORK/validator-4.toml" > "$WORK/logs/validator-4.log" 2>&1 & PIDS+=($!)
-sequencer_config 2 validator-1 validator-2 validator-4 > "$WORK/sequencer.toml"
-RUST_LOG=info "$BIN" sequencer --config "$WORK/sequencer.toml" >> "$WORK/logs/sequencer.log" 2>&1 & PIDS+=($!); SEQ_PID=$!
-until_ok "the sequencer after the rotation" lane_get /v1/status
-relayer
-grep -q "older epoch go back for signatures" "$WORK/logs/sequencer.log" || fail "the sequencer did not send checkpoint $stale back for signatures"
+sed -i.bak 's/^name = "3"$/name = "4"/; s/^key = "validator-3"$/key = "validator-4"/' "$LANE"
+caravel plan 2>/dev/null | grep -E '^\+|^~|^-' | sed 's/^/   /'
+caravel apply --yes > "$WORK/logs/apply-rotate.log" 2>&1 || { tail -30 "$WORK/logs/apply-rotate.log"; fail "caravel apply (rotation)"; }
+[[ "$(status | jq -r .epoch)" == 2 ]] || fail "the contract epoch after the rotation"
+grep -q "older epoch go back for signatures" "$RUN/logs/sequencer.log" || fail "the sequencer did not send checkpoint $stale back for signatures"
 TIMEOUT=120 until_ok "checkpoint $stale accepted under epoch 2" sh -c "curl -sf $SEQ/v1/checkpoints/$stale | jq -e '.status == \"accepted\" and .epoch == \"2\"'"
 next=$(( stale + 1 ))
 TIMEOUT=120 until_ok "checkpoint $next accepted under epoch 2" sh -c "curl -sf $SEQ/v1/checkpoints/$next | jq -e '.status == \"accepted\" and .epoch == \"2\"'"
-echo "epoch 2: checkpoints $stale and $next accepted, signed by validators 1, 2 and the new 3"
+caravel plan 2>/dev/null | grep -q "No changes." || fail "a plan after the rotation still has changes"
+echo "epoch 2: checkpoints $stale and $next accepted, signed by validators 1, 2 and 4"
 
 log "4c. B asks for a forced withdrawal of 50 USDC on Stellar and claims it"
 before="$(view "$USDC_ID" balance --id "$B" | num)"
@@ -316,15 +289,13 @@ after="$(view "$USDC_ID" balance --id "$B" | num)"
 (( after - before == 50 * USDC )) || fail "B's USDC went from $before to $after"
 echo "B's USDC balance +$(( (after - before) / USDC )) USDC by forced withdrawal"
 
-log "5. the sequencer stops; freeze and escape"
-# Let the last checkpoint land first, so every validator and replay agree on it.
-until_ok "the submission queue to drain" sh -c "curl -sf $SEQ/v1/status | jq -e '.checkpoints.accepted == .checkpoints.signed'"
-kill -INT "$SEQ_PID"; kill -INT "$RELAYER_PID"
-sleep "$([[ "$E2E_NETWORK" == local ]] && echo 5 || echo 15)" # a transaction already sent can still land
+log "5. caravel destroy; A and B escape from exit.json"
+caravel destroy --yes > "$WORK/logs/destroy.log" 2>&1 || { tail -30 "$WORK/logs/destroy.log"; fail "caravel destroy"; }
+grep -E '→|Frozen|validators' "$WORK/logs/destroy.log" | sed 's/^/   /'
+[[ "$(status | jq -r .frozen)" == true ]] || fail "the lane is not frozen"
+EXIT="$RUN/exit.json"
 last_seq="$(view "$SETTLEMENT" last_checkpoint | jq -r .seq)"
-V1="http://127.0.0.1:$((SEQ_PORT + 1))"
-until_ok "validator 1 to see checkpoint $last_seq accepted" sh -c "curl -sf $V1/v1/status | jq -e '.checkpoints.accepted == \"$last_seq\"'"
-TIMEOUT=120 until_ok "freeze (after the 30 s escape timeout)" invoke "$SETTLEMENT" admin freeze
+[[ "$(jq -r .seq "$EXIT")" == "$last_seq" && "$(jq -r .checked_on_chain "$EXIT")" == true ]] || fail "exit.json is not Stellar's last checkpoint $last_seq"
 info="$(view "$SETTLEMENT" frozen_info)"
 vault="$(view "$USDC_ID" balance --id "$SETTLEMENT" | num)"
 num_="$(jq -r .payout_num <<< "$info")"; den="$(jq -r .payout_den <<< "$info")"
@@ -332,8 +303,8 @@ echo "frozen: payout $num_ / $den, vault $vault"
 total=0
 for n in alice bob; do
   g="$(pk "$n")"
-  p="$(curl -sf "$V1/v1/proofs/escape?account=$g")"
-  [[ "$(jq -r .seq <<< "$p")" == "$last_seq" ]] || fail "escape proof is not from checkpoint $last_seq"
+  p="$(jq -c --arg g "$g" '.escape[] | select(.account == $g)' "$EXIT")"
+  [[ -n "$p" ]] || fail "exit.json has no escape leaf for $n"
   b0="$(view "$USDC_ID" balance --id "$g" | num)"
   invoke "$SETTLEMENT" "$n" escape_claim --recipient "$g" --lane_account "$(raw "$g")" --index "$(jq -r .index <<< "$p")" \
     --equity "$(jq -r .equity <<< "$p")" --proof "$(jq -c .proof <<< "$p")" > /dev/null
@@ -348,9 +319,9 @@ done
 
 log "6. replay from Stellar data only"
 "$BIN" replay --rpc "$RPC" --network-passphrase "$PASS" --settlement "$SETTLEMENT" --genesis-config "$LANE" \
-  --engine-wasm "$ENGINE_WASM" --prove-escape "$A" > "$WORK/replay.json"
+  --engine-wasm "target/contracts/${E2E_TEMPLATE}_engine.wasm" --prove-escape "$A" > "$WORK/replay.json"
 jq -s -e '.[0].ok == true' "$WORK/replay.json" > /dev/null || fail "replay: $(cat "$WORK/replay.json")"
-[[ "$(jq -s -r '.[1].equity' "$WORK/replay.json")" == "$(curl -sf "$V1/v1/proofs/escape?account=$A" | jq -r .equity)" ]] || fail "replay's escape proof differs from the validator's"
+[[ "$(jq -s -r '.[1].equity' "$WORK/replay.json")" == "$(jq -r --arg g "$A" '.escape[] | select(.account == $g) | .equity' "$EXIT")" ]] || fail "replay's escape proof differs from exit.json"
 jq -s -c '.[0]' "$WORK/replay.json"
 
 echo

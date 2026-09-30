@@ -430,3 +430,18 @@ pub fn confirm(steps: usize, yes: bool) -> Result<bool> {
         .context("reading the answer")?;
     Ok(matches!(line.trim(), "y" | "Y" | "yes"))
 }
+
+/// Destroy can't be undone: the operator types the lane's name.
+pub fn confirm_destroy(lane: &str) -> Result<bool> {
+    if !std::io::stdin().is_terminal() {
+        bail!("destroy freezes the lane for good: pass --yes to run without a prompt");
+    }
+    print!("This freezes lane {lane} for good; users exit with their proofs. Type the lane's name to go on: ");
+    std::io::stdout().flush()?;
+    let mut line = String::new();
+    std::io::stdin()
+        .lock()
+        .read_line(&mut line)
+        .context("reading the answer")?;
+    Ok(line.trim() == lane)
+}

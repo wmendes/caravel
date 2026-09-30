@@ -18,6 +18,7 @@ use caravel_node::app::NodeApp;
 use clap::Subcommand;
 
 use crate::deploy;
+use crate::ops::DestroyOptions;
 
 #[derive(Subcommand, Debug)]
 pub enum Command {
@@ -44,6 +45,45 @@ pub enum Command {
         /// Apply without asking.
         #[arg(long)]
         yes: bool,
+    },
+    /// Show a deployment's health: height, the last accepted checkpoint, when
+    /// a freeze would be possible, the relayer's XLM, TTL horizons, and
+    /// whether it matches the lane file.
+    Status {
+        lane: PathBuf,
+        #[arg(long)]
+        env: String,
+        #[arg(long)]
+        release_dir: Option<PathBuf>,
+        /// Print JSON, for scripts.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Wind a lane down for good: drain, stop the sequencer and relayer,
+    /// export every exit with its proof to exit.json, then freeze once the
+    /// contract allows it. A frozen lane can't be restarted.
+    Destroy {
+        lane: PathBuf,
+        #[arg(long)]
+        env: String,
+        #[arg(long)]
+        release_dir: Option<PathBuf>,
+        /// Don't ask (the lane can't be restarted afterwards).
+        #[arg(long)]
+        yes: bool,
+        /// Stop after the trigger and print when a freeze becomes possible;
+        /// run destroy again then.
+        #[arg(long)]
+        no_wait: bool,
+        /// Also stop the validators (by default they keep serving proofs).
+        #[arg(long)]
+        stop_validators: bool,
+        /// After the freeze, claim every exit in exit.json for its owner.
+        #[arg(long)]
+        pay_out: bool,
+        /// Remove the host's lane data after stopping every node.
+        #[arg(long)]
+        wipe: bool,
     },
 }
 
@@ -101,6 +141,44 @@ pub fn run<A: NodeApp>(app: A, cmd: Command) -> Result<()> {
                     );
                 }
                 Ok(())
+            }
+            Command::Status {
+                lane,
+                env,
+                release_dir,
+                json,
+            } => {
+                let p = deploy::prepare(&app, &lane, &env, release_dir.as_deref(), false).await?;
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&p.status_json().await)?);
+                } else {
+                    print!("{}", p.render_status().await);
+                }
+                Ok(())
+            }
+            Command::Destroy {
+                lane,
+                env,
+                release_dir,
+                yes,
+                no_wait,
+                stop_validators,
+                pay_out,
+                wipe,
+            } => {
+                let p = deploy::prepare(&app, &lane, &env, release_dir.as_deref(), true).await?;
+                print!("{}", p.render_status().await);
+                if !yes && !deploy::confirm_destroy(&p.desired.lane_name)? {
+                    println!("Nothing done.");
+                    return Ok(());
+                }
+                p.destroy(&DestroyOptions {
+                    no_wait,
+                    stop_validators,
+                    pay_out,
+                    wipe,
+                })
+                .await
             }
         }
     })
