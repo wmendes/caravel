@@ -79,6 +79,7 @@ pub struct ValidatorConfig {
     pub db: PathBuf,
     pub ids: HeaderIds,
     pub settlement_contract: [u8; 32],
+    pub network_passphrase: String,
     pub rpc_url: Option<String>,
     pub poll_ms: u64,
     pub stellar_poll_secs: u64,
@@ -122,6 +123,7 @@ impl ValidatorConfig {
                 engine_wasm_hash,
             },
             settlement_contract,
+            network_passphrase: v.network_passphrase,
             rpc_url: v.rpc_url,
             poll_ms: v.poll_ms,
             stellar_poll_secs: v.stellar_poll_secs.max(1),
@@ -135,6 +137,8 @@ pub struct ValidatorNode<A: NodeApp> {
     pub app: A,
     pub follower: Mutex<Follower<A>>,
     sequencer_url: String,
+    lane_name: String,
+    identity: api::Identity,
 }
 
 impl<A: NodeApp> ValidatorNode<A> {
@@ -191,6 +195,14 @@ pub async fn start<A: NodeApp>(
         app,
         follower: Mutex::new(follower),
         sequencer_url: cfg.sequencer_url.clone(),
+        lane_name: cfg.lane.lane.name.clone(),
+        identity: api::Identity {
+            lane_id: cfg.lane.lane_id(),
+            config_hash,
+            settlement: cfg.settlement_contract,
+            engine_wasm_hash: cfg.engine_wasm_hash,
+            network_passphrase: cfg.network_passphrase.clone(),
+        },
     });
     let router = router(node.clone(), &cfg.cors_origins);
     tokio::spawn(follow_loop(
@@ -443,8 +455,9 @@ async fn status<A: NodeApp>(State(app): AppState<A>) -> ApiResult {
         let store = f.store();
         let last = |s| store.last_checkpoint_with(s).map_err(ApiError::internal);
         let flags = store.flags_in(0, u64::MAX >> 1).map_err(ApiError::internal)?;
-        ok(json!({
+        let mut body = json!({
             "role": "validator",
+            "lane_name": app.lane_name,
             "template": A::TEMPLATE,
             "key": views::g_address(&f.public_key()),
             "sequencer_url": app.sequencer_url,
@@ -457,7 +470,9 @@ async fn status<A: NodeApp>(State(app): AppState<A>) -> ApiResult {
                 "accepted": last(CheckpointStatus::Accepted)?.map(|s| s.to_string()),
             },
             "last_signed_seq": store.last_signed_seq().map_err(ApiError::internal)?.map(|s| s.to_string()),
-        }))
+        });
+        app.identity.extend(&mut body);
+        ok(body)
     })
 }
 

@@ -128,3 +128,36 @@ fn a_node_refuses_an_engine_the_lane_file_does_not_name() {
     assert_eq!(caravel_runtime::sequencer::hex(&want), record);
     assert_eq!(PerpsApp::TEMPLATE, "perps");
 }
+
+/// A deployment block, as `[env.<name>]` tables look in a manifest.
+const ENV_BLOCK: &str = r#"
+[env.testnet]
+network = "testnet"
+admin = "caravel-admin"
+usdc = "circle"
+threshold = 2
+[env.testnet.settlement_params]
+force_inclusion_window_secs = 3600
+[[env.testnet.validators]]
+name = "v1"
+key = "caravel-validator-1"
+[env.testnet.host]
+provider = "ssh"
+address = "caravel@example.invalid"
+[env.local]
+network = "local"
+"#;
+
+/// `[env]` is not consensus: every perps lane file, in both layouts, gives the
+/// same genesis bytes with a deployment block as without one.
+#[test]
+fn env_tables_change_no_hash() {
+    for path in [TESTNET, LOCAL, TESTNET_M0, LOCAL_M0] {
+        let plain = text(path);
+        let (report, config, state) = genesis(&plain).unwrap();
+        let (report_env, config_env, state_env) =
+            genesis(&format!("{plain}\n{ENV_BLOCK}")).unwrap();
+        assert_eq!((config_env, state_env), (config, state), "{path}");
+        assert_eq!(report_env.config_hash, report.config_hash, "{path}");
+    }
+}

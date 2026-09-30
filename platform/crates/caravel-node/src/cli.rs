@@ -1,5 +1,6 @@
 //! The node commands every app's binary has (spec §14–§16, DEC-053): the
-//! sequencer, validator, replay, check-store, genesis and witness. An app's
+//! sequencer, validator, replay, check-store, genesis, witness and
+//! export-proofs. An app's
 //! binary flattens [`Command`] into its own CLI and calls [`run`]:
 //!
 //! ```ignore
@@ -80,6 +81,18 @@ pub enum Command {
         config: PathBuf,
         #[arg(long)]
         through: u64,
+    },
+    /// Write every exit a validator's store holds, with proofs, as JSON: the
+    /// escape leaves of the last checkpoint accepted on Stellar and every
+    /// withdrawal leaf. For winding a lane down. With `rpc_url` in the config,
+    /// the checkpoint must be the one Stellar has.
+    ExportProofs {
+        /// The validator config whose store to read.
+        #[arg(long)]
+        config: PathBuf,
+        /// Write the JSON here instead of stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
     },
     /// Run the sequencer (spec §14): blocks, checkpoints and the API.
     Sequencer {
@@ -239,6 +252,14 @@ pub fn run<A: NodeApp>(app: A, command: Command) -> Result<()> {
             let n = store.clear_flags(through)?;
             println!("cleared {n} flagged block(s) up to height {through}; restart the validator if it was halted");
         }
+        Command::ExportProofs { config, out } => {
+            let v = export_proofs(&app, &config)?;
+            let text = serde_json::to_string_pretty(&v)? + "\n";
+            match out {
+                Some(path) => std::fs::write(&path, text)?,
+                None => print!("{text}"),
+            }
+        }
         Command::Sequencer { config } => {
             init_logging();
             let cfg = crate::node_config::SequencerConfig::load(&config)?;
@@ -264,4 +285,59 @@ pub fn run<A: NodeApp>(app: A, command: Command) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// `export-proofs`: the exits of the last checkpoint the store knows as
+/// accepted, checked against Stellar when the config names an RPC.
+fn export_proofs<A: NodeApp>(app: &A, config: &std::path::Path) -> Result<serde_json::Value> {
+    use anyhow::{anyhow, bail};
+    use caravel_runtime::checkpoint::sha256;
+    use caravel_runtime::sequencer::hex;
+    use caravel_runtime::store::{CheckpointStatus, Store};
+
+    let cfg = crate::validator::ValidatorConfig::load(config)?;
+    let (_, config_bytes, genesis_state) = crate::lane_toml::genesis(app, &cfg.lane)?;
+    let store = Store::open(
+        &cfg.db,
+        &cfg.lane.lane_id(),
+        &sha256(&config_bytes),
+        &genesis_state,
+    )?;
+    let seq = store
+        .last_checkpoint_with(CheckpointStatus::Accepted)?
+        .ok_or_else(|| anyhow!("no checkpoint accepted on Stellar in this store yet"))?;
+    let mut v = crate::api::exit_proofs(app, &store, seq).map_err(|e| anyhow!("{e:?}"))?;
+    let checked = match &cfg.rpc_url {
+        Some(url) => {
+            let on_chain = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?
+                .block_on(
+                    crate::stellar_rpc::Rpc::new(url)?.last_checkpoint(&cfg.settlement_contract),
+                )?
+                .ok_or_else(|| anyhow!("the settlement contract has no checkpoint"))?;
+            if on_chain.seq != seq || hex(&on_chain.header_hash) != v["header_hash"] {
+                bail!(
+                    "the store's last accepted checkpoint is {seq}, but Stellar's is {}: let the validator catch up",
+                    on_chain.seq
+                );
+            }
+            true
+        }
+        None => {
+            eprintln!("warning: no rpc_url in the validator config, so the checkpoint was not checked against Stellar");
+            false
+        }
+    };
+    let extra = serde_json::json!({
+        "lane_name": cfg.lane.lane.name,
+        "lane_id": hex(&cfg.lane.lane_id()),
+        "settlement": stellar_strkey::Contract(cfg.settlement_contract).to_string().as_str(),
+        "network_passphrase": cfg.network_passphrase,
+        "checked_on_chain": checked,
+    });
+    if let (serde_json::Value::Object(o), serde_json::Value::Object(e)) = (&mut v, extra) {
+        o.extend(e);
+    }
+    Ok(v)
 }

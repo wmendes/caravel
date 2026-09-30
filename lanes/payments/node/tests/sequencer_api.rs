@@ -297,6 +297,21 @@ async fn payments_sequencer_end_to_end() {
     assert_eq!(s["lane_name"], "caravel-payments-local-0");
     assert_eq!(s["template"], "payments");
     assert_eq!(s["executor"], "wasm");
+    // What it runs, for the deploy tool's host check.
+    assert_eq!(s["config_hash"], hex(&lane.config_hash));
+    assert_eq!(
+        s["settlement"],
+        stellar_strkey::Contract([7; 32]).to_string().as_str()
+    );
+    let versions: Value =
+        serde_json::from_str(&std::fs::read_to_string(root().join("versions.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        s["engine_wasm_sha256"],
+        versions["lanes"]["payments"]["engine_wasm_sha256"]
+    );
+    assert_eq!(s["network_passphrase"], "Test SDF Network ; September 2015");
+    assert!(s["release"]["version"].is_string());
     // Payments has no feed, so no feed route.
     let r = lane
         .http

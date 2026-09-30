@@ -166,9 +166,27 @@ pub fn proofs_for(
     hashes: &[[u8; 32]],
     account: &[u8; 32],
 ) -> Vec<ProofView> {
+    proofs_where(header, leaves, hashes, |l| l.key == *account)
+}
+
+/// Proofs for every leaf of checkpoint `header`.
+pub fn all_proofs(
+    header: &CheckpointHeaderV1,
+    leaves: &[Leaf],
+    hashes: &[[u8; 32]],
+) -> Vec<ProofView> {
+    proofs_where(header, leaves, hashes, |_| true)
+}
+
+fn proofs_where(
+    header: &CheckpointHeaderV1,
+    leaves: &[Leaf],
+    hashes: &[[u8; 32]],
+    keep: impl Fn(&Leaf) -> bool,
+) -> Vec<ProofView> {
     leaves
         .iter()
-        .filter(|l| l.key == *account)
+        .filter(|l| keep(l))
         .filter_map(|l| {
             let proof = checkpoint::proof(hashes, l.index)?;
             Some(ProofView {

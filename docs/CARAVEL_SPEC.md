@@ -2012,23 +2012,27 @@ If time is short, cut in this order:
 
 Never cut replay, validator re-execution or the escape contract path: they are the claims.
 
-### 20.3 Milestone M0.5: the platform split
+### 20.3 Milestone M0.5: the platform split, then declarative lanes
 
-**Decided with the human on 2026-09-30.** Caravel is the platform that lets any team launch a lane settling to Stellar, modeled on Tanssi. Caravel Perps is the first lane built with it, not the product. M0 built the two as one. M0.5 splits them in one repository:
-- `platform/` holds the app-agnostic runtime, nodes, settlement, lane registry, console, CLI and relayer core;
+**Decided with the human on 2026-09-30.** Caravel is the platform that lets any team launch a lane settling to Stellar. Caravel Perps is the first lane built with it, not the product. M0 built the two as one. M0.5 splits them in one repository:
+- `platform/` holds the app-agnostic runtime, nodes, settlement, relayer core and the deploy tool;
 - `lanes/perps/` holds Caravel Perps;
 - `lanes/payments/` holds a small second template.
 
-The live testnet lane keeps its engine Wasm byte for byte and becomes lane #1 in the registry. Hosting is self-hosted by default, plus hosted trial lanes: at most 2 at a time, 48 h each, on the existing VM.
+**Changed with the human later on 2026-09-30.** Caravel becomes an infrastructure-as-code tool for Stellar lanes:
+- one lane file declares the lane, plus one `[env.<name>]` table per deployment;
+- `caravel plan` shows what would change on Stellar and on the host, `caravel apply` makes it so, and `caravel destroy` winds the lane down safely: drain, export every exit proof, freeze;
+- the lane file and the chain are the only record, and there is no state file;
+- hosts are `local` or `ssh` (a host the team already has); the tool provisions no cloud machines;
+- lane #1 (the live testnet lane) is imported, and its engine Wasm stays byte for byte.
 
-The plan of record is `~/.claude/plans/ok-but-now-i-lucky-hoare.md` (architecture §1–§11). Its DEC numbers (DEC-051 to DEC-057) are added to §22 as each task lands. Phase gates are P1 (P-07), P2 (P-10), P3 (P-16) and P4 (P-21).
+This drops the lane registry contract, the console and its web packages, hosted trials with their host manager, and the Pyth Pro in-engine feed (parked). The plan of record is `~/.claude/plans/ok-but-now-i-lucky-hoare.md`. Phase gates are P1 (P-07), P2 (P-10), P3 (P-14) and P4 (P-18).
 
 **Needs the human first (§0.4):**
-- the new consensus formats of Phase 2 (`AppGenesisV1`, the SDK state layout, the Payments rules);
-- the new settlement build of record for new lanes;
-- the registry admin key;
-- the platform §2 claims and the landing copy;
-- whether hosted trials open to everyone or to an allowlist first.
+- the new consensus formats of Phase 2 (`AppGenesisV1`, the SDK state layout, the Payments rules), approved 2026-09-30;
+- the new settlement build of record for new lanes, approved 2026-09-30;
+- each release to the live VM;
+- the §2 claims and the landing copy.
 
 | ID | Task | Depends | Status |
 |---|---|---|---|
@@ -2042,20 +2046,17 @@ The plan of record is `~/.claude/plans/ok-but-now-i-lucky-hoare.md` (architectur
 | P-07a | Perps oracle: Coinbase's public WebSocket ticker as the first source, once per 1 s block (DEC-058) | P-07 | review |
 | P-07b | Stellar Wallets Kit replaces Freighter in the perps web app, with a local SEP-53 check (DEC-059) | P-07a | review |
 | P-08 | `caravel-app-sdk` + `testapp`, conformance with perps' standard kinds | P-07 | review |
-| P-08b | Pyth Pro feed verified in-engine in the SDK (needs format approval and a Pyth Pro subscription) | P-08 | todo |
+| P-08b | Pyth Pro feed verified in-engine in the SDK — **parked** with the concept change | P-08 | todo |
 | P-09 | `caravel-harness`; settlement tests move off perps; new settlement build of record | P-08 | review |
 | P-10 | Payments template: engine, vectors, scenarios, INV-PAY1, parity, node, e2e (DEC-064) — **Gate P2** | P-09 | review |
-| P-11 | Lane registry contract + tests | P-10 | todo |
-| P-12 | `caravel-lane-config` + browser Wasm build (same hashes as the CLI and lane #1) | P-10 | todo |
-| P-13 | `caravel` CLI (init, genesis, deploy, register, bundle, run, escape-proofs, status) | P-11, P-12 | todo |
-| P-14 | Registry on testnet; lane #1 registered | P-13 | todo |
-| P-15 | `lane-client` / `lane-ui` packages; perps web app to `lanes/perps/web` | P-07 | todo |
-| P-16 | Console: lanes, dashboard, explorer, portfolio, escape, self-hosted wizard; on Vercel — **Gate P3** | P-14, P-15 | todo |
-| P-17 | Host manager, trial slots, teardown, archive on the VM | P-16 | todo |
-| P-18 | Console trial path | P-17 | todo |
-| P-19 | Landing page and platform §2 claims (after the human approves them) | P-16 | todo |
-| P-20 | Testnet e2e through the console, self-hosted and trial; RESULTS | P-18 | todo |
-| P-21 | Security pass over registry, host manager, console and SDK — **Gate P4** | P-20 | todo |
+| P-11 | Node groundwork, one release for the VM: `[env]` tables set aside by the lane-file parser, identity fields in `/v1/status`, `export-proofs`, release with `COMMIT`, full `SHA256SUMS` and vendored relayer dependencies (DEC-065) | P-10 | review |
+| P-12 | `caravel-deploy`: the `[env]` schema, secret refusal, derived settlement address, and the pure plan engine with golden plans | P-11 | todo |
+| P-13 | `apply` on Stellar and the `local` provider: chain reader, generated node configs, the `caravel` dispatcher | P-12 | todo |
+| P-14 | `status` and `destroy`; `e2e-local.sh` driven by the tool for both templates — **Gate P3** | P-13 | todo |
+| P-15 | The `ssh` provider: prerequisites check, IAP transport, systemd, Caddy, template extras, `--preflight` | P-14 | todo |
+| P-16 | Import lane #1: its plan shows no changes, and its next release goes through `apply --preflight` | P-15 | todo |
+| P-17 | A payments lane on testnet from its lane file, through the whole lifecycle; RESULTS; the `stellar-caravel` plugin | P-16 | todo |
+| P-18 | README, spec and landing copy (after the human approves the claims); security pass over the tool — **Gate P4** | P-17 | todo |
 
 ### 20.4 Phase 2 consensus formats (approved by the human 2026-09-30, DEC-060)
 
@@ -2346,7 +2347,7 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 - **Tests:** the frozen `add_session_key_sep53_owner` vector passes the check, and a tampered, wrong-key or wrong-message signature does not; base64 and hex are both decoded; a raw-message signature and a wallet that can't sign messages are refused. Headless Chrome opened the picker against the live lane.
 - **Not yet tested:** manual testnet flows with Freighter and xBull (RESULTS) | Users bring the Stellar wallet they have. The kit covers the wallets the ecosystem uses and is the one developers.stellar.org lists | A wallet the kit lacks, or SEP-53 support changing in a wallet (the local check shows it) |
 | DEC-060 | **M0.5 Phase 2 formats, approved by the human on 2026-09-30 as proposed in §20.4:** `AppGenesisV1` (`CVAPPGN1`), the SDK state layout (`StateFrameV1` · embedded config · `AppAccountV1`s · app globals · pending · `CommitmentV1`), the SDK's standard pipeline, and Payments 0.1.0 (`CVSTPAY1`, kind 16 `TRANSFER`, codes 10–13, flat `transfer_fee` to the treasury, recipients must exist, INV-PAY1). They freeze when their vectors land (P-08, P-10) | One genesis format and one state layout for every SDK app, so the platform, the console and the registry treat templates alike. Payments is the smallest app that exercises every standard path | A template that needs feeds (P-08b), or state that doesn't fit the layout (a V2) |
-| DEC-061 | **Settlement build of record for new lanes, approved by the human on 2026-09-30:** new lanes use the platform's settlement build `8280828f…`, the Linux build since the P-03 moves (`artifacts.settlement_wasm_sha256`). Lane #1 keeps its deployed `8a2fafbd…`, reproducible from tag `perps-m0` (`lanes.perps.settlement_deployed_wasm_sha256`). The registry (P-11) approves both | The source is lane #1's; only the build paths changed. Freezing settlement as well was not worth the churn | A settlement code change, which gets its own build and DEC |
+| DEC-061 | **Settlement build of record for new lanes, approved by the human on 2026-09-30:** new lanes use the platform's settlement build `8280828f…`, the Linux build since the P-03 moves (`artifacts.settlement_wasm_sha256`). Lane #1 keeps its deployed `8a2fafbd…`, reproducible from tag `perps-m0` (`lanes.perps.settlement_deployed_wasm_sha256`). The registry that was to approve both was cut with the concept change (§20.3); lane files pin the build instead (`settlement_wasm`) | The source is lane #1's; only the build paths changed. Freezing settlement as well was not worth the churn | A settlement code change, which gets its own build and DEC |
 | DEC-062 | **M0.5 (P-08).** `platform/crates/caravel-app-sdk` implements §20.4. It is `no_std`, depends only on `caravel-core`, and builds for `wasm32v1-none`.
 - **App interface:** an app is an `AppEngine`, with static dispatch (`step::<App, _>(state, block, crypto)`). It declares its template, versions, state magic and permission bits. Its hooks are `params`, `body_len` and `session_permission` per kind, `apply`, `begin_block`/`end_block`, `free_balance`, `escape_equity`, `is_empty` (slot reuse) and `before_forced_withdrawal`. It gets an `AppCtx`: the state, its params, the account index, the time, the entry and its events. Apps can't create accounts in V1.
 - **Crypto:** the SDK's own `Crypto` trait, the same as the perps engine's (`native` feature: `NativeCrypto` traps, `DiagnosticCrypto` names the entry).
@@ -2375,6 +2376,11 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - lane-file goldens and refusals;
   - vectors in `lanes/payments/test-vectors/payments.json`, which freeze the format (DEC-060).
 - **e2e:** `E2E_TEMPLATE=payments ./scripts/e2e-local.sh`. A new step 4c, a forced withdrawal asked for on Stellar and claimed there, runs for both templates. Both passed on a local quickstart on 2026-09-30: payments in 197 s and perps in 164 s, each with 5 checkpoints replayed from Stellar. CI runs the e2e for both, and runs the payments parity gate and no_std build on every push | A second app on the same node, settlement contract and relayer shows the platform carries a lane without app code of its own. Step 4c covers the forced-withdrawal path, which the M0 e2e left to unit tests | Fee sponsorship, transfers that create accounts, or a template that needs feeds (P-08b) |
+| DEC-065 | **M0.5 (P-11).** Node groundwork for the deploy tool (§20.3), released to the VM in one go:
+- **Lane files** may hold `[env.<name>]` tables (deployments). `LaneFile::parse` removes `env` before anything else reads the file, so genesis, the app parsers and the perps M0 layout never see it, and `env` is a reserved template name. Tests show genesis is byte-identical with and without an `[env]` block for both perps files, both M0 fixtures and the payments file.
+- **`/v1/status`** of the sequencer and of each validator reports what the node runs: `lane_id`, `config_hash`, `settlement` (C…), `engine_wasm_sha256`, `network_passphrase` and `release` `{version, commit}`. The commit is `CARAVEL_COMMIT` at build time, which the CI release sets, and `null` in local builds. The validator also reports `lane_name`. The deploy tool compares a host against the lane file and the chain with these fields.
+- **`export-proofs --config <validator.toml>`** writes every exit a validator's store holds: every escape leaf of its last accepted checkpoint and every withdrawal leaf, each with its proof. With `rpc_url` set, that checkpoint must be Stellar's `last_checkpoint()` (seq and header hash). It reuses the escape and withdrawal proof code, and on the fixture store its proofs equal the per-account routes'.
+- **The CI release** builds both node binaries, vendors the relayer's production `node_modules` (pure JS; package-lock integrity is checked in CI), covers the relayer and feed files in `SHA256SUMS`, and `deploy-vm.sh` installs `COMMIT` and `SHA256SUMS` in `/opt/caravel`. Hosts no longer run `npm` | The deploy tool reads hosts and the chain rather than a state file, so the nodes must say what they run. Destroy needs every exit in one file | — |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 
