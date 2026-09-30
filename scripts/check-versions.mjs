@@ -82,8 +82,8 @@ if (toolchain !== versions.rust_toolchain) fail(`rust-toolchain.toml channel ${t
 if (!read("rust-toolchain.toml").includes(`"${versions.wasm_target}"`)) fail(`rust-toolchain.toml does not list target ${versions.wasm_target}`);
 
 // --- npm: exact pins in package.json and package-lock.json ------------------
-// npm apps: the platform relayer and the perps web app (M0.5 layout).
-const apps = ["platform/relayer", "lanes/perps/web"].filter((d) => existsSync(join(root, d, "package.json")));
+// npm apps: the platform relayer, the perps feed module and web app (M0.5 layout).
+const apps = ["platform/relayer", "lanes/perps/relayer-feeds", "lanes/perps/web"].filter((d) => existsSync(join(root, d, "package.json")));
 for (const app of apps) {
   const pkgPath = join(app, "package.json");
   if (!existsSync(join(root, pkgPath))) continue;

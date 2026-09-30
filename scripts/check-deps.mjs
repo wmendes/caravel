@@ -15,7 +15,6 @@ import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const EXCEPTIONS = {
-  "caravel-node": "P-06 puts the node on NodeApp",
   settlement: "P-09 moves its codecs to caravel-core and its tests to caravel-harness",
 };
 

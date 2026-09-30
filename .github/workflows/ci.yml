@@ -36,7 +36,18 @@ jobs:
 
   rust:
     runs-on: ubuntu-latest
+    # Two workspaces (root and the frozen engine) build debug targets here, and
+    # the runner's disk ran out linking caravel-perps-node (ld bus error). Tests
+    # need no debug info; the Wasm builds use the release profile, unaffected.
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
+      - name: Free disk space (preinstalled SDKs Caravel does not use)
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h / | tail -1
       - uses: actions/checkout@v4
       - name: Install toolchain from rust-toolchain.toml
         run: rustup toolchain install && rustup show active-toolchain
@@ -84,7 +95,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        app: [platform/relayer, lanes/perps/web]
+        app: [platform/relayer, lanes/perps/relayer-feeds, lanes/perps/web]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -145,16 +156,18 @@ jobs:
           tar xzf stellar-cli.tar.gz -C "$HOME/.local/bin" stellar
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: ./scripts/build-contracts.sh
-      - run: cargo build --release --locked -p caravel-node
+      - run: cargo build --release --locked -p caravel-perps-node
       - run: npm --prefix platform/relayer ci && npm --prefix platform/relayer run build
+      - run: npm --prefix lanes/perps/relayer-feeds ci && npm --prefix lanes/perps/relayer-feeds run build
       - run: npm --prefix lanes/perps/web ci && npm --prefix lanes/perps/web run build
       - name: Assemble the release
         run: |
-          mkdir -p release/bin release/contracts release/relayer release/web
+          mkdir -p release/bin release/contracts release/relayer release/relayer-feeds/perps release/web
           cp -r lanes/perps/web/dist/. release/web/
-          cp target/release/caravel-node release/bin/
+          cp target/release/caravel-perps-node release/bin/
           cp target/contracts/*.wasm release/contracts/
           cp -r platform/relayer/dist platform/relayer/package.json platform/relayer/package-lock.json release/relayer/
+          cp -r lanes/perps/relayer-feeds/dist lanes/perps/relayer-feeds/package.json lanes/perps/relayer-feeds/package-lock.json release/relayer-feeds/perps/
           (cd release && sha256sum bin/* contracts/* > SHA256SUMS && echo "${GITHUB_SHA}" > COMMIT)
           cat release/SHA256SUMS
       - uses: actions/upload-artifact@v4

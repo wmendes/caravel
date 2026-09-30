@@ -1,27 +1,15 @@
 [package]
 name = "caravel-node"
-description = "Caravel node: sequencer, validator, replay, genesis and key tools"
+description = "Caravel node library: sequencer, validator, replay and genesis for any app (each app's binary links it)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
-[lib]
-path = "src/lib.rs"
-
-[[bin]]
-name = "caravel-node"
-path = "src/main.rs"
-
 [dependencies]
-caravel-types = { workspace = true }
-caravel-perps = { workspace = true, features = ["native"] }
-caravel-runtime = { workspace = true }
-# Until P-06 splits the node into the platform library and a perps binary,
-# the node runs the perps app (check-deps exception).
-caravel-perps-node = { workspace = true }
 caravel-core = { workspace = true, features = ["native"] }
+caravel-runtime = { workspace = true }
 ed25519-dalek = { workspace = true }
 stellar-strkey = { workspace = true }
 stellar-xdr = { workspace = true, features = ["std", "base64"] }
@@ -39,8 +27,3 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 
 [dev-dependencies]
-caravel-types = { workspace = true, features = ["gen-vectors"] }
-caravel-merkle = { workspace = true, features = ["alloc", "native"] }
-caravel-testkit = { workspace = true }
-tempfile = "3.27.0"
-tokio-tungstenite = { version = "0.29.0", features = ["rustls-tls-native-roots"] }

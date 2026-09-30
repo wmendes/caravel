@@ -4,7 +4,7 @@
 //!   `escape_proof`) over the fixture store that
 //!   `lanes/perps/node/tests/golden.rs` leaves behind, with checkpoints 1 to 5
 //!   marked accepted.
-//! - `caravel-node genesis` for both perps lane files.
+//! - `caravel-perps-node genesis` for both perps lane files.
 //!
 //! The split must give the same JSON (plan P-06). `UPDATE_GOLDEN=1` rewrites
 //! the files; never on a split branch.
@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use axum::response::{IntoResponse, Response};
 use caravel_node::api;
 use caravel_node::lane_toml::{self, LaneFile};
+use caravel_perps_node::PerpsApp;
 use caravel_runtime::checkpoint::sha256;
 use caravel_runtime::store::Store;
 use caravel_testkit::lane::{config, seeds};
@@ -91,16 +92,16 @@ async fn m0_api_json_is_unchanged() {
     out["checkpoints"] = Value::Array(checkpoints);
     let mut blocks = Vec::new();
     for h in [0u64, 1, 2, 3, 10, 13, 44, 70, 71] {
-        blocks.push(body(api::block_json(&store, h)).await);
+        blocks.push(body(api::block_json(&PerpsApp, &store, h)).await);
     }
     out["blocks"] = Value::Array(blocks);
     let mut withdrawals = Vec::new();
     let mut escapes = Vec::new();
     for s in [seeds::A, seeds::B, seeds::C, seeds::D] {
         withdrawals.push(body(api::withdrawal_proofs(&store, &pk(s))).await);
-        escapes.push(body(api::escape_proof(&store, &pk(s), Some(5))).await);
+        escapes.push(body(api::escape_proof(&PerpsApp, &store, &pk(s), Some(5))).await);
     }
-    escapes.push(body(api::escape_proof(&store, &pk(seeds::A), None)).await);
+    escapes.push(body(api::escape_proof(&PerpsApp, &store, &pk(seeds::A), None)).await);
     out["withdrawal_proofs"] = Value::Array(withdrawals);
     out["escape_proofs"] = Value::Array(escapes);
     check("m0-api.json", &out);
@@ -119,7 +120,7 @@ fn m0_genesis_reports_are_unchanged() {
         ),
     ] {
         let lane = LaneFile::load(&root().join(file)).unwrap();
-        let (report, config_bytes, state) = lane_toml::genesis(&lane).unwrap();
+        let (report, config_bytes, state) = lane_toml::genesis(&PerpsApp, &lane).unwrap();
         check(
             name,
             &json!({

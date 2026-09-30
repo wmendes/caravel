@@ -206,7 +206,7 @@ Consequences, used throughout this spec:
 ```text
                         ┌──────────────────────────── LANE (Caravel Perps, 1s blocks) ─────────────────────────────┐
  Browser (web app)      │                                                                                          │
-  ├ Freighter (owner) ──┼─► Sequencer (caravel-node --role sequencer)                                              │
+  ├ Freighter (owner) ──┼─► Sequencer (caravel-perps-node sequencer)                                               │
   └ session key ────────┼─►  ├ mempool → BlockInputV1 every block_time_ms                                         │
                         │    ├ executes engine Wasm via soroban-env-host  (StateV1 → StateV1)                     │
                         │    ├ persists block + state (SQLite) before broadcasting                                │
@@ -214,7 +214,7 @@ Consequences, used throughout this spec:
                         │    └ assembles CheckpointHeaderV1 + BatchV1, collects signatures                        │
                         │            │ blocks (WS)                     ▲ signatures                               │
                         │            ▼                                 │                                          │
-                        │    Validators ×3 (caravel-node --role validator)                                       │
+                        │    Validators ×3 (caravel-perps-node validator)                                        │
                         │      re-execute every block with the same Wasm, compare state hashes,                   │
                         │      sign checkpoint header hashes (ed25519), keep their own copy of blocks            │
                         └──────────────┬──────────────────────────────────────────────▲──────────────────────────┘
@@ -236,7 +236,7 @@ Consequences, used throughout this spec:
  └───────────────────────────────────────────────────────────────────────────────────────────┘
                                        │ RPC (contract data + transactions)
                                        ▼
- Replay verifier (caravel-node replay): rebuilds every state from genesis + batches on Stellar
+ Replay verifier (caravel-perps-node replay): rebuilds every state from genesis + batches on Stellar
 ```
 
 ### 4.2 Components
@@ -249,7 +249,8 @@ Consequences, used throughout this spec:
 | Engine contract | `lanes/perps/engine/contracts/perps-engine` | Soroban | Thin wrapper: `genesis`, `step`, `version` (§12) |
 | Settlement contract | `platform/contracts/settlement` | Soroban | §13 |
 | Lane runtime | `platform/crates/caravel-runtime` | Rust std | soroban-env-host executor, block/batch builders, SQLite store |
-| Node | `platform/crates/caravel-node` | Rust std (bin) | `sequencer`, `validator`, `replay`, `genesis`, `keys` subcommands (§14–§16) |
+| Node | `platform/crates/caravel-node` | Rust std (library) | The `sequencer`, `validator`, `replay`, `check-store`, `genesis` and `witness` commands for any app through `NodeApp` (§14–§16, DEC-053); lane files (DEC-054) |
+| Perps node | `lanes/perps/node` | Rust std (bin `caravel-perps-node`) | `PerpsApp` (the perps `LaneApp` and `NodeApp`), its lane file, views and `/v1/markets*` routes, and `tx` |
 | Relayer | `platform/relayer` | TypeScript (Node ≥ 22) | §17 |
 | Web app | `lanes/perps/web` | TypeScript, React, Vite | §18 |
 
@@ -328,6 +329,8 @@ What is new (nobody has built it for Stellar):
 ---
 
 ## 6. Repository layout
+
+The M0 layout, as first planned. M0.5 moved it to `platform/` and `lanes/perps/` (§20.3, DEC-051); CLAUDE.md has the current layout.
 
 ```text
 caravel/
@@ -790,7 +793,9 @@ Genesis validation. `genesis()` returns `Fatal(BAD_CONFIG)` unless every rule ho
 
 ### 10.3 M0 lane file (`lanes/perps/config/lane.caravel-perps.testnet.toml`)
 
-`caravel-node genesis` converts this to `GenesisConfigV1` and prints `config_hash`, `genesis_state_hash` and the state size.
+`caravel-perps-node genesis` converts this to `GenesisConfigV1` and prints `config_hash`, `genesis_state_hash` and the state size.
+
+This is the M0 layout. Since M0.5 the file uses the platform layout (DEC-054): the same values, with `[app]` added, the perps settings under `[perps.*]`, and `max_orders_per_side` and `max_open_orders_per_account` under `[perps.limits]`. Both layouts give the same bytes.
 
 ```toml
 [lane]
@@ -1546,7 +1551,7 @@ Reject (panic with a `contracterror` code) on the first failure:
 
 ---
 
-## 14. Sequencer (`caravel-node sequencer`)
+## 14. Sequencer (`caravel-perps-node sequencer`)
 
 ### 14.1 Responsibilities
 
@@ -1669,12 +1674,12 @@ Rules:
 
 ### 14.6 Operator tasks
 
-- `caravel-node op backstop-unwind --market 1 --max-lots N`: signs orders with `backstop_key` to close backstop positions. Manual in M0.
-- `caravel-node op treasury-withdraw --amount X`: WITHDRAW from the treasury account.
+- `caravel-perps-node op backstop-unwind --market 1 --max-lots N`: signs orders with `backstop_key` to close backstop positions. Manual in M0.
+- `caravel-perps-node op treasury-withdraw --amount X`: WITHDRAW from the treasury account.
 
 ---
 
-## 15. Validator (`caravel-node validator`)
+## 15. Validator (`caravel-perps-node validator`)
 
 - Config:
   - sequencer URL;
@@ -1710,7 +1715,7 @@ Rules:
 
 ---
 
-## 16. Replay verifier (`caravel-node replay`)
+## 16. Replay verifier (`caravel-perps-node replay`)
 
 ### 16.1 Inputs
 
@@ -1720,7 +1725,7 @@ Rules:
 ### 16.2 Algorithm
 
 1. Read `config()` from the contract. Check:
-   - `H(GenesisConfigV1 bytes) == config_hash`, where the bytes are derived from the lane TOML by the same code as `caravel-node genesis`;
+   - `H(GenesisConfigV1 bytes) == config_hash`, where the bytes are derived from the lane TOML by the same code as `caravel-perps-node genesis`;
    - `H(engine wasm) == engine_wasm_hash`;
    - `H(genesis(config)) == genesis_state_hash`.
 2. List accepted checkpoints via `Checkpoint` events (`getEvents`) and `checkpoint(seq)` views.
@@ -1747,7 +1752,7 @@ Document this in RUNBOOK.
 
 ## 17. Relayer (`platform/relayer`, TypeScript)
 
-Node ≥ 22 with `@stellar/stellar-sdk 17.2.0`. Contract calls go through `rpc.Server` with explicit `ScVal`s, not generated clients (DEC-040). Three loops in one process, each with its own key where signing is needed.
+Node ≥ 22 with `@stellar/stellar-sdk 17.2.0`. Contract calls go through `rpc.Server` with explicit `ScVal`s, not generated clients (DEC-040). One process runs the inbox and checkpoint loops, plus one loop per feed module the config names (M0.5, DEC-053). Each loop has its own key where signing is needed.
 
 ### 17.1 Inbox watcher
 
@@ -1766,6 +1771,8 @@ Node ≥ 22 with `@stellar/stellar-sdk 17.2.0`. Contract calls go through `rpc.S
 5. Record `minResourceFee`, the fee charged and the tx size per checkpoint in metrics (feeds §19.6 cost reporting).
 
 ### 17.3 Oracle feeder
+
+The perps lane's feed module, `lanes/perps/relayer-feeds` (DEC-053). The relayer config lists it under `feeds`, and it reads the oracle key from `CARAVEL_ORACLE_SECRET`. It posts to the perps node's feed route, `/internal/oracle`.
 
 - Sources, in priority:
   1. Reflector SEP-40 feeds on testnet: `lastprice(asset)`. The "External CEXs & DEXs" testnet feed is `CCYOZJCOPG34LLQQ7N24YXBM7LL62R7ONMZ3G6WZAAYPB5OYKOMJRN63`, 14 decimals, 300 s resolution (developers.stellar.org "Oracle Providers", 2026-09-08, and on-chain `decimals()`/`resolution()`, 2026-09-29; DEC-041).
@@ -1806,7 +1813,7 @@ Node ≥ 22 with `@stellar/stellar-sdk 17.2.0`. Contract calls go through `rpc.S
 | `/trade/:market` | Oracle price chart, order book (depth 20), order form (limit / IOC / post-only, reduce-only for IOC), positions, open orders, recent fills. Status bar: lane height and "soft" badge in `lane`; last accepted checkpoint and "settled on Stellar" badge in `harbor` |
 | `/portfolio` | USDC wallet balance (Stellar), lane collateral/equity/free collateral, Deposit, Withdraw, Claims (withdrawals ready to claim on Stellar), Forced withdrawal (advanced) |
 | `/explorer` | Lane blocks, checkpoints with header fields, validator signatures, links to the Stellar testnet explorer for each checkpoint transaction |
-| `/escape` | Shown only when `frozen()` is true. Explains the state. Gets the escape proof from, in order: the sequencer, each configured validator, or a proof JSON the user uploads (from `caravel-node replay --prove-escape`). Calls `escape_claim`. Also handles refunds for unprocessed deposits |
+| `/escape` | Shown only when `frozen()` is true. Explains the state. Gets the escape proof from, in order: the sequencer, each configured validator, or a proof JSON the user uploads (from `caravel-perps-node replay --prove-escape`). Calls `escape_claim`. Also handles refunds for unprocessed deposits |
 | `/about` | Honest claims (§2.1) and what is not claimed (§2.2) |
 
 ### 18.3 Flows
@@ -1900,7 +1907,7 @@ The e2e script:
 3. Wait for checkpoint seq ≥ 1 accepted on-chain.
 4. A withdraws 100 and claims on Stellar. Check the USDC balance delta.
 5. Stop the sequencer, wait past `escape_timeout_secs` (30 s on the local instance, DEC-043), `freeze`, and have A and B `escape_claim`. Check Σ payouts ≤ vault balance and each payout = equity × ratio.
-6. Run `caravel-node replay` from Stellar data. It MUST report OK.
+6. Run `caravel-perps-node replay` from Stellar data. It MUST report OK.
 
 ### 19.6 Measurements to publish (T-014)
 
@@ -2028,7 +2035,7 @@ The plan of record is `~/.claude/plans/ok-but-now-i-lucky-hoare.md` (architectur
 | P-03 | Moves into `platform/` and `lanes/perps/` (runtime, node, settlement, configs, web, relayer) | P-02 | review |
 | P-04 | `caravel-core`: generic codecs over the same bytes (opaque bodies, feeds, receipts, state frame) + compatibility tests | P-03 | review |
 | P-05 | Runtime on `LaneApp` + `PerpsApp`: golden trace byte for byte, parity gate, fixture store opens | P-04 | review |
-| P-06 | Node on `NodeApp`, lane-file split, `caravel-perps-node`, relayer feed module: API snapshots identical, dependency guard | P-05 | todo |
+| P-06 | Node on `NodeApp`, lane-file split, `caravel-perps-node`, relayer feed module: API snapshots identical, dependency guard | P-05 | review |
 | P-07 | Live VM upgrade to `caravel-perps-node` (check-store, shadow validator, replay) — **Gate P1** | P-06 | todo |
 | P-08 | `caravel-app-sdk` + `testapp`, conformance with perps' standard kinds | P-07 | todo |
 | P-09 | `caravel-harness`; settlement tests move off perps; new settlement build of record | P-08 | todo |
@@ -2188,6 +2195,46 @@ Reinterpreted, **bytes unchanged**:
 `lanes/perps/node` (`caravel-perps-node`) holds `PerpsApp`, the M0 rules as they were: oracle updates are feeds with the market id as slot, a configured key and a valid signature to be admitted, and the 60 s live window. The perps views (accounts, markets, books, fills), the account leaves from margin equity, the runtime's tests, the golden trace, the fixture store and `bench_full_caps` moved there too.
 
 Checked on the split: the M0 golden trace and API snapshots are byte for byte the P-01 ones, without regenerating; the fixture store opens at the trace's end state; the parity gate passes; the engine and settlement hashes are unchanged. Two texts change, neither in consensus nor in the API: a quarantined feed's incident source reads `Feed(m)` instead of `Oracle(m)` in the logs, and `Reject::Decode` keeps its M0 message ("does not decode as LaneTxV1") until P-06 lets the app word it. `caravel-runtime` no longer depends on any lane, so its check-deps exception is gone. `caravel-node` now depends on `caravel-perps-node` until P-06 | Static dispatch keeps the hot path free of trait objects and lets the app's state be a real type. The Wasm stays the only consensus path (DEC-002); the native calls are for diagnosis and tests | A process that must run several apps at once (hosted trials run one process per lane, DEC-057) |
+| DEC-053 (cont.) | **M0.5 (P-06).** The node and relayer halves of the app interface.
+- **`caravel_node::NodeApp`** (on top of `LaneApp`). It gives:
+  - the app's `[app] template` and its genesis config from a lane file;
+  - the execution limits in that config;
+  - the account view;
+  - a view cache kept between blocks, and what each block adds to the stream;
+  - its own public routes and stream messages;
+  - its feed route, if any.
+- **What the node serves for every app:**
+  - public: `/v1/tx`, `/v1/status` (now with `template`), `/v1/accounts/{account}`, blocks, checkpoints, proofs and the stream (`{blocks, account}` plus the app's subscription fields);
+  - internal: `/internal/inbox`, `/internal/{feed}` and the checkpoint routes.
+- **Binaries.** `caravel-node` is now a library, with `caravel_node::cli::{Command, run}`. Each app's binary flattens those commands into its own CLI. Lane #1's binary is `caravel-perps-node`: the platform commands plus `tx`, with `loadgen` and `bench_full_caps` as its examples. At startup it refuses:
+  - a lane file for another template;
+  - an engine Wasm other than the one the lane file names.
+- **Perps.** `PerpsApp` keeps the M0 JSON. It serves `/v1/markets`, `/v1/markets/{id}/book` and `/v1/markets/{id}/trades`, with 1,000 fills kept per market. Its stream order is `block`, `fill`, `book`, `receipt`, `account`. Its feed route is `/internal/oracle`, with the M0 errors (`DECODE`, `BAD_ORACLE`).
+- **Relayer.** `platform/relayer` keeps the inbox, checkpoint and metrics loops. An app's feeds are ES modules the config lists under `feeds: [{module, intervalMs, options}]`:
+  - each exports `createFeed(host, options)`;
+  - the host gives the lane id, the RPC, public GETs and `postFeed(route, hex)`;
+  - a module reads its own keys from the environment;
+  - an M0 config with `loops.oracle` is refused with a pointer to `feeds`.
+  - The perps oracle feeder, its price sources and the Reflector client moved to `lanes/perps/relayer-feeds` (its own package, with the `oracle_update.json` vectors). The VM release adds `relayer-feeds/perps`.
+- **Checked:**
+  - the M0 API and genesis goldens are unchanged, now from `lanes/perps/node/tests`;
+  - the node API, validator and replay tests pass unchanged against `caravel-perps-node`;
+  - `scripts/e2e-local.sh` passes with the feed module;
+  - check-deps has no node exception left (only `settlement`, P-09).
+
+Changed outside consensus:
+  - `/v1/status` gains `template` (sequencer and validator);
+  - the binary is renamed, which the VM picks up at P-07 | One node library for every app, with the app's parts behind one trait each, and relayer feeds the platform does not parse | An app needing a route or loop the traits cannot express |
+| DEC-054 | **M0.5 (P-06).** The lane file's platform layout:
+- **Generic sections:** `[lane] name`; `[app] template, engine_wasm_sha256`; `[node]` (not consensus); `[access] mode, allowlist`; `[limits]`. The limits are `min_deposit`, `min_withdrawal`, `max_accounts`, `max_session_keys`, `max_txs_per_account_per_block`, `max_entries_per_block`, `max_block_bytes`, `max_pending_withdrawals`, `exec_cpu_limit` and `exec_mem_limit`.
+- **App section:** a table named after the template. Perps uses `[perps.accounts]`, `[perps.oracle]`, `[perps.funding]`, `[perps.fees]`, `[perps.limits]` (`max_orders_per_side`, `max_open_orders_per_account`) and `[[perps.markets]]`.
+- **Refused:** any other top-level table.
+- **M0 files:** a file without `[app]` is an M0 file. Only its app reads it; `PerpsApp` keeps the M0 parser.
+- **Converted:** both perps lane files now use the platform layout. The M0 copies are test fixtures (`lanes/perps/node/tests/fixtures/*.m0.toml`).
+- **Checked:** the two layouts give byte-identical `GenesisConfigV1` and genesis state for both lanes. Lane #1 keeps `lane_id 319b46e9…`, `config_hash f4b9db09…` and `genesis_state_hash 22702d9f…`.
+- **Engine check:** a node refuses an engine Wasm other than `[app] engine_wasm_sha256` (sequencer and validator config load, replay, witness).
+
+The lane file is a node input, not a consensus format. The bytes it produces are unchanged | Every template needs the same generic settings, and a node must know which app a file is for before parsing the rest | `AppGenesisV1` (Phase 2) gives the generic sections their own bytes |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

@@ -1,5 +1,5 @@
 /**
- * The settlement contract and Reflector through Stellar RPC
+ * The settlement contract through Stellar RPC
  * (`@stellar/stellar-sdk` 17.2.0). Views run as simulations from a null
  * source account; `submit_checkpoint` is simulated, assembled, signed by the
  * relayer key, sent and polled.
@@ -7,7 +7,6 @@
 import { Account, BASE_FEE, Contract, Keypair, TransactionBuilder, nativeToScVal, rpc, scValToNative, xdr } from "@stellar/stellar-sdk";
 
 import type { PendingCheckpoint } from "./sequencer.js";
-import type { ReflectorReader } from "./prices.js";
 
 /** A source account for read-only simulations; it need not exist. */
 const NULL_ACCOUNT = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
@@ -173,25 +172,5 @@ export class RpcSettlement implements SettlementApi {
       minResourceFee: BigInt(sim.minResourceFee),
       txSizeBytes,
     };
-  }
-}
-
-/** Reflector's SEP-40 feed (`lastprice(Asset::Other(Symbol))`), read by simulation. */
-export class RpcReflector implements ReflectorReader {
-  private readonly c: RpcContract;
-
-  constructor(rpcUrl: string, contractId: string, networkPassphrase: string) {
-    this.c = new RpcContract(rpcUrl, contractId, networkPassphrase);
-  }
-
-  async decimals(): Promise<number> {
-    return Number(await this.c.view("decimals"));
-  }
-
-  async lastPrice(asset: string): Promise<{ price: bigint; timestamp: bigint } | null> {
-    const arg = xdr.ScVal.scvVec([xdr.ScVal.scvSymbol("Other"), xdr.ScVal.scvSymbol(asset)]);
-    const r = (await this.c.view("lastprice", arg)) as Record<string, unknown> | null | undefined;
-    if (r === null || r === undefined) return null;
-    return { price: BigInt(String(r.price)), timestamp: BigInt(String(r.timestamp)) };
   }
 }

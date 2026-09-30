@@ -155,7 +155,7 @@ export function Explorer() {
                     </tbody>
                   </table>
                   <p className="note" style={{ marginTop: 12 }}>
-                    Anyone can rebuild this checkpoint from Stellar alone with <span className="mono">caravel-node replay</span>.
+                    Anyone can rebuild this checkpoint from Stellar alone with <span className="mono">caravel-perps-node replay</span>.
                   </p>
                 </div>
               </div>

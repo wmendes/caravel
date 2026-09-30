@@ -7,13 +7,13 @@ use std::path::Path;
 
 use anyhow::{bail, Context, Result};
 use caravel_core::block::{BlockInputV1, BlockRecordV1};
-use caravel_perps_node::PerpsApp;
 use caravel_runtime::checkpoint::{self, sha256, HeaderIds};
 use caravel_runtime::sequencer::hex;
 use caravel_runtime::store::Store;
-use caravel_runtime::{LaneApp, WasmExecutor};
+use caravel_runtime::WasmExecutor;
 use serde::Serialize;
 
+use crate::app::NodeApp;
 use crate::lane_toml::LaneFile;
 
 #[derive(Serialize, Debug)]
@@ -25,7 +25,8 @@ pub struct CheckReport {
     pub host_cpu_insns_max: u64,
 }
 
-pub fn check_store(
+pub fn check_store<A: NodeApp>(
+    app: &A,
     lane: &LaneFile,
     db: &Path,
     exec: &WasmExecutor,
@@ -34,7 +35,7 @@ pub fn check_store(
     if !db.exists() {
         bail!("no store at {}", db.display());
     }
-    let (_, config_bytes, genesis_state) = crate::lane_toml::genesis(lane)?;
+    let (_, config_bytes, genesis_state) = crate::lane_toml::genesis(app, lane)?;
     let config_hash = sha256(&config_bytes);
     let store = Store::open(db, &lane.lane_id(), &config_hash, &genesis_state)
         .context("opening the store")?;
@@ -62,8 +63,7 @@ pub fn check_store(
                 .map_err(|_| anyhow::anyhow!("block {height} does not decode"))?
                 .checkpoint_end
             {
-                PerpsApp
-                    .decode_state(&state)
+                app.decode_state(&state)
                     .ok_or_else(|| anyhow::anyhow!("state after {height}"))?;
                 let (_, header) = checkpoint::assemble(ids, prev_header, &batch, &state)
                     .map_err(|e| anyhow::anyhow!("checkpoint at {height}: {e:?}"))?;

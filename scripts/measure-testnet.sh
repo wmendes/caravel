@@ -60,7 +60,7 @@ until_ok() {
 log "tools and lane"
 command -v jq > /dev/null || fail "jq is required"
 [[ -d "$SDK" ]] || npm --prefix platform/relayer ci --silent
-cargo build --release --locked -p caravel-node --example loadgen
+cargo build --release --locked -p caravel-perps-node --example loadgen
 status="$(curl -sf "$API/v1/status")" || fail "no lane at $API"
 jq -c '{lane_name, height, executor, checkpoints}' <<< "$status"
 # Request time after the TLS handshake (the load generator reuses connections).

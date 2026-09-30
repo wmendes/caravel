@@ -10,7 +10,7 @@
 //! reports soft latency (POST → receipt), hard latency (receipt → the
 //! checkpoint holding that block accepted on Stellar) and host CPU per block.
 //!
-//! cargo run --release -p caravel-node --example loadgen -- \
+//! cargo run --release -p caravel-perps-node --example loadgen -- \
 //!   --url http://127.0.0.1:8080 --lane lanes/perps/config/lane.caravel-perps.local.toml --tps 50 --duration-secs 3600
 
 use std::collections::{BTreeMap, HashMap};
@@ -21,6 +21,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use caravel_node::lane_toml::LaneFile;
+use caravel_perps_node::PerpsApp;
 use caravel_runtime::checkpoint::sha256;
 use caravel_runtime::sequencer::{hex, unhex};
 use caravel_types::inbox::{inbox_acc_preimage, InboxKind, InboxMsgV1};
@@ -557,7 +558,8 @@ fn read_key(path: &Path) -> Result<SigningKey> {
 async fn main() -> Result<()> {
     let args = Args::parse();
     let lane = LaneFile::load(&args.lane)?;
-    let (_, config_bytes, _) = caravel_node::lane_toml::genesis(&lane)?;
+    let (_, config_bytes, _) = caravel_node::lane_toml::genesis(&PerpsApp, &lane)?;
+    let genesis = caravel_perps_node::lane_file::genesis_config(&lane)?;
     let token = if args.no_fund && args.no_oracle {
         String::new()
     } else {
@@ -591,7 +593,7 @@ async fn main() -> Result<()> {
             }
         })
         .collect();
-    let markets = lane
+    let markets = genesis
         .markets
         .iter()
         .map(|m| Market {

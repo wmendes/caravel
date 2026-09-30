@@ -1,25 +1,41 @@
 [package]
 name = "caravel-perps-node"
-description = "Caravel Perps node plugin: the perps app on the platform runtime (M0.5)"
+description = "Caravel Perps node: the perps app on the platform runtime and node, and the caravel-perps-node binary (M0.5)"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[[bin]]
+name = "caravel-perps-node"
+path = "src/main.rs"
+
 [dependencies]
 caravel-core = { workspace = true, features = ["native"] }
 caravel-types = { workspace = true }
 caravel-perps = { workspace = true, features = ["native"] }
 caravel-runtime = { workspace = true }
+caravel-node = { workspace = true }
+ed25519-dalek = { workspace = true }
+anyhow = "1.0.104"
+axum = { version = "0.8.9", features = ["ws"] }
+clap = { version = "4.6.7", features = ["derive"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }
 serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "net", "time", "signal", "sync"] }
 
 [dev-dependencies]
 caravel-types = { workspace = true, features = ["gen-vectors"] }
 caravel-merkle = { workspace = true, features = ["alloc", "native"] }
 caravel-testkit = { workspace = true }
 ed25519-dalek = { workspace = true }
+futures-util = "0.3.34"
 proptest = "1.11.0"
 serde_json = "1.0.151"
 soroban-env-host = { workspace = true, features = ["testutils"] }
+stellar-strkey = { workspace = true }
+stellar-xdr = { workspace = true, features = ["std", "base64"] }
 tempfile = "3.27.0"
+tokio-tungstenite = { version = "0.29.0", features = ["rustls-tls-native-roots"] }

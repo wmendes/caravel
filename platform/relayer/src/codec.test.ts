@@ -1,14 +1,13 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { Keypair } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
 
-import { encodeInboxMsg, encodeOracleUpdate, fromHex, inboxAccAfter, oracleSigningPreimage, sha256, toHex } from "./codec.js";
+import { encodeInboxMsg, fromHex, inboxAccAfter, toHex } from "./codec.js";
 
 type Vector = { name: string; fields: Record<string, string>; hex: string; hash: string };
-// Platform formats come from platform/test-vectors; the oracle update is the
-// perps lane's feed format (it moves to lanes/perps with the feeder, P-06).
+// The platform formats' vectors; the perps oracle update is tested with its
+// feed module (lanes/perps/relayer-feeds).
 const vectors = (file: string, dir = "platform/test-vectors") =>
   JSON.parse(readFileSync(fileURLToPath(new URL(`../../../${dir}/${file}`, import.meta.url)), "utf8")) as { context?: Record<string, string>; vectors: Vector[] };
 
@@ -21,27 +20,6 @@ describe("InboxMsgV1 (test-vectors/inbox_msg.json)", () => {
       // hash_rule: hash = acc_after = H(TAG_INBOX || acc_before || msg).
       expect(toHex(inboxAccAfter(fromHex(f.acc_before!), msg))).toBe(f.acc_after);
       expect(f.acc_after).toBe(v.hash);
-    });
-  }
-});
-
-describe("OracleUpdateV1 (test-vectors/oracle_update.json)", () => {
-  const file = vectors("oracle_update.json", "lanes/perps/engine/test-vectors");
-  for (const v of file.vectors) {
-    it(v.name, () => {
-      const f = v.fields;
-      const laneId = fromHex(file.context!.lane_id!);
-      const fields = { marketId: Number(f.market_id), price: BigInt(f.price!), publishTimeMs: BigInt(f.publish_time_ms!) };
-      const preimage = oracleSigningPreimage(laneId, fields);
-      expect(toHex(preimage)).toBe(f.signing_preimage);
-      // hash_rule: hash = H(signing preimage).
-      expect(toHex(sha256(preimage))).toBe(v.hash);
-      // The fixture oracle key is the ed25519 key with seed [0x31; 32].
-      const key = Keypair.fromRawEd25519Seed(Buffer.alloc(32, 0x31));
-      expect(toHex(key.rawPublicKey())).toBe(f.oracle_key);
-      const signature = key.sign(Buffer.from(sha256(preimage)));
-      expect(toHex(signature)).toBe(f.signature);
-      expect(toHex(encodeOracleUpdate({ ...fields, oracleKey: key.rawPublicKey(), signature }))).toBe(v.hex);
     });
   }
 });

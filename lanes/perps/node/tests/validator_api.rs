@@ -10,11 +10,12 @@ use std::time::{Duration, Instant};
 use axum::extract::Path as UrlPath;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use caravel_core::inbox::{inbox_acc_preimage, InboxKind, InboxMsgV1};
 use caravel_node::lane_toml::LaneFile;
 use caravel_perps::native::verify_strict;
+use caravel_perps_node::PerpsApp;
 use caravel_runtime::checkpoint::sha256;
 use caravel_runtime::sequencer::{hex, unhex};
-use caravel_types::inbox::{inbox_acc_preimage, InboxKind, InboxMsgV1};
 use caravel_types::oracle::OracleUpdateV1;
 use caravel_types::vectors::{key, pk};
 use ed25519_dalek::Signer;
@@ -105,7 +106,7 @@ async fn start_validator(
     let (l, url) = listener().await;
     let path = validator_config(dir, n, seed, sequencer, rpc);
     let cfg = caravel_node::validator::ValidatorConfig::load(&path).unwrap();
-    let (_app, router) = caravel_node::validator::start(cfg).await.unwrap();
+    let (_app, router) = caravel_node::validator::start(PerpsApp, cfg).await.unwrap();
     serve(l, router);
     url
 }
@@ -113,7 +114,8 @@ async fn start_validator(
 /// The settlement contract's `Config` as far as nodes read it: the lane,
 /// engine Wasm, genesis state and genesis config it commits to.
 fn contract_config(lane: &LaneFile, engine_wasm_hash: [u8; 32]) -> ScMapEntry {
-    let (_, config_bytes, genesis_state) = caravel_node::lane_toml::genesis(lane).unwrap();
+    let (_, config_bytes, genesis_state) =
+        caravel_node::lane_toml::genesis(&PerpsApp, lane).unwrap();
     let sym = |s: &str| ScVal::Symbol(ScSymbol(s.try_into().unwrap()));
     let bytes = |b: [u8; 32]| ScVal::Bytes(ScBytes(b.to_vec().try_into().unwrap()));
     let fields = [
@@ -284,7 +286,9 @@ async fn validators_follow_sign_and_refuse_a_tampered_chain() {
     unsafe { std::env::set_var("CARAVEL_TEST_TOKEN_V", TOKEN) };
     let cfg = caravel_node::node_config::SequencerConfig::load(&dir.path().join("sequencer.toml"))
         .unwrap();
-    let (_app, router) = caravel_node::sequencer::start(&cfg).await.unwrap();
+    let (_app, router) = caravel_node::sequencer::start(PerpsApp, &cfg)
+        .await
+        .unwrap();
     serve(seq_listener, router);
     let proxy = tampering_proxy(seq_url.clone(), 3).await;
     let bad_validator = start_validator(dir.path(), 4, 0x64, &proxy, None).await;
@@ -458,7 +462,7 @@ async fn a_validator_refuses_a_contract_committed_to_another_engine() {
     .await;
     let path = validator_config(dir.path(), 1, 0x61, "http://127.0.0.1:9", Some(&rpc));
     let cfg = caravel_node::validator::ValidatorConfig::load(&path).unwrap();
-    let err = caravel_node::validator::start(cfg)
+    let err = caravel_node::validator::start(PerpsApp, cfg)
         .await
         .err()
         .expect("refused");
@@ -474,5 +478,5 @@ async fn a_validator_refuses_a_contract_committed_to_another_engine() {
     .await;
     let path = validator_config(dir.path(), 2, 0x62, "http://127.0.0.1:9", Some(&rpc));
     let cfg = caravel_node::validator::ValidatorConfig::load(&path).unwrap();
-    assert!(caravel_node::validator::start(cfg).await.is_ok());
+    assert!(caravel_node::validator::start(PerpsApp, cfg).await.is_ok());
 }

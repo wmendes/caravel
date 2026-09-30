@@ -1,18 +1,18 @@
 {
-  "name": "@caravel/relayer",
+  "name": "@caravel/perps-relayer-feeds",
   "version": "0.1.0",
-  "description": "Caravel relayer: inbox watcher, checkpoint submitter and the host for an app's feed modules (spec \u00a717)",
+  "description": "Caravel Perps feed module for the relayer: the signed oracle feed (spec §17.3, DEC-053)",
   "private": true,
   "type": "module",
   "license": "MIT OR Apache-2.0",
+  "main": "dist/index.js",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsc -p tsconfig.json --noEmit && vitest run",
-    "start": "node dist/main.js"
+    "test": "tsc -p tsconfig.json --noEmit && vitest run"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "17.2.0"

@@ -54,8 +54,8 @@ done
 grep -q "\"$(pk caravel-oracle)\"" "$LANE" || fail "caravel-oracle is not the lane's oracle key"
 
 echo "== engine contract"
-cargo build --release --locked -p caravel-node -q
-BIN="$ROOT/target/release/caravel-node"
+cargo build --release --locked -p caravel-perps-node -q
+BIN="$ROOT/target/release/caravel-perps-node"
 ENGINE="$(sc contract deploy --wasm "$WASM_DIR/perps_engine.wasm" --source-account caravel-admin "${NET[@]}" --alias caravel-perps-engine)"
 echo "engine $ENGINE"
 

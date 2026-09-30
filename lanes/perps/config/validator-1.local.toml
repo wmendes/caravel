@@ -3,7 +3,7 @@
 # e.g. from `stellar keys generate caravel-validator-1 && stellar keys show
 # caravel-validator-1`); *.key and /keys/ are ignored by git.
 #
-#   cargo run --release -p caravel-node -- validator --config lanes/perps/config/validator-1.local.toml
+#   cargo run --release -p caravel-perps-node -- validator --config lanes/perps/config/validator-1.local.toml
 
 [validator]
 listen = "127.0.0.1:8081"

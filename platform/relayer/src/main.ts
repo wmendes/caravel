@@ -1,17 +1,18 @@
 /**
- * The relayer (spec §17): three loops in one process. Each loop step is
- * idempotent, so the process can stop at any point and restart.
+ * The relayer (spec §17): the inbox and checkpoint loops, and one loop per
+ * feed module the config names (DEC-053). Each loop step is idempotent, so
+ * the process can stop at any point and restart.
  *
  *   node dist/main.js --config relayer.local.json
  */
 import { syncInbox, InboxMismatch } from "./inbox.js";
 import { submitNext, CheckpointDivergence } from "./checkpoints.js";
-import { loadConfig, type SourceSpec } from "./config.js";
+import { fromHex } from "./codec.js";
+import { loadConfig } from "./config.js";
+import { loadFeedModule, type FeedHost } from "./feeds.js";
 import { JsonlMetrics } from "./metrics.js";
-import { OracleFeeder, laneIdFromHex, type FeedMarket } from "./oracle.js";
-import { CoinbaseSpot, FixedPrice, ReflectorPrice, type PriceSource } from "./prices.js";
 import { HttpSequencer } from "./sequencer.js";
-import { RpcReflector, RpcSettlement } from "./stellar.js";
+import { RpcSettlement } from "./stellar.js";
 
 function log(level: "info" | "warn" | "error", msg: string, extra: Record<string, unknown> = {}): void {
   const line = JSON.stringify({ t: new Date().toISOString(), level, msg, ...extra }, (_k, v) => (typeof v === "bigint" ? v.toString() : v));
@@ -89,39 +90,34 @@ async function main(): Promise<void> {
     );
   }
 
-  if (f.loops.oracle && f.oracle && cfg.oracle) {
-    const o = f.oracle;
+  if (f.feeds?.length) {
     const status = await seq.status();
-    const markets = await seq.markets();
-    const reflector = o.reflectorContract ? new RpcReflector(f.rpcUrl, o.reflectorContract, f.networkPassphrase) : null;
-    const decimals = reflector ? await reflector.decimals() : 0;
-    const source = (s: SourceSpec): PriceSource => {
-      if ("reflector" in s) {
-        if (!reflector) throw new Error("a reflector source needs oracle.reflectorContract");
-        return new ReflectorPrice(reflector, s.reflector, decimals);
-      }
-      if ("coinbase" in s) return new CoinbaseSpot(s.coinbase);
-      return new FixedPrice(s.fixed);
+    const host: FeedHost = {
+      laneId: fromHex(status.lane_id),
+      rpcUrl: f.rpcUrl,
+      networkPassphrase: f.networkPassphrase,
+      getJson: (path) => seq.getJson(path),
+      postFeed: (route, updateHex) => seq.postFeed(route, updateHex),
+      log,
     };
-    const feed: FeedMarket[] = markets
-      .filter((m) => o.markets[String(m.market_id)])
-      .map((m) => ({ info: m, sources: (o.markets[String(m.market_id)] ?? []).map(source) }));
-    const feeder = new OracleFeeder(seq, cfg.oracle, laneIdFromHex(status.lane_id), feed, o.maxSourceAgeSecs);
-    log("info", "oracle feeder", { oracle_key: cfg.oracle.publicKey(), markets: feed.map((m) => ({ id: m.info.market_id, sources: m.sources.map((s) => s.name) })) });
-    loops.push(
-      loop(
-        "oracle",
-        f.intervalsMs?.oracle ?? 2_000,
-        async () => {
-          const r = await feeder.tick();
-          for (const e of r.errors) log("warn", `oracle: ${e}`);
-        },
-        () => false,
-      ),
-    );
+    for (const spec of f.feeds) {
+      const feed = await (await loadFeedModule(spec, cfg.dir)).createFeed(host, spec.options ?? {});
+      log("info", `feed ${feed.name}`, { module: spec.module, ...feed.describe() });
+      loops.push(
+        loop(
+          feed.name,
+          spec.intervalMs ?? 2_000,
+          async () => {
+            const r = await feed.tick();
+            for (const e of r.errors) log("warn", `${feed.name}: ${e}`);
+          },
+          () => false,
+        ),
+      );
+    }
   }
 
-  log("info", "relayer started", { sequencer: f.sequencerUrl, rpc: f.rpcUrl, settlement: f.settlementContract, loops: f.loops });
+  log("info", "relayer started", { sequencer: f.sequencerUrl, rpc: f.rpcUrl, settlement: f.settlementContract, loops: f.loops, feeds: (f.feeds ?? []).map((x) => x.module) });
   await Promise.all(loops);
 }
 

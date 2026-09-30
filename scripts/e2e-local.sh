@@ -19,7 +19,7 @@
 #   4. A withdraws 100 USDC and claims it on Stellar;
 #   4b. validator 3 is rotated to a new key (the RUNBOOK's admin rotation);
 #   5. the sequencer stops, anyone freezes, A and B escape pro rata;
-#   6. `caravel-node replay` from Stellar data reports OK.
+#   6. `caravel-perps-node replay` from Stellar data reports OK.
 set -euo pipefail
 START_TIME=$(date +%s)
 
@@ -40,7 +40,7 @@ case "$E2E_NETWORK" in
   *) echo "E2E_NETWORK is local or testnet" >&2; exit 1 ;;
 esac
 LANE="$ROOT/lanes/perps/config/lane.caravel-perps.local.toml"
-BIN="$ROOT/target/release/caravel-node"
+BIN="$ROOT/target/release/caravel-perps-node"
 SEQ_PORT=18080
 SEQ="http://127.0.0.1:$SEQ_PORT"
 USDC=10000000
@@ -93,9 +93,11 @@ command -v jq > /dev/null || fail "jq is required"
 
 log "build"
 ./scripts/build-contracts.sh
-cargo build --release --locked -p caravel-node
+cargo build --release --locked -p caravel-perps-node
 npm --prefix platform/relayer ci --silent
 npm --prefix platform/relayer run build --silent
+npm --prefix lanes/perps/relayer-feeds ci --silent
+npm --prefix lanes/perps/relayer-feeds run build --silent
 
 log "Stellar network ($E2E_NETWORK)"
 if [[ "$E2E_NETWORK" == local ]] && ! curl -sf -X POST "$RPC" -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"getHealth"}' | grep -q healthy; then
@@ -186,12 +188,14 @@ validator_config() {
 }
 sequencer_config 1 validator-1 validator-2 validator-3 > "$WORK/sequencer.toml"
 for i in 1 2 3; do validator_config "validator-$i" $((SEQ_PORT + i)) > "$WORK/validator-$i.toml"; done
-jq -n --arg rpc "$RPC" --arg pass "$PASS" --arg s "$SETTLEMENT" --arg seq "$SEQ" '{
+# The perps oracle runs as the lane's feed module (DEC-053).
+jq -n --arg rpc "$RPC" --arg pass "$PASS" --arg s "$SETTLEMENT" --arg seq "$SEQ" --arg feeds "$ROOT/lanes/perps/relayer-feeds/dist/index.js" '{
   rpcUrl: $rpc, networkPassphrase: $pass, settlementContract: $s, sequencerUrl: $seq,
   metricsFile: "relayer-checkpoints.jsonl",
-  loops: {inbox: true, checkpoints: true, oracle: true},
-  intervalsMs: {inbox: 1000, checkpoints: 1000, oracle: 2000},
-  oracle: {maxSourceAgeSecs: 900, markets: {"1": [{fixed: "65000"}], "2": [{fixed: "3500"}], "3": [{fixed: "0.40"}]}}
+  loops: {inbox: true, checkpoints: true},
+  intervalsMs: {inbox: 1000, checkpoints: 1000},
+  feeds: [{module: $feeds, intervalMs: 2000,
+           options: {maxSourceAgeSecs: 900, markets: {"1": [{fixed: "65000"}], "2": [{fixed: "3500"}], "3": [{fixed: "0.40"}]}}}]
 }' > "$WORK/relayer.json"
 
 log "lane processes"

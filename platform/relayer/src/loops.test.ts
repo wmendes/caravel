@@ -1,13 +1,9 @@
-import { Keypair } from "@stellar/stellar-sdk";
 import { describe, expect, it } from "vitest";
 
 import { CheckpointDivergence, submitNext } from "./checkpoints.js";
-import { fromHex, oracleSigningPreimage, sha256 } from "./codec.js";
 import { FakeSequencer, FakeSettlement, pending } from "./fakes.js";
 import { InboxMismatch, syncInbox } from "./inbox.js";
 import type { CheckpointMetric, MetricsSink } from "./metrics.js";
-import { OracleFeeder } from "./oracle.js";
-import { FixedPrice, type PriceSource, parseDecimal } from "./prices.js";
 
 class Metrics implements MetricsSink {
   rows: CheckpointMetric[] = [];
@@ -90,42 +86,5 @@ describe("checkpoint submitter (spec §17.2)", () => {
     const seq = new FakeSequencer();
     seq.queue.push(pending(3n));
     await expect(submitNext(seq, st, new Metrics())).rejects.toThrow(/Stellar is at seq 0/);
-  });
-});
-
-describe("oracle feeder (spec §17.3)", () => {
-  const market = { market_id: 1, symbol: "BTC-PERP", tick: "1000", display_lot_base_units: 10_000, display_base_decimals: 8 };
-  const oracle = Keypair.fromRawEd25519Seed(Buffer.alloc(32, 0x31));
-
-  it("signs updates the engine accepts and skips small moves inside 10 s", async () => {
-    const seq = new FakeSequencer();
-    let now = 1_790_000_000_000;
-    let price = "65000";
-    const src: PriceSource = { name: "test", quote: async () => ({ usd: parseDecimal(price), observedAt: Math.floor(now / 1000), source: "test" }) };
-    const feeder = new OracleFeeder(seq, oracle, fromHex(seq.laneId), [{ info: market, sources: [src] }], 900, () => now);
-    expect((await feeder.tick()).published).toHaveLength(1);
-    const u = fromHex(seq.oracle[0]!);
-    expect(u.length).toBe(114);
-    // The signature verifies over H(TAG_ORACLE || lane_id || signed fields).
-    const fields = { marketId: 1, price: 65_000_000n, publishTimeMs: BigInt(now) };
-    expect(Keypair.fromPublicKey(oracle.publicKey()).verify(Buffer.from(sha256(oracleSigningPreimage(fromHex(seq.laneId), fields))), Buffer.from(u.slice(50)))).toBe(true);
-    now += 2_000;
-    price = "65000.0004"; // +0.4 stroops per lot: less than a tick
-    expect((await feeder.tick()).published).toHaveLength(0);
-    now += 2_000;
-    price = "65001"; // +1,000 stroops per lot: one tick
-    expect((await feeder.tick()).published[0]?.price).toBe(65_001_000n);
-    now += 10_000;
-    expect((await feeder.tick()).published).toHaveLength(1); // heartbeat
-  });
-
-  it("reports a market without a fresh price and keeps the others going", async () => {
-    const seq = new FakeSequencer();
-    const dead: PriceSource = { name: "dead", quote: async () => Promise.reject(new Error("down")) };
-    const eth = { ...market, market_id: 2, display_lot_base_units: 100_000 };
-    const feeder = new OracleFeeder(seq, oracle, fromHex(seq.laneId), [{ info: market, sources: [dead] }, { info: eth, sources: [new FixedPrice("3500")] }], 900);
-    const r = await feeder.tick();
-    expect(r.published.map((p) => [p.marketId, p.price])).toEqual([[2, 35_000_000n]]);
-    expect(r.errors[0]).toMatch(/market 1: .*down/);
   });
 });

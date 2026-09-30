@@ -169,12 +169,14 @@ impl SequencerConfig {
         };
         let lane = LaneFile::load(&dir.join(&s.lane))?;
         lane.check_node_settings()?;
+        let engine_wasm_hash = parse_hash(&s.engine_wasm_sha256)?;
+        lane.check_engine(&engine_wasm_hash)?;
         let signers = file.signers.map(parse_signers).transpose()?;
         Ok(Self {
             listen: s.listen,
             lane,
             engine_wasm: dir.join(s.engine_wasm),
-            engine_wasm_hash: parse_hash(&s.engine_wasm_sha256)?,
+            engine_wasm_hash,
             db: dir.join(s.db),
             network_passphrase: s.network_passphrase,
             settlement_contract: parse_contract(&s.settlement_contract)?,

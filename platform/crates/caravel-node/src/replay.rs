@@ -12,12 +12,9 @@ use caravel_core::batch::BatchV1;
 use caravel_core::block::BlockRecordV1;
 use caravel_core::checkpoint::CheckpointHeaderV1;
 use caravel_core::receipts::ReceiptsV1;
-use caravel_perps_node::{app as perps_app, PerpsApp};
 use caravel_runtime::checkpoint::{self, block_hash, sha256, HeaderIds, Leaf};
 use caravel_runtime::sequencer::{hex, Executor};
 use caravel_runtime::views;
-use caravel_runtime::LaneApp;
-use caravel_types::state::StateV1;
 use serde::Serialize;
 use serde_json::{json, Value};
 use stellar_xdr::{
@@ -26,6 +23,7 @@ use stellar_xdr::{
     ScVec, TransactionEnvelope, WriteXdr,
 };
 
+use crate::app::NodeApp;
 use crate::lane_toml::LaneFile;
 use crate::stellar_rpc::{LastCheckpoint, Rpc};
 
@@ -86,14 +84,16 @@ fn mismatch(seq: u64, what: impl std::fmt::Display) -> anyhow::Error {
 }
 
 /// Replays every accepted checkpoint. The first mismatch is the error.
-pub async fn replay<S: ReplaySource>(
+pub async fn replay<A: NodeApp, S: ReplaySource>(
+    app: &A,
     src: &S,
     lane: &LaneFile,
     exec: &Executor,
     wasm_hash: [u8; 32],
     ids: &HeaderIds,
 ) -> Result<Outcome> {
-    let (_, config_bytes, native_genesis) = crate::lane_toml::genesis(lane)?;
+    let (_, config_bytes, native_genesis) = crate::lane_toml::genesis(app, lane)?;
+    lane.check_engine(&wasm_hash)?;
     let cfg = src
         .config()
         .await
@@ -181,7 +181,7 @@ pub async fn replay<S: ReplaySource>(
                     ),
                 ));
             }
-            let (o, _) = exec.step(&PerpsApp, &state, &record.input).map_err(|e| {
+            let (o, _) = exec.step(app, &state, &record.input).map_err(|e| {
                 mismatch(
                     seq,
                     format!("block {} does not execute: {e:?}", input.height),
@@ -198,14 +198,14 @@ pub async fn replay<S: ReplaySource>(
             }
             state = o.state;
             prev_block_hash = block_hash(record);
-            if !PerpsApp.receipts_decode(&o.receipts) {
+            if !app.receipts_decode(&o.receipts) {
                 return Err(mismatch(seq, "receipts"));
             }
             let receipts =
                 ReceiptsV1::decode(&o.receipts).map_err(|_| mismatch(seq, "receipts"))?;
             blocks.push((record.clone(), receipts));
         }
-        if PerpsApp.decode_state(&state).is_none() {
+        if app.decode_state(&state).is_none() {
             return Err(mismatch(seq, "state does not decode"));
         }
         let (_, rebuilt) = checkpoint::assemble(ids, prev_header, &batch.blocks, &state)
@@ -266,13 +266,16 @@ pub fn report(o: &Outcome) -> Report {
 }
 
 /// The escape leaf of `account` in the last accepted checkpoint.
-pub fn escape_proof(o: &Outcome, account: &[u8; 32]) -> Result<Value> {
+pub fn escape_proof<A: NodeApp>(app: &A, o: &Outcome, account: &[u8; 32]) -> Result<Value> {
     let last = o
         .checkpoints
         .last()
         .ok_or_else(|| anyhow!("no checkpoint accepted yet"))?;
-    let st = StateV1::decode(&o.final_state).map_err(|_| anyhow!("state"))?;
-    let leaves = perps_app::account_leaves(&last.header, &st)
+    let escape = app
+        .decode_state(&o.final_state)
+        .and_then(|st| app.escape_leaves(&st))
+        .ok_or_else(|| anyhow!("state"))?;
+    let leaves = checkpoint::account_leaves(&last.header, &escape)
         .map_err(|_| anyhow!("account leaves do not match the header"))?;
     let hashes = checkpoint::account_hashes(&last.header, &leaves);
     let p = views::proofs_for(&last.header, &leaves, &hashes, account)

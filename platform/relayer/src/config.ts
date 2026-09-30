@@ -3,18 +3,17 @@
  * variables for every secret (spec §0.3 rule 8).
  *
  * - CARAVEL_INTERNAL_TOKEN: the sequencer's internal API token;
- * - CARAVEL_RELAYER_SECRET: S... key that pays for checkpoint transactions;
- * - CARAVEL_ORACLE_SECRET: S... oracle key listed in the lane config.
+ * - CARAVEL_RELAYER_SECRET: S... key that pays for checkpoint transactions.
+ *
+ * Feed modules read their own keys (perps: CARAVEL_ORACLE_SECRET).
  */
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 import { Keypair, StrKey } from "@stellar/stellar-sdk";
 
+import type { FeedSpec } from "./feeds.js";
 import { assertTestnet } from "./network.js";
-
-/** One price source, in priority order per market. */
-export type SourceSpec = { reflector: string } | { coinbase: string } | { fixed: string };
 
 export interface RelayerFile {
   rpcUrl: string;
@@ -22,21 +21,19 @@ export interface RelayerFile {
   settlementContract: string;
   sequencerUrl: string;
   metricsFile: string;
-  loops: { inbox: boolean; checkpoints: boolean; oracle: boolean };
-  intervalsMs?: { inbox?: number; checkpoints?: number; oracle?: number };
-  oracle?: {
-    maxSourceAgeSecs: number;
-    reflectorContract?: string;
-    markets: Record<string, SourceSpec[]>;
-  };
+  loops: { inbox: boolean; checkpoints: boolean };
+  intervalsMs?: { inbox?: number; checkpoints?: number };
+  /** The app's feed modules (DEC-053), e.g. the perps oracle. */
+  feeds?: FeedSpec[];
 }
 
 export interface RelayerConfig {
   file: RelayerFile;
+  /** The config file's directory: feed module paths are relative to it. */
+  dir: string;
   metricsPath: string;
   token: string;
   relayer: Keypair | null;
-  oracle: Keypair | null;
 }
 
 function secret(name: string): Keypair {
@@ -51,12 +48,16 @@ export async function loadConfig(path: string): Promise<RelayerConfig> {
   if (!StrKey.isValidContract(file.settlementContract)) throw new Error("settlementContract must be a C... contract id");
   const token = process.env.CARAVEL_INTERNAL_TOKEN;
   if (!token) throw new Error("set CARAVEL_INTERNAL_TOKEN");
-  if (file.loops.oracle && !file.oracle) throw new Error("loops.oracle needs an oracle section");
+  const m0 = file as unknown as { loops: Record<string, unknown>; oracle?: unknown };
+  if ("oracle" in m0.loops || m0.oracle !== undefined) {
+    throw new Error("loops.oracle and oracle moved to a feed module: feeds: [{module: \"<perps relayer-feeds>/dist/index.js\", options: {...}}] (DEC-053)");
+  }
+  for (const f of file.feeds ?? []) if (typeof f.module !== "string") throw new Error("every feeds[] entry needs a module");
   return {
     file,
+    dir: dirname(path),
     metricsPath: resolve(dirname(path), file.metricsFile),
     token,
     relayer: file.loops.checkpoints ? secret("CARAVEL_RELAYER_SECRET") : null,
-    oracle: file.loops.oracle ? secret("CARAVEL_ORACLE_SECRET") : null,
   };
 }

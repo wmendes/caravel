@@ -6,14 +6,6 @@ export interface SequencerStatus {
   inbox: { reported: string; reported_acc: string; processed: string; halted: boolean };
 }
 
-export interface MarketInfo {
-  market_id: number;
-  symbol: string;
-  tick: string;
-  display_lot_base_units: number;
-  display_base_decimals: number;
-}
-
 export interface PendingCheckpoint {
   seq: bigint;
   header: Uint8Array;
@@ -26,9 +18,11 @@ export type InboxReply = { status: "added" | "known" } | { status: "gap"; expect
 
 export interface SequencerApi {
   status(): Promise<SequencerStatus>;
-  markets(): Promise<MarketInfo[]>;
+  /** Any public GET path, for feed modules. */
+  getJson(path: string): Promise<unknown>;
   postInbox(index: bigint, msgHex: string, accAfterHex: string): Promise<InboxReply>;
-  postOracle(updateHex: string): Promise<void>;
+  /** `POST /internal/{route}`: an app's feed update (DEC-053). */
+  postFeed(route: string, updateHex: string): Promise<void>;
   pendingCheckpoint(): Promise<PendingCheckpoint | null>;
   reportAccepted(seq: bigint, stellarTxHash: string, ledger: number): Promise<void>;
 }
@@ -61,8 +55,9 @@ export class HttpSequencer implements SequencerApi {
     return this.json(await this.request("/v1/status"), "status");
   }
 
-  async markets(): Promise<MarketInfo[]> {
-    return this.json(await this.request("/v1/markets"), "markets");
+  async getJson(path: string): Promise<unknown> {
+    if (!path.startsWith("/v1/")) throw new Error(`not a public path: ${path}`);
+    return this.json(await this.request(path), path);
   }
 
   async postInbox(index: bigint, msgHex: string, accAfterHex: string): Promise<InboxReply> {
@@ -80,8 +75,9 @@ export class HttpSequencer implements SequencerApi {
     return { status: body.status === "added" ? "added" : "known" };
   }
 
-  async postOracle(updateHex: string): Promise<void> {
-    await this.json(await this.request("/internal/oracle", { method: "POST", body: JSON.stringify({ update: updateHex }) }, true), "oracle");
+  async postFeed(route: string, updateHex: string): Promise<void> {
+    if (!/^[a-z][a-z0-9-]*$/.test(route)) throw new Error(`bad feed route: ${route}`);
+    await this.json(await this.request(`/internal/${route}`, { method: "POST", body: JSON.stringify({ update: updateHex }) }, true), route);
   }
 
   async pendingCheckpoint(): Promise<PendingCheckpoint | null> {

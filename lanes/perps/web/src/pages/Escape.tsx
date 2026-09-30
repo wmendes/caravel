@@ -10,7 +10,7 @@ import { useApp, usePoll } from "../state";
  * The escape hatch (spec §13.6, §18.2): when the settlement contract is
  * frozen, each account claims its share of the last checkpointed equity on
  * Stellar, with a proof from the sequencer, any validator, or a JSON file from
- * `caravel-node replay --prove-escape`.
+ * `caravel-perps-node replay --prove-escape`.
  */
 export function Escape() {
   const { frozen, address, connect, onChain } = useApp();
@@ -50,7 +50,7 @@ export function Escape() {
         /* try the next source */
       }
     }
-    setMsg({ ok: false, text: "No source served a proof. Upload one from caravel-node replay --prove-escape." });
+    setMsg({ ok: false, text: "No source served a proof. Upload one from caravel-perps-node replay --prove-escape." });
   };
 
   const upload = async (f: File) => {

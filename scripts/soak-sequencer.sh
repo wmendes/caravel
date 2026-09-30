@@ -19,8 +19,8 @@ WORK="${WORK:-$(mktemp -d)}"
 mkdir -p "$WORK"
 echo "work dir: $WORK"
 
-cargo build --release --locked -p caravel-node --bin caravel-node --example loadgen
-BIN="$ROOT/target/release/caravel-node"
+cargo build --release --locked -p caravel-perps-node --bin caravel-perps-node --example loadgen
+BIN="$ROOT/target/release/caravel-perps-node"
 LOADGEN="$ROOT/target/release/examples/loadgen"
 LANE="$ROOT/lanes/perps/config/lane.caravel-perps.local.toml"
 HASH="$(node -p 'require("./versions.json").artifacts.engine_wasm_sha256')"
