@@ -35,7 +35,7 @@ This shows the exact call the nodes make is a valid Stellar invocation with the 
 
 ## The lane on testnet (T-012, 2026-09-29)
 
-The sequencer, 3 validators and relayer run on one e2-small VM (DEC-046). Public API: `https://35-224-76-64.sslip.io/v1/status`, and each validator at `/validators/N/v1/status`. Oracle prices come from Reflector's testnet feed (DEC-041).
+The sequencer, 3 validators and relayer run on one e2-small VM (DEC-046). Public API: `https://35-224-76-64.sslip.io/v1/status`, and each validator at `/validators/N/v1/status`. Oracle prices come from Reflector's testnet feed (DEC-041). Since 2026-09-30 the same host also serves the web app at [`https://35-224-76-64.sslip.io`](https://35-224-76-64.sslip.io) (release `6c1224d`, from CI run 36651914634).
 
 | First checkpoint on testnet | |
 |---|---|
