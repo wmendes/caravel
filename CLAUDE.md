@@ -75,6 +75,7 @@ M0.5 splits the repo into the platform (Caravel) and its lanes (Caravel Perps fi
   - `crates/caravel-app-sdk` (no_std: `AppGenesisV1`, the SDK state layout and the standard pipeline for any app engine, DEC-060, DEC-062; `testapp` feature);
   - `crates/caravel-runtime` (executor, store, sequencer and validator cores, checkpoints; any app through the `LaneApp` trait, DEC-053; formerly caravel-lane);
   - `crates/caravel-node` (library: sequencer / validator / replay / genesis / lane files for any app through `NodeApp`, DEC-053, DEC-054; each app's binary links it);
+  - `crates/caravel-deploy` (the deploy tool: a lane file's `[env.<name>]` deployments, derived addresses, the pure plan; DEC-066);
   - `contracts/settlement`;
   - `relayer/` (TS: inbox, checkpoints, metrics, and the host for an app's feed modules, DEC-053);
   - `test-vectors/` (the platform formats' golden vectors).

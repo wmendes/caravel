@@ -2050,7 +2050,7 @@ This drops the lane registry contract, the console and its web packages, hosted 
 | P-09 | `caravel-harness`; settlement tests move off perps; new settlement build of record | P-08 | review |
 | P-10 | Payments template: engine, vectors, scenarios, INV-PAY1, parity, node, e2e (DEC-064) — **Gate P2** | P-09 | review |
 | P-11 | Node groundwork, one release for the VM: `[env]` tables set aside by the lane-file parser, identity fields in `/v1/status`, `export-proofs`, release with `COMMIT`, full `SHA256SUMS` and vendored relayer dependencies (DEC-065) | P-10 | review |
-| P-12 | `caravel-deploy`: the `[env]` schema, secret refusal, derived settlement address, and the pure plan engine with golden plans | P-11 | todo |
+| P-12 | `caravel-deploy`: the `[env]` schema, secret refusal, derived settlement address, and the pure plan engine with golden plans (DEC-066) | P-11 | review |
 | P-13 | `apply` on Stellar and the `local` provider: chain reader, generated node configs, the `caravel` dispatcher | P-12 | todo |
 | P-14 | `status` and `destroy`; `e2e-local.sh` driven by the tool for both templates — **Gate P3** | P-13 | todo |
 | P-15 | The `ssh` provider: prerequisites check, IAP transport, systemd, Caddy, template extras, `--preflight` | P-14 | todo |
@@ -2381,6 +2381,25 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 - **`/v1/status`** of the sequencer and of each validator reports what the node runs: `lane_id`, `config_hash`, `settlement` (C…), `engine_wasm_sha256`, `network_passphrase` and `release` `{version, commit}`. The commit is `CARAVEL_COMMIT` at build time, which the CI release sets, and `null` in local builds. The validator also reports `lane_name`. The deploy tool compares a host against the lane file and the chain with these fields.
 - **`export-proofs --config <validator.toml>`** writes every exit a validator's store holds: every escape leaf of its last accepted checkpoint and every withdrawal leaf, each with its proof. With `rpc_url` set, that checkpoint must be Stellar's `last_checkpoint()` (seq and header hash). It reuses the escape and withdrawal proof code, and on the fixture store its proofs equal the per-account routes'.
 - **The CI release** builds both node binaries, vendors the relayer's production `node_modules` (pure JS; package-lock integrity is checked in CI), covers the relayer and feed files in `SHA256SUMS`, and `deploy-vm.sh` installs `COMMIT` and `SHA256SUMS` in `/opt/caravel`. Hosts no longer run `npm` | The deploy tool reads hosts and the chain rather than a state file, so the nodes must say what they run. Destroy needs every exit in one file | — |
+| DEC-066 | **M0.5 (P-12).** `platform/crates/caravel-deploy`: the deployment schema and the pure plan engine.
+- **`[env.<name>]`** (`manifest.rs`, `deny_unknown_fields`) has these fields:
+  - `network` (`local` or `testnet`; mainnet is refused by name), `rpc_url`;
+  - `admin`, `usdc` (`circle` or `local`), optional `settlement` (a pinned C… address) and `settlement_wasm`, `threshold`, `[settlement_params]` (`min_deposit` defaults to `[limits] min_deposit`);
+  - `[[validators]]` (`name`, `key`, `weight`);
+  - `[sequencer]` (`port`; validator `i` listens on `port + i`);
+  - `[relayer]` (`account`, `feed_keys`, and opaque `feeds`);
+  - `[host]` (`provider` `local` or `ssh`, `address`, `transport` `ssh` or `gcloud-iap` with `project` and `zone`, `public_url`, `root`).
+- **Every broken rule is reported at once.** Key fields must name Stellar CLI identities (a G… key or a 64-hex seed is refused). A secret key or a seed phrase anywhere in the table is refused without being echoed. Hashes elsewhere are fine.
+- **Addresses are computed offline** (`address.rs`), matching `stellar contract id wasm` and `stellar contract id asset`:
+  - the settlement contract comes from the admin and the salt `H("caravel/settlement" ‖ lane_id)`;
+  - a local lane's USDC is the asset contract of `USDC:<admin>`.
+- **The plan** (`plan.rs`) is a pure diff from the resolved deployment to ordered steps and blocking problems.
+  - **Steps:** fund, create USDC, upload, deploy, wipe host data, release, write, start, restart, rotate, stop.
+  - **Problems:** a constructor field changed, code drift or unknown code, frozen, a pinned contract missing, USDC missing, a signer set reused, a host not ready, a node mismatch.
+  - **Order:** validators start before a rotation names them, and the sequencer restarts after it.
+  - **The target epoch** is computed first, so the sequencer's config can carry it.
+- **Tests:** 11 plan cases, 9 of them golden texts (`tests/golden/plan-*.txt`), and 6 manifest tests.
+- **CI** fails if the name of one well-known IaC tool appears anywhere in the repo (the human's copy rule) | A plan that names every address and step before anything is sent, with the chain as the only record, is what the prior art lacks on Stellar (docs/SOURCES.md, 2026-09-30). A pure diff can be tested case by case | — |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

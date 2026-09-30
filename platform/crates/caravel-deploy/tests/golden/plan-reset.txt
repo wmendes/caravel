@@ -1,0 +1,17 @@
+Lane demo-pay-0 · env local · network testnet
+  lane_id 01010101…  config_hash 02020202…  engine 04040404…
+  settlement CC3UKZIZZ2LOLG6ZXQ3UNAEAP5JSCTWSSU4X33RU3VIAJMYUDZCSC6D4 (derived from the admin and the lane), admin GCQK…AGP5, USDC CADF…T54G
+  signers: 2 of 3 at epoch 1
+
++ fund      admin GCQK…AGP5 (friendbot)
++ fund      relayer GCQ2…DJX7 (friendbot)
++ upload    settlement Wasm fb68ee32…
++ deploy    settlement CC3UKZIZZ2LOLG6ZXQ3UNAEAP5JSCTWSSU4X33RU3VIAJMYUDZCSC6D4
+- wipe      the host's lane data (it belongs to a contract that is gone)
+~ restart   validator-1
+~ restart   validator-2
+~ restart   validator-3
+~ restart   sequencer
+~ restart   relayer
+
+10 step(s), 0 problem(s).

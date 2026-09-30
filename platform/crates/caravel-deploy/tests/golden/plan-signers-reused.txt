@@ -1,0 +1,8 @@
+Lane demo-pay-0 · env local · network local
+  lane_id 01010101…  config_hash 02020202…  engine 04040404…
+  settlement CC3UKZIZZ2LOLG6ZXQ3UNAEAP5JSCTWSSU4X33RU3VIAJMYUDZCSC6D4 (derived from the admin and the lane), admin GCQK…AGP5, USDC CADF…T54G
+  signers: 2 of 3 at epoch 2
+
+! this signer set was installed at epoch 1; a set can be installed only once, so change a key
+
+0 step(s), 1 problem(s). Apply refuses until they are fixed.

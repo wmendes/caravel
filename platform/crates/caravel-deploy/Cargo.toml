@@ -1,0 +1,18 @@
+[package]
+name = "caravel-deploy"
+description = "Caravel deploy tool: a lane file's [env.<name>] deployments, planned against Stellar and the host, then applied (spec §20.3)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+caravel-node = { workspace = true }
+caravel-runtime = { workspace = true }
+stellar-xdr = { workspace = true, features = ["std"] }
+stellar-strkey = { workspace = true }
+anyhow = "1.0.104"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+toml = "1.1.6"

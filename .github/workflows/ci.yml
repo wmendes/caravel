@@ -33,6 +33,10 @@ jobs:
       - run: ./scripts/check-frozen.sh
       # M0.5: nothing under platform/ may depend on a lane (listed exceptions shrink to none).
       - run: node scripts/check-deps.mjs
+      # Copy rule (spec §20.3): one well-known IaC tool is never named in the
+      # repo. The pattern avoids spelling the word, so it doesn't match itself.
+      - name: Copy rule
+        run: "! git grep -I -n -i -E 'terra[f]orm'"
 
   rust:
     runs-on: ubuntu-latest

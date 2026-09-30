@@ -467,6 +467,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "caravel-deploy"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "caravel-node",
+ "caravel-runtime",
+ "serde",
+ "serde_json",
+ "stellar-strkey 0.0.16",
+ "stellar-xdr",
+ "toml",
+]
+
+[[package]]
 name = "caravel-harness"
 version = "0.1.0"
 dependencies = [
