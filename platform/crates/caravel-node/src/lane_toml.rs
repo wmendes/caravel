@@ -12,6 +12,10 @@
 //! only the app that wrote it reads. Every node, and the replay CLI, derives
 //! the consensus config from the file with this code, so they all hash the
 //! same bytes (spec §16.2).
+//!
+//! `[env.<name>]` tables describe deployments (where and how a lane runs).
+//! They are removed before anything else reads the file, so they never reach
+//! genesis or the app's parser.
 
 use std::path::Path;
 
@@ -26,14 +30,19 @@ use crate::app::NodeApp;
 /// The sections every lane file has.
 const GENERIC: [&str; 5] = ["lane", "app", "node", "access", "limits"];
 
+/// The deployment tables, `[env.<name>]`; also a reserved template name.
+pub const ENV: &str = "env";
+
 #[derive(Debug)]
 pub struct LaneFile {
     pub lane: LaneSection,
     /// `None` for an M0 file.
     pub app: Option<AppSection>,
     pub node: NodeSection,
-    /// The whole file, for the app's parser.
+    /// The whole file without `[env]`, for the app's parser.
     pub raw: toml::Table,
+    /// `[env.<name>]`: one table per deployment. Not consensus.
+    pub env: toml::Table,
 }
 
 #[derive(Debug, Deserialize)]
@@ -121,9 +130,17 @@ impl LaneFile {
     }
 
     pub fn parse(text: &str) -> Result<Self> {
-        let raw: toml::Table = toml::from_str(text)?;
+        let mut raw: toml::Table = toml::from_str(text)?;
+        let env = match raw.remove(ENV) {
+            None => toml::Table::new(),
+            Some(toml::Value::Table(t)) => t,
+            Some(_) => bail!("[{ENV}] must be a table of deployments, [{ENV}.<name>]"),
+        };
         let app: Option<AppSection> = raw.get("app").map(|_| section(&raw, "app")).transpose()?;
         if let Some(app) = &app {
+            if app.template == ENV {
+                bail!("[app] template {ENV:?} is reserved for the deployment tables");
+            }
             if let Some(extra) = raw
                 .keys()
                 .find(|k| !GENERIC.contains(&k.as_str()) && **k != app.template)
@@ -141,6 +158,7 @@ impl LaneFile {
             node: section(&raw, "node")?,
             app,
             raw,
+            env,
         })
     }
 
@@ -339,6 +357,25 @@ greeting = "hi"
             .unwrap()
             .app_section::<Demo>()
             .is_err());
+    }
+
+    #[test]
+    fn env_tables_are_set_aside() {
+        let with_env = format!(
+            "{FILE}\n[env.testnet]\nnetwork = \"testnet\"\n[[env.testnet.validators]]\nname = \"v1\"\n[env.local]\nnetwork = \"local\"\n"
+        );
+        let f = LaneFile::parse(&with_env).unwrap();
+        let plain = LaneFile::parse(FILE).unwrap();
+        assert_eq!(f.raw, plain.raw, "[env] never reaches the app's parser");
+        assert!(plain.env.is_empty());
+        assert_eq!(f.env.keys().collect::<Vec<_>>(), ["local", "testnet"]);
+        assert_eq!(f.env["testnet"]["network"].as_str(), Some("testnet"));
+        // `env` must be a table, and is no template name.
+        assert!(LaneFile::parse(&format!("env = 1\n{FILE}")).is_err());
+        let reserved = FILE
+            .replace("template = \"demo\"", "template = \"env\"")
+            .replace("[demo]\ngreeting = \"hi\"\n", "");
+        assert!(LaneFile::parse(&reserved).is_err());
     }
 
     #[test]

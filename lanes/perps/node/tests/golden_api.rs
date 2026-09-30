@@ -102,9 +102,120 @@ async fn m0_api_json_is_unchanged() {
         escapes.push(body(api::escape_proof(&PerpsApp, &store, &pk(s), Some(5))).await);
     }
     escapes.push(body(api::escape_proof(&PerpsApp, &store, &pk(seeds::A), None)).await);
-    out["withdrawal_proofs"] = Value::Array(withdrawals);
-    out["escape_proofs"] = Value::Array(escapes);
+    out["withdrawal_proofs"] = Value::Array(withdrawals.clone());
+    out["escape_proofs"] = Value::Array(escapes.clone());
     check("m0-api.json", &out);
+
+    // export-proofs gives every account's exit at once: the same proofs the
+    // per-account routes give, each verifying against its header.
+    let exits = api::exit_proofs(&PerpsApp, &store, 5).unwrap();
+    let header = |seq: u64| {
+        caravel_core::checkpoint::CheckpointHeaderV1::decode(
+            &store.checkpoint(seq).unwrap().unwrap().header,
+        )
+        .unwrap()
+    };
+    let h5 = header(5);
+    assert_eq!(exits["seq"], "5");
+    assert_eq!(
+        exits["header_hash"],
+        caravel_runtime::sequencer::hex(&sha256(&h5.encode()))
+    );
+    let escape = exits["escape"].as_array().unwrap();
+    assert_eq!(escape.len() as u32, h5.account_count);
+    let mut total = 0i128;
+    for e in escape {
+        let (index, equity) = (
+            e["index"].as_u64().unwrap() as u32,
+            e["equity"].as_str().unwrap().parse::<i128>().unwrap(),
+        );
+        let key = caravel_runtime::views::parse_g(e["account"].as_str().unwrap()).unwrap();
+        let leaf = sha256(&caravel_core::preimage::account_leaf_preimage(
+            &h5.lane_id,
+            5,
+            index,
+            &key,
+            equity,
+        ));
+        assert!(
+            verifies(
+                &leaf,
+                index,
+                h5.account_count,
+                &e["proof"],
+                &h5.accounts_root
+            ),
+            "{e}"
+        );
+        total += equity;
+    }
+    assert_eq!(total, h5.escape_total);
+    for (seed, one) in [seeds::A, seeds::B, seeds::C, seeds::D]
+        .iter()
+        .zip(&escapes)
+    {
+        let mine = escape
+            .iter()
+            .find(|e| e["account"] == caravel_runtime::views::g_address(&pk(*seed)));
+        match mine {
+            Some(mine) => {
+                assert_eq!(one["status"], 200);
+                assert_eq!(mine["proof"], one["body"]["proof"]);
+                assert_eq!(mine["equity"], one["body"]["equity"]);
+            }
+            None => assert_eq!(one["status"], 404, "{one}"),
+        }
+    }
+    let all_withdrawals: usize = withdrawals
+        .iter()
+        .map(|w| w["body"]["withdrawals"].as_array().unwrap().len())
+        .sum();
+    let listed = exits["withdrawals"].as_array().unwrap();
+    assert!(listed.len() >= all_withdrawals && !listed.is_empty());
+    for w in listed {
+        let seq: u64 = w["seq"].as_str().unwrap().parse().unwrap();
+        let h = header(seq);
+        let (index, amount) = (
+            w["index"].as_u64().unwrap() as u32,
+            w["amount"].as_str().unwrap().parse::<i128>().unwrap(),
+        );
+        let key = caravel_runtime::views::parse_g(w["account"].as_str().unwrap()).unwrap();
+        let leaf = sha256(&caravel_core::preimage::withdrawal_leaf_preimage(
+            &h.lane_id, seq, index, &key, amount,
+        ));
+        assert!(
+            verifies(
+                &leaf,
+                index,
+                h.withdrawal_count,
+                &w["proof"],
+                &h.withdrawals_root
+            ),
+            "{w}"
+        );
+    }
+}
+
+fn verifies(leaf: &[u8; 32], index: u32, n: u32, proof: &Value, root: &[u8; 32]) -> bool {
+    let siblings: Vec<[u8; 32]> = proof
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| {
+            caravel_runtime::sequencer::unhex(p.as_str().unwrap())
+                .unwrap()
+                .try_into()
+                .unwrap()
+        })
+        .collect();
+    caravel_core::merkle::verify(
+        &caravel_core::merkle::NativeSha256,
+        leaf,
+        index,
+        n,
+        &siblings,
+        root,
+    )
 }
 
 #[test]

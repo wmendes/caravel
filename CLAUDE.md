@@ -48,6 +48,7 @@ BENCH_ACCOUNTS=256 BENCH_ORDERS_PER_SIDE=128 BENCH_BLOCK_BYTES=12000 cargo run -
 CARAVEL_INTERNAL_TOKEN=$(openssl rand -hex 16) cargo run --release -p caravel-perps-node -- sequencer --config lanes/perps/config/sequencer.local.toml   # local sequencer (local lane, DEC-037)
 cargo run --release -p caravel-perps-node -- validator --config lanes/perps/config/validator-1.local.toml   # a validator (key in keys/, never in git)
 cargo run --release -p caravel-perps-node -- check-store --config lanes/perps/config/sequencer.local.toml   # replay a node's store through the Wasm
+cargo run --release -p caravel-perps-node -- export-proofs --config <validator.toml> [--out exit.json]   # every escape and withdrawal proof a validator holds (DEC-065)
 DURATION=3600 TPS=50 ./scripts/soak-sequencer.sh   # T-007 soak: 1 s blocks, 50 tx/s, restart halfway
 cargo run --release -p caravel-perps-node -- replay --rpc <url> --network-passphrase <p> --settlement C... --genesis-config lanes/perps/config/lane.<lane>.toml --engine-wasm target/contracts/perps_engine.wasm [--prove-escape G...]   # replay from Stellar only
 ./scripts/e2e-local.sh                  # quickstart + sequencer + 3 validators + relayer (after T-011); E2E_TEMPLATE=payments for the payments lane
@@ -62,11 +63,11 @@ RELEASE_DIR=<CI release artifact> ./scripts/deploy-vm.sh            # install on
 (cd site && vercel deploy --prod)       # landing page only, never from the repo root (DEC-019)
 ```
 
-Git: one branch and PR per task (`t-0xx-short-name`, and `p-0x-short-name` for M0.5). Inside a phase, PRs stack on the previous task's branch, and the human reviews at the phase gates (M0: T-003, T-006, T-011, T-016; M0.5: P-07, P-10, P-16, P-21).
+Git: one branch and PR per task (`t-0xx-short-name`, and `p-0x-short-name` for M0.5). Inside a phase, PRs stack on the previous task's branch, and the human reviews at the phase gates (M0: T-003, T-006, T-011, T-016; M0.5: P-07, P-10, P-14, P-18).
 
 ## Layout
 
-M0.5 is splitting the repo into the platform (Caravel) and its lanes (Caravel Perps first, then the Payments template), spec §20.3. Current state:
+M0.5 splits the repo into the platform (Caravel) and its lanes (Caravel Perps first, then the Payments template), then turns the platform into a declarative deploy tool for lanes: one lane file with `[env.<name>]` tables; plan, apply, destroy (spec §20.3). Never write the name of the well-known IaC tool in copy or docs; say "declarative" or "infrastructure as code". Current state:
 - `lanes/perps/engine/`: **frozen** nested workspace, the perps engine of record (DEC-051). Never edit it. It holds caravel-types, caravel-merkle, caravel-perps (engine logic), caravel-testkit (test-only: lane simulator, scenarios, `cargo gen-vectors`), contracts/perps-engine and test-vectors/.
 - `platform/` (Caravel, app-agnostic; `scripts/check-deps.mjs` keeps it off `lanes/`):
   - `crates/caravel-core` (the formats every lane shares, read without the app, DEC-052);

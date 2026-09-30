@@ -87,6 +87,7 @@ pub struct SequencerNode<A: NodeApp> {
     pub signers: Option<Signers>,
     token: String,
     production: bool,
+    identity: api::Identity,
 }
 
 impl<A: NodeApp> SequencerNode<A> {
@@ -218,6 +219,13 @@ pub async fn start<A: NodeApp>(
         signers: cfg.signers.clone(),
         token: cfg.internal_token.clone(),
         production: cfg.production,
+        identity: api::Identity {
+            lane_id: cfg.lane.lane_id(),
+            config_hash,
+            settlement: cfg.settlement_contract,
+            engine_wasm_hash: cfg.engine_wasm_hash,
+            network_passphrase: cfg.network_passphrase.clone(),
+        },
     });
     let router = router(node.clone(), &cfg.cors_origins);
     tokio::spawn(block_loop(node.clone(), config_hash));
@@ -529,7 +537,7 @@ async fn status<A: NodeApp>(State(app): AppState<A>) -> ApiResult {
     let seq = |v: Option<u64>| v.map(|s| s.to_string());
     let (mh, m) = *app.last_metering.lock().expect("metering lock");
     let metering = json!({ "height": mh.to_string(), "cpu_insns": m.cpu_insns.to_string(), "mem_bytes": m.mem_bytes.to_string(), "note": "soroban-env-host metering of the last step call, not network fees" });
-    let body = json!({
+    let mut body = json!({
         "lane_id": hex(&st.lane_id),
         "config_hash": hex(&core.config_hash()),
         "lane_name": app.lane_name,
@@ -562,6 +570,7 @@ async fn status<A: NodeApp>(State(app): AppState<A>) -> ApiResult {
             "validators": s.validators.iter().map(|v| json!({ "index": v.index, "url": v.url, "key": views::g_address(&v.key), "weight": v.weight })).collect::<Vec<_>>(),
         })),
     });
+    app.identity.extend(&mut body);
     ok(body)
 }
 

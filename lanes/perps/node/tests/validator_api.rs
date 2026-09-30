@@ -370,6 +370,19 @@ async fn validators_follow_sign_and_refuse_a_tampered_chain() {
             })
             .await;
         assert!(st["halted"].is_null());
+        // What it runs, for the deploy tool's host check.
+        let hex = |b: &[u8]| b.iter().map(|x| format!("{x:02x}")).collect::<String>();
+        assert_eq!(
+            st["settlement"],
+            stellar_strkey::Contract(CONTRACT).to_string().as_str()
+        );
+        assert_eq!(st["engine_wasm_sha256"], hex(&engine_hash()));
+        assert_eq!(st["config_hash"], status["config_hash"]);
+        assert_eq!(
+            st["network_passphrase"],
+            "Test SDF Network ; September 2015"
+        );
+        assert_eq!(st["release"]["version"], env!("CARGO_PKG_VERSION"));
     }
 
     // The tampered validator stopped at block 3 and refuses to sign anything.
