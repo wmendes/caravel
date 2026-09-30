@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="Caravel lets any team run its own appchain, with its own block time, gas token, fees and validators, that settles to Stellar in USDC.">
+<meta name="description" content="Caravel deploys and runs appchains that settle to Stellar in the token they choose, declared in one lane file: plan, apply, destroy.">
 <title>Caravel</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -314,6 +314,19 @@ footer p { font-size: .875rem; color: var(--muted); }
 
 /* Logo fills */
 .lg-lane { fill: var(--lane); } .lg-harbor { fill: var(--harbor); } .lg-ink { fill: var(--ink); }
+
+/* One lane file: the file on the left, the four commands on the right. */
+.filegrid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); gap: 32px; margin-top: 44px; align-items: start; }
+@media (max-width: 900px) { .filegrid { grid-template-columns: minmax(0, 1fr); } }
+.lanefile { margin: 0; background: var(--raised); border: 1px solid var(--rule); border-radius: 12px; padding: 22px 24px; overflow-x: auto; font: .875rem/1.65 ui-monospace, "SF Mono", Menlo, Consolas, monospace; color: var(--ink); tab-size: 2; }
+.lanefile .h { color: var(--lane); font-weight: 700; }
+.lanefile .s { color: var(--harbor-ink); }
+.lanefile .c { color: var(--muted); }
+.verbs { list-style: none; padding: 0; display: grid; gap: 22px; }
+.verb { border-top: 3px solid var(--lane); padding-top: 14px; }
+.verb.st { border-top-color: var(--harbor); }
+.verb code { font: 700 1.125rem ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.verb p { margin-top: 6px; color: var(--muted); font-size: .9375rem; max-width: 52ch; }
 </style>
 </head>
 <body>
@@ -327,6 +340,7 @@ footer p { font-size: .875rem; color: var(--muted); }
       </svg>
     </a>
     <nav class="nav" aria-label="Sections">
+      <a href="#file">Lane file</a>
       <a href="#config">Configure</a>
       <a href="#how">How it works</a>
       <a href="#trust">Trust model</a>
@@ -341,13 +355,13 @@ footer p { font-size: .875rem; color: var(--muted); }
     <div class="wrap">
       <div>
         <p class="eyebrow">Appchains that settle to Stellar</p>
-        <h1 id="hero-h">Custom lanes that always come home to Stellar.</h1>
-        <p class="lede">Caravel lets any team run its own appchain, with its own block time, gas token, fees and validators, that settles to Stellar in USDC. The first lane is Caravel Perps, a fully onchain perpetual futures exchange with a real order book.</p>
+        <h1 id="hero-h">One file.<br>Your own lane.<br>Settled on Stellar.</h1>
+        <p class="lede">Caravel runs appchains, called lanes, from one file: block time, fees, validators, access and the token it settles in. See every change before it's made, then apply it. The first lane is Caravel Perps, a perpetual futures exchange with a real order book.</p>
         <div class="cta-row">
           <a class="btn btn-primary" data-waitlist href="#join">Join the testnet waitlist</a>
-          <a class="btn btn-ghost" href="#config">See what a lane can change</a>
+          <a class="btn btn-ghost" href="#file">See the lane file</a>
         </div>
-        <p class="hero-note">Market makers get access first.</p>
+        <p class="hero-note">Testnet only. Market makers get access first.</p>
       </div>
 
       <figure class="clock" aria-label="Simulation of the two clocks: the Caravel Perps lane closes a block every second, Stellar closes a ledger about every five seconds, and the lane posts a checkpoint to Stellar every five blocks." style="margin:0">
@@ -370,12 +384,51 @@ footer p { font-size: .875rem; color: var(--muted); }
     </div>
   </section>
 
+  <section class="band" id="file" aria-labelledby="file-h">
+    <div class="wrap">
+      <div class="head">
+        <p class="eyebrow">One lane file</p>
+        <h2 id="file-h">Everything about a lane lives in one file.</h2>
+        <p class="lede">What the lane is, and where it runs. The tool reads Stellar and your host, then changes only what differs from the file.</p>
+      </div>
+      <div class="filegrid">
+        <pre class="lanefile" aria-label="An example lane file"><span class="c"># lane.toml</span>
+<span class="h">[lane]</span>
+name = <span class="s">"acme-pay-0"</span>
+<span class="h">[app]</span>
+template = <span class="s">"payments"</span>
+<span class="h">[payments]</span>
+transfer_fee = 100000  <span class="c"># 0.01 per transfer</span>
+
+<span class="h">[env.testnet]</span>
+network = <span class="s">"testnet"</span>
+admin = <span class="s">"acme-admin"</span>  <span class="c"># a key in your keystore</span>
+token = <span class="s">"circle-usdc"</span>  <span class="c"># or any Stellar asset</span>
+threshold = 2
+
+<span class="h">[[env.testnet.validators]]</span>
+name = <span class="s">"1"</span>
+key = <span class="s">"acme-v1"</span>
+
+<span class="h">[env.testnet.host]</span>
+provider = <span class="s">"ssh"</span>
+address = <span class="s">"ops@lane.example"</span></pre>
+        <ol class="verbs">
+          <li class="verb"><code>plan</code><p>Lists every change on Stellar and on your host, down to the settlement contract's address, before anything is sent.</p></li>
+          <li class="verb"><code>apply</code><p>Deploys the contract, installs the release and starts the nodes. Run it again and nothing changes. Interrupted, it finishes on the next run.</p></li>
+          <li class="verb"><code>status</code><p>Height, checkpoints on Stellar, when a freeze would become possible, and whether the lane still matches its file.</p></li>
+          <li class="verb st"><code>destroy</code><p>Drains the lane, writes every account's exit proof, and freezes the contract so users withdraw on Stellar.</p></li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
   <section class="band" id="config" aria-labelledby="config-h">
     <div class="wrap">
       <div class="head">
         <p class="eyebrow">Configure your lane</p>
         <h2 id="config-h">Every lane sets its own rules.</h2>
-        <p class="lede">What Stellar mainnet decides once for everyone, a lane decides for itself. The money still settles on Stellar.</p>
+        <p class="lede">What Stellar mainnet decides once for everyone, a lane decides for itself, in its lane file. The money still settles on Stellar.</p>
       </div>
       <div class="bandkey">
         <span><i class="bk bk-lane"></i>Top: your lane</span>
@@ -385,19 +438,19 @@ footer p { font-size: .875rem; color: var(--muted); }
       <ul class="dials">
         <li class="dial">
           <h3>Block time</h3>
-          <div class="cell l"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><rect class="d-lo" x="0" y="14" width="24" height="28" rx="3"/><rect class="d-lo" x="31.5" y="14" width="24" height="28" rx="3"/><rect class="d-lo" x="63" y="14" width="24" height="28" rx="3"/><rect class="d-lo" x="94.5" y="14" width="24" height="28" rx="3"/><rect class="d-lo" x="126" y="14" width="24" height="28" rx="3"/><rect class="d-lf" x="0" y="14" width="24" height="28" rx="3"/><rect class="d-lf d-b2" x="31.5" y="14" width="24" height="28" rx="3"/><rect class="d-lf d-b3" x="63" y="14" width="24" height="28" rx="3"/><rect class="d-lf d-b4" x="94.5" y="14" width="24" height="28" rx="3"/><rect class="d-lf d-b5" x="126" y="14" width="24" height="28" rx="3"/></svg><b><span class="vh">Your lane: </span>1s blocks</b></div>
+          <div class="cell l"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><rect class="d-lo" x="0" y="14" width="24" height="28" rx="3"/><rect class="d-lo" x="31.5" y="14" width="24" height="28" rx="3"/><rect class="d-lo" x="63" y="14" width="24" height="28" rx="3"/><rect class="d-lo" x="94.5" y="14" width="24" height="28" rx="3"/><rect class="d-lo" x="126" y="14" width="24" height="28" rx="3"/><rect class="d-lf" x="0" y="14" width="24" height="28" rx="3"/><rect class="d-lf d-b2" x="31.5" y="14" width="24" height="28" rx="3"/><rect class="d-lf d-b3" x="63" y="14" width="24" height="28" rx="3"/><rect class="d-lf d-b4" x="94.5" y="14" width="24" height="28" rx="3"/><rect class="d-lf d-b5" x="126" y="14" width="24" height="28" rx="3"/></svg><b><span class="vh">Your lane: </span>0.2s to 5s blocks</b></div>
           <div class="cell s"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><defs><clipPath id="d-led"><rect x="0" y="14" width="150" height="28" rx="5"/></clipPath></defs><rect class="d-so" x="0" y="14" width="150" height="28" rx="5"/><g clip-path="url(#d-led)"><rect class="d-sf d-sweep" x="0" y="14" width="150" height="28"/></g></svg><b><span class="vh">Stellar mainnet: </span>~5s ledgers</b></div>
           <p class="seen"><svg class="ck" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8"/></svg><span><span class="vh">Already live on </span>Hyperliquid</span></p>
         </li>
         <li class="dial">
-          <h3>Gas token</h3>
-          <div class="cell l"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><circle class="d-lf" cx="18" cy="28" r="16"/><text class="d-onl" x="18" y="35" text-anchor="middle" font-size="20">$</text><circle class="d-lf" cx="75" cy="28" r="16"/><rect class="d-onl" x="69" y="22" width="12" height="12" rx="1.5" transform="rotate(45 75 28)"/><circle class="d-lo d-dash" cx="132" cy="28" r="15"/></svg><b><span class="vh">Your lane: </span>USDC, own token, or none</b></div>
-          <div class="cell s"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><circle class="d-sf" cx="18" cy="28" r="16"/><text class="d-ons" x="18" y="32" text-anchor="middle" font-size="10.5">XLM</text></svg><b><span class="vh">Stellar mainnet: </span>XLM only</b></div>
+          <h3>Settlement token</h3>
+          <div class="cell l"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><circle class="d-lf" cx="18" cy="28" r="16"/><text class="d-onl" x="18" y="35" text-anchor="middle" font-size="20">$</text><circle class="d-lf" cx="75" cy="28" r="16"/><rect class="d-onl" x="69" y="22" width="12" height="12" rx="1.5" transform="rotate(45 75 28)"/><circle class="d-lo d-dash" cx="132" cy="28" r="15"/></svg><b><span class="vh">Your lane: </span>USDC, EURC, or any Stellar token</b></div>
+          <div class="cell s"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><circle class="d-sf" cx="18" cy="28" r="16"/><text class="d-ons" x="18" y="32" text-anchor="middle" font-size="10.5">XLM</text></svg><b><span class="vh">Stellar mainnet: </span>XLM pays every fee</b></div>
           <p class="seen"><svg class="ck" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8"/></svg><span><span class="vh">Already live on </span>Arbitrum, ApeChain</span></p>
         </li>
         <li class="dial">
           <h3>Fees</h3>
-          <div class="cell l"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><rect class="d-lf" x="0" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="15.7" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="31.3" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="47" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="62.7" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="78.3" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="94" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="109.7" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="125.3" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="141" y="30" width="9" height="20" rx="1.5"/></svg><b><span class="vh">Your lane: </span>Fixed, sponsored, or zero</b></div>
+          <div class="cell l"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><rect class="d-lf" x="0" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="15.7" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="31.3" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="47" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="62.7" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="78.3" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="94" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="109.7" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="125.3" y="30" width="9" height="20" rx="1.5"/><rect class="d-lf" x="141" y="30" width="9" height="20" rx="1.5"/></svg><b><span class="vh">Your lane: </span>Flat, per trade, or zero</b></div>
           <div class="cell s"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><rect class="d-sf" x="0" y="36" width="9" height="14" rx="1.5"/><rect class="d-sf" x="15.7" y="28" width="9" height="22" rx="1.5"/><rect class="d-sf" x="31.3" y="38" width="9" height="12" rx="1.5"/><rect class="d-sf" x="47" y="16" width="9" height="34" rx="1.5"/><rect class="d-sf" x="62.7" y="24" width="9" height="26" rx="1.5"/><rect class="d-sf" x="78.3" y="6" width="9" height="44" rx="1.5"/><rect class="d-sf" x="94" y="32" width="9" height="18" rx="1.5"/><rect class="d-sf" x="109.7" y="20" width="9" height="30" rx="1.5"/><rect class="d-sf" x="125.3" y="10" width="9" height="40" rx="1.5"/><rect class="d-sf" x="141" y="30" width="9" height="20" rx="1.5"/></svg><b><span class="vh">Stellar mainnet: </span>Market fee in XLM</b></div>
           <p class="seen"><svg class="ck" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8"/></svg><span><span class="vh">Already live on </span>Hyperliquid, dYdX</span></p>
         </li>
@@ -409,7 +462,7 @@ footer p { font-size: .875rem; color: var(--muted); }
         </li>
         <li class="dial">
           <h3>Access</h3>
-          <div class="cell l"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><circle class="d-lf" cx="10" cy="28" r="7"/><circle class="d-lo d-dash" cx="36" cy="28" r="6.5"/><circle class="d-lf" cx="62" cy="28" r="7"/><circle class="d-lf" cx="88" cy="28" r="7"/><circle class="d-lo d-dash" cx="114" cy="28" r="6.5"/><circle class="d-lf" cx="140" cy="28" r="7"/></svg><b><span class="vh">Your lane: </span>Allow-list or KYC</b></div>
+          <div class="cell l"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><circle class="d-lf" cx="10" cy="28" r="7"/><circle class="d-lo d-dash" cx="36" cy="28" r="6.5"/><circle class="d-lf" cx="62" cy="28" r="7"/><circle class="d-lf" cx="88" cy="28" r="7"/><circle class="d-lo d-dash" cx="114" cy="28" r="6.5"/><circle class="d-lf" cx="140" cy="28" r="7"/></svg><b><span class="vh">Your lane: </span>Open or allow-listed</b></div>
           <div class="cell s"><svg class="dp" viewBox="0 0 150 56" aria-hidden="true"><circle class="d-sf" cx="10" cy="28" r="7"/><circle class="d-sf" cx="36" cy="28" r="7"/><circle class="d-sf" cx="62" cy="28" r="7"/><circle class="d-sf" cx="88" cy="28" r="7"/><circle class="d-sf" cx="114" cy="28" r="7"/><circle class="d-sf" cx="140" cy="28" r="7"/></svg><b><span class="vh">Stellar mainnet: </span>Any account</b></div>
           <p class="seen"><svg class="ck" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8.5l3.2 3.2L13 4.8"/></svg><span><span class="vh">Already live on </span>Avalanche L1s</span></p>
         </li>
@@ -450,23 +503,23 @@ footer p { font-size: .875rem; color: var(--muted); }
     <div class="wrap">
       <div class="head">
         <p class="eyebrow">How it works</p>
-        <h2 id="how-h">Every dollar starts and ends on Stellar.</h2>
-        <p class="lede">A lane is its own Stellar-based chain with its own validators and rules. It runs Soroban, so existing contracts, SDKs and wallets carry over. Stellar holds the money and checks the lane's work.</p>
+        <h2 id="how-h">Every token starts and ends on Stellar.</h2>
+        <p class="lede">A lane runs its own blocks with its own validators and rules. Its app is Soroban Wasm, run by the sequencer and again by every validator. Stellar holds the money and checks the lane's work.</p>
       </div>
       <div class="bandkey">
         <span><i class="bk bk-lane"></i>Top band: a Caravel lane</span>
         <span><i class="bk bk-harbor"></i>Bottom band: Stellar mainnet, ~5s ledgers</span>
       </div>
       <ol class="steps" style="list-style:none; padding:0">
-        <li class="step"><svg class="glyph" viewBox="0 0 240 120" aria-hidden="true"><rect class="g-lane" x="0" y="0" width="240" height="54" rx="8"/><rect class="g-harbor" x="0" y="66" width="240" height="54" rx="8"/><rect class="g-sb" x="36" y="80" width="48" height="26" rx="4"/><rect class="g-lb" x="164" y="14" width="26" height="26" rx="3"/><path class="g-arrow" d="M84 93 L120 93 L120 30 L156 30"/><path class="g-head" d="M151 23 L160 30 L151 37"/></svg><span class="where harbor-t">Stellar → lane</span><h3>Deposit</h3><p>Lock USDC in the settlement contract on Stellar. The same amount appears on the lane.</p></li>
-        <li class="step"><svg class="glyph" viewBox="0 0 240 120" aria-hidden="true"><rect class="g-lane" x="0" y="0" width="240" height="54" rx="8"/><rect class="g-harbor" x="0" y="66" width="240" height="54" rx="8"/><rect class="g-lb" x="22" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="62" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="102" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="142" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="182" y="14" width="30" height="26" rx="3"/></svg><span class="where lane-t">On the lane</span><h3>Trade at 1s</h3><p>Orders match on a Soroban order book in every 1-second block.</p></li>
-        <li class="step"><svg class="glyph" viewBox="0 0 240 120" aria-hidden="true"><rect class="g-lane" x="0" y="0" width="240" height="54" rx="8"/><rect class="g-harbor" x="0" y="66" width="240" height="54" rx="8"/><rect class="g-lb" x="22" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="62" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="102" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="142" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="182" y="14" width="30" height="26" rx="3"/><rect class="g-sb" x="130" y="80" width="88" height="26" rx="4"/><line class="g-arrow" x1="214" y1="44" x2="214" y2="74"/><path class="g-head" d="M207 67 L214 76 L221 67"/></svg><span class="where lane-t">Lane → Stellar</span><h3>Checkpoint</h3><p>Every few blocks, the validators sign the lane's new state and it's posted to Stellar, where a contract verifies it.</p></li>
-        <li class="step"><svg class="glyph" viewBox="0 0 240 120" aria-hidden="true"><rect class="g-lane" x="0" y="0" width="240" height="54" rx="8"/><rect class="g-harbor" x="0" y="66" width="240" height="54" rx="8"/><rect class="g-sb" x="22" y="80" width="88" height="26" rx="4"/><line class="g-arrow" x1="116" y1="93" x2="176" y2="93"/><path class="g-head" d="M171 86 L180 93 L171 100"/><circle class="g-wallet" cx="204" cy="93" r="14"/></svg><span class="where harbor-t">On Stellar</span><h3>Withdraw</h3><p>USDC is released back to your Stellar wallet, and only against a verified checkpoint.</p></li>
+        <li class="step"><svg class="glyph" viewBox="0 0 240 120" aria-hidden="true"><rect class="g-lane" x="0" y="0" width="240" height="54" rx="8"/><rect class="g-harbor" x="0" y="66" width="240" height="54" rx="8"/><rect class="g-sb" x="36" y="80" width="48" height="26" rx="4"/><rect class="g-lb" x="164" y="14" width="26" height="26" rx="3"/><path class="g-arrow" d="M84 93 L120 93 L120 30 L156 30"/><path class="g-head" d="M151 23 L160 30 L151 37"/></svg><span class="where harbor-t">Stellar → lane</span><h3>Deposit</h3><p>Lock the lane's token in its settlement contract on Stellar. The same amount appears on the lane.</p></li>
+        <li class="step"><svg class="glyph" viewBox="0 0 240 120" aria-hidden="true"><rect class="g-lane" x="0" y="0" width="240" height="54" rx="8"/><rect class="g-harbor" x="0" y="66" width="240" height="54" rx="8"/><rect class="g-lb" x="22" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="62" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="102" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="142" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="182" y="14" width="30" height="26" rx="3"/></svg><span class="where lane-t">On the lane</span><h3>Use the lane</h3><p>Every block runs the lane's app. On Caravel Perps, orders match on its order book every second.</p></li>
+        <li class="step"><svg class="glyph" viewBox="0 0 240 120" aria-hidden="true"><rect class="g-lane" x="0" y="0" width="240" height="54" rx="8"/><rect class="g-harbor" x="0" y="66" width="240" height="54" rx="8"/><rect class="g-lb" x="22" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="62" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="102" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="142" y="14" width="30" height="26" rx="3"/><rect class="g-lb" x="182" y="14" width="30" height="26" rx="3"/><rect class="g-sb" x="130" y="80" width="88" height="26" rx="4"/><line class="g-arrow" x1="214" y1="44" x2="214" y2="74"/><path class="g-head" d="M207 67 L214 76 L221 67"/></svg><span class="where lane-t">Lane → Stellar</span><h3>Checkpoint</h3><p>Every few blocks, the validators sign the lane's new state and it's posted to Stellar, where the settlement contract checks their signatures.</p></li>
+        <li class="step"><svg class="glyph" viewBox="0 0 240 120" aria-hidden="true"><rect class="g-lane" x="0" y="0" width="240" height="54" rx="8"/><rect class="g-harbor" x="0" y="66" width="240" height="54" rx="8"/><rect class="g-sb" x="22" y="80" width="88" height="26" rx="4"/><line class="g-arrow" x1="116" y1="93" x2="176" y2="93"/><path class="g-head" d="M171 86 L180 93 L171 100"/><circle class="g-wallet" cx="204" cy="93" r="14"/></svg><span class="where harbor-t">On Stellar</span><h3>Withdraw</h3><p>The token goes back to your Stellar wallet, and only against an accepted checkpoint.</p></li>
       </ol>
       <div class="props">
-        <div class="prop"><h3>Your own settings</h3><p>Block time, fees, reserves and resource limits.</p></div>
-        <div class="prop"><h3>Your own modules</h3><p>Gas token, validator rules, access control, order matching.</p></div>
-        <div class="prop st"><h3>Stellar settlement</h3><p>Deposits, withdrawals and final state stay on mainnet.</p></div>
+        <div class="prop"><h3>Your own settings</h3><p>Block time, fees, limits, access and the settlement token.</p></div>
+        <div class="prop"><h3>Your own app</h3><p>Perps and Payments today. Your own Wasm engine later.</p></div>
+        <div class="prop st"><h3>Stellar settlement</h3><p>Deposits, withdrawals and every checkpoint stay on Stellar.</p></div>
       </div>
     </div>
   </section>
@@ -481,8 +534,8 @@ footer p { font-size: .875rem; color: var(--muted); }
       <div class="scroll-x"><svg class="chart" viewBox="0 0 900 222" role="img" aria-label="A trade at 1.3 seconds is soft-confirmed by the next 1-second lane block. After five blocks a checkpoint is posted to Stellar; the trade is final when the Stellar ledger that includes the verified checkpoint closes."><rect class="c-lb" x="133" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="197" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="261" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="325" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="389" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="453" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="517" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="581" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="645" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="709" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="773" y="36" width="58" height="28" rx="3"/><rect class="c-lb" x="837" y="36" width="58" height="28" rx="3"/><rect class="c-sb" x="133" y="132" width="314" height="40" rx="6"/><rect class="c-sb" x="453" y="132" width="314" height="40" rx="6"/><rect class="c-sb" x="773" y="132" width="122" height="40" rx="6"/><rect class="c-cp" x="442" y="84" width="16" height="16" transform="rotate(45 450 92)"/><line class="c-drop" x1="450" y1="104" x2="450" y2="126"/><rect class="c-cp" x="762" y="84" width="16" height="16" transform="rotate(45 770 92)"/><line class="c-drop" x1="770" y1="104" x2="770" y2="126"/><line class="c-trade" x1="213.2" y1="22" x2="213.2" y2="196"/><path class="c-br-lane" d="M213.2 26 L213.2 18 L258 18 L258 26"/><path class="c-br-harbor" d="M213.2 182 L213.2 190 L770 190 L770 182"/><text class="c-lab c-lab-lane" x="0" y="56">Lane · 1s</text><text class="c-lab" x="0" y="98">Checkpoint</text><text class="c-lab c-lab-harbor" x="0" y="158">Stellar · ~5s</text><text class="c-note c-lab-lane" x="268" y="22">Soft confirmation: next 1s block</text><text class="c-note c-lab-harbor" x="221.2" y="214">Hard settlement: a Stellar ledger includes the verified checkpoint</text><text class="c-note" x="205.2" y="14" text-anchor="end">Your trade</text></svg></div>
       <div class="cards3">
         <div class="tcard soft"><span class="pill l">~1s</span><h3>Soft confirmation</h3><p>The lane's validators confirm your trade in the next block. Between checkpoints you're trusting them, the same trade-off every rollup makes.</p></div>
-        <div class="tcard hard"><span class="pill h">Checkpoint + ~5s</span><h3>Hard settlement</h3><p>Once the settlement contract verifies the checkpoint and a Stellar ledger closes, the trade is final. You're trusting Stellar and the math.</p></div>
-        <div class="tcard exit"><span class="pill o">Planned</span><h3>If the lane stops</h3><p>Your USDC never leaves Stellar. The exit path lets you withdraw against the last verified checkpoint.</p></div>
+        <div class="tcard hard"><span class="pill h">Checkpoint + ~5s</span><h3>Hard settlement</h3><p>Once the settlement contract accepts the checkpoint's signatures and a Stellar ledger closes, the trade is final on Stellar. You're trusting the validators' threshold, and anyone can replay the lane from Stellar to check them.</p></div>
+        <div class="tcard exit"><span class="pill o">Live</span><h3>If the lane stops</h3><p>Your money never leaves Stellar. If the lane stalls or ignores what you send through Stellar, anyone can freeze it, and you withdraw your last checkpointed balance there.</p></div>
       </div>
     </div>
   </section>
@@ -500,7 +553,7 @@ footer p { font-size: .875rem; color: var(--muted); }
         <li><time datetime="2026-05">May 2026</time><span class="dot"></span><h3>Protocol 26</h3><p>Faster BN254 math for proof checks (CAP-80).</p></li>
         <li><time datetime="2026-06">Jun 2026</time><span class="dot"></span><h3>Circle CCTP</h3><p>Native USDC moves between Stellar and other chains.</p></li>
         <li><time datetime="2026-08">Aug 2026</time><span class="dot"></span><h3>Nethermind</h3><p>Noir UltraHonk proof checks on Soroban made 64% cheaper.</p></li>
-        <li><time datetime="2026-10">Oct 2026</time><span class="dot"></span><h3>Caravel</h3><p>Custom lanes that checkpoint to Stellar.</p></li>
+        <li><time datetime="2026-09">Sep 2026</time><span class="dot"></span><h3>Caravel</h3><p>Lanes declared in one file, on testnet.</p></li>
       </ol>
       <div class="cost">
         <h3>Cost to verify one ZK proof on Soroban</h3>
@@ -520,10 +573,10 @@ footer p { font-size: .875rem; color: var(--muted); }
         <h2 id="lanes-h">Perps first. Then any team that needs its own rules.</h2>
       </div>
       <div class="lanes">
-        <article class="lanecard first"><div class="row5"><i></i><i></i><i></i><i></i><i></i></div><span class="tag">First lane</span><h3>Caravel Perps</h3><p class="cfgline">1s blocks · fees in USDC</p><p>A fully onchain order book for perpetual futures, quoting every second and settling in USDC.</p></article>
-        <article class="lanecard"><div class="row5"><i></i><i></i><i></i><i></i><i></i></div><span class="tag">Example</span><h3>Agent payments</h3><p class="cfgline">Sponsored fees · gas in USDC</p><p>Pay-per-request networks where agents never need to hold XLM.</p></article>
-        <article class="lanecard"><div class="row5"><i></i><i></i><i></i><i></i><i></i></div><span class="tag">Example</span><h3>Anchors and institutions</h3><p class="cfgline">KYC'd validators · allow-listed accounts</p><p>A permissioned lane with your own compliance rules, settling on Stellar.</p></article>
-        <article class="lanecard"><div class="row5"><i></i><i></i><i></i><i></i><i></i></div><span class="tag">Example</span><h3>Real-time games</h3><p class="cfgline">Own gas token · 0.5s blocks</p><p>Moves confirmed at play speed, with the game's own token paying for gas.</p></article>
+        <article class="lanecard first"><div class="row5"><i></i><i></i><i></i><i></i><i></i></div><span class="tag">Live on testnet</span><h3>Caravel Perps</h3><p class="cfgline">1s blocks · settles in USDC</p><p>A fully onchain order book for perpetual futures, quoting every second.</p></article>
+        <article class="lanecard"><div class="row5"><i></i><i></i><i></i><i></i><i></i></div><span class="tag">Template</span><h3>Payments</h3><p class="cfgline">Flat or zero fees · any token</p><p>Transfers between lane accounts, with a flat fee to the treasury or none. Ready to launch from a lane file.</p></article>
+        <article class="lanecard"><div class="row5"><i></i><i></i><i></i><i></i><i></i></div><span class="tag">Example</span><h3>Anchors and institutions</h3><p class="cfgline">Your validators · allow-listed accounts</p><p>A permissioned lane with your own access rules, settling on Stellar.</p></article>
+        <article class="lanecard"><div class="row5"><i></i><i></i><i></i><i></i><i></i></div><span class="tag">Example</span><h3>Real-time games</h3><p class="cfgline">Own token · 0.2s blocks</p><p>Moves confirmed at play speed, settling in the game's own token.</p></article>
       </div>
     </div>
   </section>
@@ -532,14 +585,14 @@ footer p { font-size: .875rem; color: var(--muted); }
     <div class="wrap">
       <div class="head">
         <p class="eyebrow">Roadmap</p>
-        <h2 id="roadmap-h">From trusted validators to trustless lanes.</h2>
+        <h2 id="roadmap-h">From team-run validators to proven lanes.</h2>
         <p class="lede">Each step asks users to trust less.</p>
       </div>
       <div class="stairs">
-        <div class="stair l"><span class="when lane-t">Now</span><h3>Signed checkpoints</h3><p>Three validators run by the team. Stellar checks their aggregated BLS signature on every checkpoint.</p><div class="riser"></div></div>
-        <div class="stair"><span class="when harbor-t">Next · Q4 2026</span><h3>Validity proofs</h3><p>A ZK proof replaces the signature check. The exit path and a public testnet ship with it.</p><div class="riser"></div></div>
-        <div class="stair"><span class="when harbor-t">Then</span><h3>Bonded validators</h3><p>Anyone can run a validator. Rewards are a share of fees in USDC, vesting and slashable.</p><div class="riser"></div></div>
-        <div class="stair l"><span class="when lane-t">Later</span><h3>Lane launch kit</h3><p>Pick block time, gas token, fees and validators, and deploy a lane settled on Stellar.</p><div class="riser"></div></div>
+        <div class="stair l"><span class="when lane-t">Now</span><h3>Lanes from one file</h3><p>Declare a lane, plan it, apply it and wind it down, in the token you choose. On testnet.</p><div class="riser"></div></div>
+        <div class="stair l"><span class="when lane-t">Now</span><h3>Signed checkpoints</h3><p>Validators sign every checkpoint (2 of 3 on Caravel Perps, run by the team) and Stellar checks the signatures. The exit path is live.</p><div class="riser"></div></div>
+        <div class="stair"><span class="when harbor-t">Next</span><h3>Validity proofs</h3><p>A ZK proof replaces the signature check, so a wrong state can't be accepted.</p><div class="riser"></div></div>
+        <div class="stair"><span class="when harbor-t">Then</span><h3>Bonded validators</h3><p>Anyone can run a validator, with a bond it loses for signing two versions of a checkpoint.</p><div class="riser"></div></div>
       </div>
     </div>
   </section>
@@ -557,8 +610,8 @@ footer p { font-size: .875rem; color: var(--muted); }
         <ul class="who">
           <li><span><b>Market makers.</b> First wave. Quote on a 1-second order book and tell us what breaks.</span></li>
           <li><span><b>Traders.</b> Perps with an order book, settling in Stellar USDC.</span></li>
-          <li class="v"><span><b>Validator operators.</b> Run a lane validator and earn a share of fees.</span></li>
-          <li class="v"><span><b>Builders.</b> Teams that want their own lane on Stellar.</span></li>
+          <li class="v"><span><b>Validator operators.</b> Run a lane validator.</span></li>
+          <li class="v"><span><b>Builders.</b> Teams that want their own lane on Stellar, declared in one file.</span></li>
         </ul>
       </div>
     </div>
