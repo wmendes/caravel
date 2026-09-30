@@ -1,0 +1,24 @@
+Lane demo-pay-0 · env local · network local
+  lane_id 01010101…  config_hash 02020202…  engine 04040404…
+  settlement CC3UKZIZZ2LOLG6ZXQ3UNAEAP5JSCTWSSU4X33RU3VIAJMYUDZCSC6D4 (derived from the admin and the lane), admin GCQK…AGP5, USDC CADF…T54G
+  signers: 2 of 3 at epoch 1
+
++ fund      admin GCQK…AGP5 (friendbot)
++ fund      relayer GCQ2…DJX7 (friendbot)
++ create    USDC asset contract CADF…T54G (issuer: the admin)
++ upload    settlement Wasm fb68ee32…
++ deploy    settlement CC3UKZIZZ2LOLG6ZXQ3UNAEAP5JSCTWSSU4X33RU3VIAJMYUDZCSC6D4
++ release   0a1b2c3d
+~ write     lane.toml
+~ write     relayer.json
+~ write     sequencer.toml
+~ write     validator-1.toml
+~ write     validator-2.toml
+~ write     validator-3.toml
++ start     validator-1
++ start     validator-2
++ start     validator-3
++ start     sequencer
++ start     relayer
+
+17 step(s), 0 problem(s).
