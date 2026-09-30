@@ -489,8 +489,20 @@ impl EnvSpec {
             }
             _ => {}
         }
-        if !h.root.starts_with('/') {
-            p.push(format!("host.root = {:?} must be an absolute path", h.root));
+        // The root goes into shell commands on the host (`rm -rf <root>/data/*`
+        // among them), so it is a plain absolute path, never `/` itself.
+        let plain = h.root.starts_with('/')
+            && h.root.len() > 1
+            && !h.root.ends_with('/')
+            && h.root
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '-' | '.'))
+            && !h.root.split('/').any(|seg| seg == "..");
+        if !plain {
+            p.push(format!(
+                "host.root = {:?}: an absolute path of letters, digits, '/', '_', '-', '.', not / itself",
+                h.root
+            ));
         }
         p
     }

@@ -110,6 +110,15 @@ This section governs README text, UI copy, pitch material generated from code, a
   - forced position closes through the inbox are M1 (T-M1-08).
 - "Audited", "production", "mainnet", "first ever".
 
+### 2.4 What the platform may claim (M0.5, proposed 2026-09-30, awaiting the human's approval)
+
+> Caravel deploys and runs appchains ("lanes") that settle to Stellar in USDC, from one lane file. `caravel plan` shows every change on Stellar and on the host before it is made; `caravel apply` makes it; `caravel destroy` winds a lane down to a frozen contract and gives every account its exit proof. Each lane's engine is Soroban Wasm, run through `soroban-env-host` by the sequencer and independently by each validator. Every checkpoint, with its block data, is posted to Stellar and accepted only with the validators' threshold signature. Anyone can rebuild a lane from Stellar data alone. USDC stays in the lane's settlement contract; if the lane stops checkpointing or ignores deposits and forced withdrawals sent through Stellar, anyone can freeze it, and users take their last checkpointed balance back on Stellar. This is testnet software: a lane's admin can still upgrade its contract and rotate its validators, and lane #1's three validators all run on one machine operated by the Caravel team.
+
+It MUST NOT claim, besides §2.2:
+- one-click or zero-configuration lanes: a lane needs a lane file, Stellar identities and a host;
+- hosting, cloud provisioning, or a lane registry or console: they were cut from M0.5 (§20.3);
+- any comparison naming the well-known infrastructure-as-code tool: the human's copy rule, which CI enforces.
+
 ### 2.3 Known mismatches with the pitch materials (deck, landing page)
 
 Do not implement from the deck. Where they differ, this spec wins:
@@ -2056,7 +2065,7 @@ This drops the lane registry contract, the console and its web packages, hosted 
 | P-15 | The `ssh` provider: prerequisites check, IAP transport, systemd, Caddy, template extras (DEC-069) | P-14 | review |
 | P-16 | Lane #1 under the tool: its `[env.testnet]` in its lane file, a plan with no Stellar changes, the host configs normalized by `apply` (DEC-070) | P-15 | review |
 | P-17 | A payments lane on testnet from its lane file, through the whole lifecycle; RESULTS (DEC-071) | P-16 | review |
-| P-18 | README, spec and landing copy (after the human approves the claims); security pass over the tool — **Gate P4** | P-17 | todo |
+| P-18 | README, §2.4 claims (proposed), security pass over the tool; the landing copy after the human approves §2.4 — **Gate P4** | P-17 | review |
 
 ### 20.4 Phase 2 consensus formats (approved by the human 2026-09-30, DEC-060)
 
