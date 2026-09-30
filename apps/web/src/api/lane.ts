@@ -106,8 +106,24 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * A host that serves only the app answers every path with its index.html, so
+ * a response that is not JSON means there is no lane API at `base`.
+ */
+function notTheApi(r: Response, base: string): ApiError | null {
+  const type = r.headers.get("content-type") ?? "";
+  if (type.includes("application/json")) return null;
+  return new ApiError(
+    r.status,
+    "NOT_THE_API",
+    `${base} answered with ${type.split(";")[0] || "no content type"}, not the lane API. Open the app where the lane serves it, or run it with npm run dev, which proxies the testnet lane.`,
+  );
+}
+
 async function get<T>(path: string, base = config.sequencerUrl): Promise<T> {
   const r = await fetch(`${base}${path}`);
+  const wrongHost = notTheApi(r, base);
+  if (wrongHost && (r.ok || r.status === 404)) throw wrongHost;
   if (!r.ok) {
     const body = (await r.json().catch(() => ({}))) as { code?: string; error?: string };
     throw new ApiError(r.status, body.code ?? "HTTP", body.error ?? `HTTP ${r.status}`);
