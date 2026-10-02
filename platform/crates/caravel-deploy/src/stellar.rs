@@ -86,6 +86,17 @@ impl Cli {
         run(&[s("keys"), s("public-key"), s(identity)]).is_ok()
     }
 
+    /// Creates an identity in the keystore (a seed phrase, the CLI's
+    /// default store); never replaces one.
+    pub fn generate_identity(identity: &str) -> Result<Key> {
+        if Self::has_identity(identity) {
+            bail!("identity {identity:?} already exists");
+        }
+        run(&[s("keys"), s("generate"), s(identity)])
+            .with_context(|| format!("creating identity {identity:?}"))?;
+        Self::public_key(identity)
+    }
+
     pub fn public_key(identity: &str) -> Result<Key> {
         let g = run(&[s("keys"), s("public-key"), s(identity)]).with_context(|| {
             format!("identity {identity:?} (create it with `stellar keys generate {identity}`)")

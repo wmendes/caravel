@@ -232,13 +232,16 @@ impl Prepared {
         self.stop_nodes(o.stop_validators, o.wipe)
     }
 
-    /// Waits until the last signed checkpoint is accepted on Stellar.
+    /// Waits until the last signed checkpoint is accepted on Stellar, and
+    /// until there is one: every exit is proven against an accepted
+    /// checkpoint, so a lane destroyed right after its first apply waits
+    /// for its first.
     async fn drain(&self) -> Result<()> {
         let port = self.m.env.sequencer.port;
         if self.host_provider.status(port).await.is_none() {
             return Ok(());
         }
-        eprintln!("→ drain: wait until every signed checkpoint is accepted");
+        eprintln!("→ drain: wait until every signed checkpoint is accepted, and at least one is");
         let deadline = now() + 600;
         loop {
             let s = self
@@ -252,10 +255,13 @@ impl Prepared {
                     .and_then(|x| x.parse::<u64>().ok())
                     .unwrap_or(0)
             };
-            if n("signed") == n("accepted") {
+            if n("signed") == n("accepted") && n("accepted") >= 1 {
                 return Ok(());
             }
             if now() > deadline {
+                if n("accepted") == 0 && n("signed") == 0 {
+                    bail!("no checkpoint was signed in 10 minutes: are the validators running?");
+                }
                 bail!("checkpoint {} was signed but not accepted in 10 minutes: is the relayer running?", n("signed"));
             }
             tokio::time::sleep(Duration::from_secs(2)).await;

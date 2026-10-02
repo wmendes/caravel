@@ -42,6 +42,7 @@ min_transfer = 1
 # A deployment on this machine, against a local Stellar network that
 # `caravel apply` starts. Keys are Stellar CLI identities, never secrets.
 [env.local]
+default = true                             # what commands use when --env is not given
 network = "local"
 admin = "{{id.admin}}"                     # deploys the settlement contract, issues the test token
 token = { local = "USDC" }                 # a test asset USDC:<admin>

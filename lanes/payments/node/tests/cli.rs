@@ -5,7 +5,9 @@
 
 use std::path::{Path, PathBuf};
 
+use caravel_cli::init::{ensure_identities, init, keys_report, InitArgs};
 use caravel_cli::{env_list_json, validate_report};
+use caravel_deploy::manifest::Manifest;
 use caravel_node::lane_toml::LaneFile;
 
 fn root() -> PathBuf {
@@ -116,4 +118,66 @@ fn env_list_marks_the_chosen_deployment() {
     );
     let list = env_list_json(&lane, Some("local"), None);
     assert_eq!(list[0]["selected"], true);
+}
+
+/// `caravel init payments acme-pay`, against a keystore of its own: the lane
+/// file, its identities, and a lane file every check accepts. Needs the
+/// Stellar CLI (skipped without it, as on CI's test runners).
+#[test]
+fn init_writes_a_lane_file_and_its_identities() {
+    if std::process::Command::new("stellar")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        eprintln!("skipped: no stellar CLI");
+        return;
+    }
+    use_this_plugin();
+    let home = tempfile::tempdir().unwrap();
+    std::env::set_var("XDG_CONFIG_HOME", home.path());
+    let dir = home.path().join("Acme Pay");
+    let args = InitArgs {
+        template: Some("payments"),
+        dir: Some(&dir),
+        name: None,
+        port: Some(28080),
+        prefix: None,
+        force: false,
+    };
+    let done = init(&args).unwrap();
+    assert_eq!(done.lane_file, dir.join("lane.toml"));
+    assert_eq!(done.report["name"], "acme-pay");
+    let ids = done.report["identities"].as_array().unwrap();
+    assert_eq!(ids.len(), 6);
+    assert!(ids.iter().all(|i| i["created"] == true));
+    assert!(ids.iter().any(|i| i["identity"] == "acme-pay-treasury"));
+    // The lane file passes every check, and the keystore has what it names.
+    let (ok, report) = validate_report(&done.lane_file, None).unwrap();
+    assert!(ok, "{report}");
+    let m = Manifest::load(&done.lane_file, "local").unwrap();
+    assert!(m.env.default);
+    assert_eq!(m.env.sequencer.port, 28080);
+    assert!(keys_report(&m)
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|k| k["exists"] == true));
+    assert!(ensure_identities(&m).unwrap().is_empty());
+    let ignore = std::fs::read_to_string(dir.join(".gitignore")).unwrap();
+    assert!(ignore.lines().any(|l| l == ".caravel/"));
+    // Again: refused without --force; with it, the same identities are reused.
+    assert!(init(&args).is_err());
+    let again = init(&InitArgs {
+        force: true,
+        ..args
+    })
+    .unwrap();
+    assert!(again.report["identities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|i| i["created"] == false));
+    let ignore2 = std::fs::read_to_string(dir.join(".gitignore")).unwrap();
+    assert_eq!(ignore, ignore2, "the .gitignore line is added once");
 }

@@ -2200,7 +2200,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-02 | `caravel-deploy` without `NodeApp`: a `Template` trait (in-process or plugin), pure `addresses()`/`desired()`, a state root (DEC-074) | C-01 | review |
 | C-03 | `caravel-cli`, the one CLI: lane-file and env discovery, `--json`, exit codes; plan, apply, status, destroy, validate, env, output, version, doctor (DEC-075) | C-02 | review |
 | C-04 | Install from source: `install.sh`, the release next to the binary, a web dir per template, a binary-platform guard (DEC-076) | C-03 | review |
-| C-05 | `init` and `keys`; local applies create the identities they name — **Gate G1** | C-04 | todo |
+| C-05 | `init` and `keys`; local applies create the identities they name (DEC-077) — **Gate G1** | C-04 | review |
 | C-06 | `caravel-lanefile`: loader with spans and diagnostics, `include`, `extends`, reserved keys; genesis refuses `${` | C-05 | todo |
 | C-07 | The expression evaluator: grammar, types, functions, no time or randomness | C-06 | todo |
 | C-08 | Vars, locals, `for_each`, per-env `[env.<name>.node]` | C-07 | todo |
@@ -2645,6 +2645,18 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 - **A web app per template:** `web/<t>/`. Releases from before M0.6 have the perps app at `web/`, which only perps lanes take. This fixes a payments lane on an ssh host serving the perps web app.
 - **A platform guard.** The release's node binary is read as ELF or Mach-O (the `uname -sm` form), and an ssh host's read reports `uname -sm`. A release that would be installed on another platform is the plan problem `WrongPlatform`, so a macOS build never reaches lane #1's Linux VM.
 - **CI** builds `caravel-cli` too, assembles with the script, and runs the installer over its builds | The quickstart needs one install step and no checkout paths, and the VM must never get a binary for another platform | Public prebuilt releases (needs the human: an outward-facing publish) |
+| DEC-077 | **M0.6 (C-05).** `caravel init` and `caravel keys`, and local applies create the identities they name.
+- **`caravel init [TEMPLATE] [DIR]`** writes `DIR/lane.toml` from the template's `plugin example`.
+  - The template is the only one installed, unless named.
+  - The lane's name comes from `DIR` (lowercase letters, digits and dashes, at most 48 characters), unless `--name` is given.
+  - It creates every identity the example names, `<prefix>-<role>`, where the prefix defaults to the lane's name. Existing identities are reused, never replaced.
+  - The sequencer gets the first free port from 18080, unless `--port` is given.
+  - Before writing, it checks the file: it must parse, give a genesis through the template's binary, and pass every deployment's rules.
+  - It adds `.caravel/` to `DIR/.gitignore` once. `--force` replaces an existing `lane.toml`.
+  - The scaffolds mark `[env.local]` as `default = true`.
+- **`caravel keys list | ensure | show <who>`**: each role's identity (admin, relayer, `validator-<name>`, `feed <VAR>`), whether the keystore has it, and its key. `ensure` creates the missing ones.
+- **On a local network,** `apply` creates the identities the deployment names, and `plan` lists them first, because every address derives from the admin's key. **On testnet** both refuse and point to `caravel keys ensure`. Funding stays `apply`'s friendbot step.
+- **Keys stay in the Stellar CLI's keystore** (`stellar keys generate`, CLI 28.1.0, `docs/SOURCES.md`). No secret is written anywhere else | The quickstart's `for … stellar keys generate` loop goes, and nothing beyond the keystore holds a key | Identities in a hardware wallet or the OS secure store for testnet admins (`--secure-store`) |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 
