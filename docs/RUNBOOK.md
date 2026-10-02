@@ -250,7 +250,7 @@ The escape hatch (spec §13.6): if no checkpoint is accepted for `escape_timeout
 ```sh
 ./scripts/e2e-local.sh                                   # on a local network
 gh run download <main run id> -n contracts-wasm -D /tmp/wasm
-E2E_NETWORK=testnet SETTLEMENT_WASM=/tmp/wasm/settlement.wasm ./scripts/e2e-local.sh   # on testnet, its own contract
+E2E_NETWORK=testnet E2E_WASM_DIR=/tmp/wasm ./scripts/e2e-local.sh   # on testnet, its own contract
 ```
 
 The testnet run deploys its own settlement contract (the Wasm of record, checked against `versions.json`) and buys its USDC on the testnet DEX; it takes about 3.5 minutes. By hand, on any network:

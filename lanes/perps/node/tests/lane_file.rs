@@ -46,6 +46,26 @@ fn lane_1_keeps_its_hashes() {
     assert_eq!(report.state_bytes, state.len());
 }
 
+/// The local perps lane's hashes, pinned before the lane file grows an
+/// expression layer (M0.6): resolving a file must never move them.
+#[test]
+fn the_local_lane_keeps_its_hashes() {
+    let (report, _, _) = genesis(&text(LOCAL)).unwrap();
+    assert_eq!(report.lane_name, "caravel-perps-local-0");
+    assert_eq!(
+        report.lane_id,
+        "dc6edb91328cbdf76d69369788153d06cfa9efddcb1cfcb239c14c6029afe0cb"
+    );
+    assert_eq!(
+        report.config_hash,
+        "81442ee3fcc06437dba0ee342260a9654c895b510952c40ed369f92ae3e2b70b"
+    );
+    assert_eq!(
+        report.genesis_state_hash,
+        "6b079675e579addd0d831835c30ace3d5f562323662836b89cf855ff9b8a8a78"
+    );
+}
+
 #[test]
 fn both_layouts_give_the_same_bytes() {
     for (new, m0) in [(TESTNET, TESTNET_M0), (LOCAL, LOCAL_M0)] {

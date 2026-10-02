@@ -1,6 +1,6 @@
 # Caravel: agent instructions
 
-Caravel deploys and runs configurable appchains ("lanes") that settle to Stellar in a token of their choosing (DEC-072), declared in one lane file (`caravel plan / apply / status / destroy`). The first lane is Caravel Perps, an on-chain perpetual futures exchange; Payments is the second template. Current milestone: **M0.5, the platform split and declarative lanes, on testnet** (spec §20.3).
+Caravel deploys and runs configurable appchains ("lanes") that settle to Stellar in a token of their choosing (DEC-072), declared in one lane file (`caravel plan / apply / status / destroy`). The first lane is Caravel Perps, an on-chain perpetual futures exchange; Payments is the second template. Current milestone: **M0.6, a real CLI and the lane file language, on testnet** (spec §20.5), after M0.5 (the platform split and declarative lanes, §20.3).
 
 ## Read first
 
@@ -64,7 +64,7 @@ WASM_DIR=<CI contracts-wasm artifact> ./scripts/deploy-testnet.sh   # T-012: dep
 (cd site && vercel deploy --prod)       # landing page only, never from the repo root (DEC-019)
 ```
 
-Git: one branch and PR per task (`t-0xx-short-name`, and `p-0x-short-name` for M0.5). Inside a phase, PRs stack on the previous task's branch, and the human reviews at the phase gates (M0: T-003, T-006, T-011, T-016; M0.5: P-07, P-10, P-14, P-18).
+Git: one branch and PR per task (`t-0xx-short-name`, `p-0x-short-name` for M0.5, `c-0x-short-name` for M0.6). Inside a phase, PRs stack on the previous task's branch, and the human reviews at the phase gates (M0: T-003, T-006, T-011, T-016; M0.5: P-07, P-10, P-14, P-18; M0.6: C-05, C-10, C-14, C-17, C-21, C-25).
 
 ## Layout
 

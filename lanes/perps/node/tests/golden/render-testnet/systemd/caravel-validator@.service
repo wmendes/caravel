@@ -1,0 +1,20 @@
+[Unit]
+Description=Caravel validator %i (testnet)
+After=network-online.target caravel-sequencer.service
+Wants=network-online.target
+
+[Service]
+User=caravel
+Group=caravel
+Environment=RUST_LOG=info
+ExecStart=/opt/caravel/bin/caravel-perps-node validator --config /opt/caravel/config/validator-%i.toml
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/caravel/data
+
+[Install]
+WantedBy=multi-user.target
