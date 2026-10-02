@@ -104,7 +104,7 @@ lane_get() { curl -sf "$SEQ$1"; }
 # The deploy tool runs from $WORK, so its state (.caravel/) stays there.
 # VARS: the deployment's inputs (the var file, and later the rotation).
 VARS=(--var-file "$WORK/e2e.vars.toml")
-caravel() { local cmd="$1"; shift; (cd "$WORK" && "$CARAVEL" "$cmd" "$LANE" --env e2e ${RELEASE[@]+"${RELEASE[@]}"} "${VARS[@]}" "$@"); }
+caravel() { local cmd="$1"; shift; (cd "$WORK" && "$CARAVEL" "$cmd" -f "$LANE" --env e2e ${RELEASE[@]+"${RELEASE[@]}"} "${VARS[@]}" "$@"); }
 status() { caravel status --json 2>> "$WORK/logs/caravel.log"; }
 
 log "tools"
