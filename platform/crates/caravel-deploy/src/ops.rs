@@ -80,10 +80,10 @@ impl Prepared {
             "frozen": oc.is_some_and(|o| o.frozen),
             "token": strkey(&d.token),
             "admin": g(&d.admin),
-            "sequencer_url": format!("http://127.0.0.1:{seq_port}"),
+            "sequencer_url": crate::deploy::api_url(&self.m),
             "validators": self.m.env.validators.iter().enumerate().map(|(i, v)| json!({
                 "node": validator_node(&v.name),
-                "url": format!("http://127.0.0.1:{}", crate::render::validator_port(&self.m, i)),
+                "url": crate::deploy::validator_url(&self.m, i),
                 "key": self.validator_keys.get(&validator_node(&v.name)).map(g),
             })).collect::<Vec<_>>(),
             "epoch": oc.map(|o| o.epoch),

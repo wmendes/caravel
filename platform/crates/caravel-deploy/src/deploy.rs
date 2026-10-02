@@ -8,7 +8,6 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Context, Result};
-use caravel_node::app::NodeApp;
 use caravel_node::stellar_rpc::Rpc;
 use caravel_runtime::checkpoint::sha256;
 
@@ -23,6 +22,7 @@ use crate::plan::{
 use crate::release::{self, Release};
 use crate::render::{self, engine_file, validator_node, Resolved};
 use crate::stellar::{self, Cli};
+use crate::template::{GenesisHashes, Template};
 
 /// A deployment resolved and read, ready to diff.
 pub struct Prepared {
@@ -51,14 +51,184 @@ fn parse_hex(h: &str, what: &str) -> Result<Key> {
     Ok(v.try_into().expect("32 bytes"))
 }
 
+/// The deployment's identities, as keys.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Keys {
+    pub admin: Key,
+    pub relayer: Key,
+    /// In file order.
+    pub validators: Vec<Key>,
+}
+
+impl Keys {
+    /// From the Stellar CLI keystore.
+    pub fn from_keystore(m: &Manifest) -> Result<Self> {
+        Ok(Self {
+            admin: Cli::public_key(&m.env.admin)?,
+            relayer: Cli::public_key(&m.env.relayer.account)?,
+            validators: m
+                .env
+                .validators
+                .iter()
+                .map(|v| Cli::public_key(&v.key))
+                .collect::<Result<Vec<_>>>()?,
+        })
+    }
+}
+
+/// Where a deployment lives on Stellar, known from the lane file and its keys
+/// alone.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Addresses {
+    /// The settlement token's contract.
+    pub token: Key,
+    /// The Stellar asset behind it, when it is a Stellar Asset Contract that
+    /// `apply` may deploy.
+    pub token_asset: Option<(String, Key)>,
+    pub settlement: Key,
+    /// Named in the lane file (deployed before this tool), not derived.
+    pub settlement_pinned: bool,
+}
+
+pub fn addresses(m: &Manifest, keys: &Keys) -> Result<Addresses> {
+    let passphrase = m.env.network.passphrase();
+    let (token, token_asset) = match &m.env.token {
+        Token::Named(_) => (
+            stellar_strkey::Contract::from_string(crate::versions::testnet_usdc())
+                .map_err(|_| anyhow!("versions.json testnet.usdc_sac"))?
+                .0,
+            None,
+        ),
+        Token::Asset { asset } => {
+            let (code, issuer) = crate::manifest::parse_asset(asset)
+                .ok_or_else(|| anyhow!("token.asset {asset:?}"))?;
+            (
+                asset_contract_id(passphrase, &code, &issuer),
+                Some((code, issuer)),
+            )
+        }
+        Token::Contract { contract } => (
+            stellar_strkey::Contract::from_string(contract)
+                .map_err(|_| anyhow!("token.contract {contract:?}"))?
+                .0,
+            None,
+        ),
+        Token::Local { local } => (
+            asset_contract_id(passphrase, local, &keys.admin),
+            Some((local.clone(), keys.admin)),
+        ),
+    };
+    let (settlement, settlement_pinned) = match &m.env.settlement {
+        Some(c) => (
+            stellar_strkey::Contract::from_string(c)
+                .map_err(|_| anyhow!("settlement {c:?}"))?
+                .0,
+            true,
+        ),
+        None => (
+            contract_id(passphrase, &keys.admin, &settlement_salt(&m.lane.lane_id())),
+            false,
+        ),
+    };
+    Ok(Addresses {
+        token,
+        token_asset,
+        settlement,
+        settlement_pinned,
+    })
+}
+
+/// The lane file's deployment as `plan` compares it, before its files are
+/// rendered (`host.files` is empty).
+pub fn desired(
+    m: &Manifest,
+    genesis: &GenesisHashes,
+    keys: &Keys,
+    a: &Addresses,
+    engine_wasm_hash: Key,
+    settlement_wasm: Key,
+    release: &str,
+) -> Result<Desired> {
+    let mut signers: Vec<(Key, u32)> = keys
+        .validators
+        .iter()
+        .zip(&m.env.validators)
+        .map(|(k, v)| (*k, v.weight))
+        .collect();
+    signers.sort();
+    let sp = &m.env.settlement_params;
+    Ok(Desired {
+        lane_name: m.lane.lane.name.clone(),
+        env: m.env_name.clone(),
+        network: m.env.network,
+        lane_id: genesis.lane_id,
+        config_hash: genesis.config_hash,
+        genesis_state_hash: genesis.genesis_state_hash,
+        engine_wasm_hash,
+        admin: keys.admin,
+        relayer: keys.relayer,
+        token: a.token,
+        token_asset: a.token_asset.clone(),
+        settlement: a.settlement,
+        settlement_pinned: a.settlement_pinned,
+        settlement_wasm,
+        params: Params {
+            force_inclusion_window_secs: sp.force_inclusion_window_secs,
+            escape_timeout_secs: sp.escape_timeout_secs,
+            min_rotation_delay_secs: sp.min_rotation_delay_secs,
+            signer_retention_epochs: sp.signer_retention_epochs,
+            min_deposit: m.min_deposit()?,
+        },
+        signers: SignerSet {
+            signers,
+            threshold: m.env.threshold,
+        },
+        validators: m
+            .env
+            .validators
+            .iter()
+            .map(|v| validator_node(&v.name))
+            .collect(),
+        host: DesiredHost {
+            provider: m.env.host.provider,
+            release: release.to_string(),
+            files: BTreeMap::new(),
+        },
+    })
+}
+
+/// Where users reach the lane's API: the sequencer on this machine, or the
+/// host's public URL.
+pub fn api_url(m: &Manifest) -> Option<String> {
+    match m.env.host.provider {
+        Provider::Local => Some(format!("http://127.0.0.1:{}", m.env.sequencer.port)),
+        Provider::Ssh => m
+            .env
+            .host
+            .public_url
+            .as_deref()
+            .map(|u| u.trim_end_matches('/').to_string()),
+    }
+}
+
+/// Validator `i`'s API (0-based, in file order), where users reach it.
+pub fn validator_url(m: &Manifest, i: usize) -> Option<String> {
+    match m.env.host.provider {
+        Provider::Local => Some(format!("http://127.0.0.1:{}", render::validator_port(m, i))),
+        Provider::Ssh => api_url(m).map(|u| format!("{u}/validators/{}", m.env.validators[i].name)),
+    }
+}
+
 /// Resolves the deployment and reads what Stellar and the host have.
 /// `for_apply` starts the local network if it isn't up; `plan` never does.
-pub async fn prepare<A: NodeApp>(
-    app: &A,
+/// A local host keeps its processes under `<state_root>/.caravel/`.
+pub async fn prepare(
+    t: &dyn Template,
     lane_path: &Path,
     env: &str,
     source: &crate::cli::ReleaseArgs,
     for_apply: bool,
+    state_root: &Path,
 ) -> Result<Prepared> {
     Cli::check_version()?;
     let m = Manifest::load(lane_path, env)?;
@@ -69,7 +239,13 @@ pub async fn prepare<A: NodeApp>(
         .as_ref()
         .map(|a| a.template.clone())
         .ok_or_else(|| anyhow!("the lane file needs [app] (template and engine_wasm_sha256)"))?;
-    let (_, config_bytes, genesis_state) = caravel_node::lane_toml::genesis(app, &m.lane)?;
+    if template != t.name() {
+        bail!(
+            "the lane file runs the {template} template, not {}",
+            t.name()
+        );
+    }
+    let genesis = t.genesis(&m.lane)?;
     let engine_wasm_hash = m
         .lane
         .engine_wasm_hash()?
@@ -111,120 +287,36 @@ pub async fn prepare<A: NodeApp>(
         }
     };
 
-    let admin = Cli::public_key(&m.env.admin)?;
-    let relayer = Cli::public_key(&m.env.relayer.account)?;
-    let validator_keys = m
-        .env
-        .validators
-        .iter()
-        .map(|v| Cli::public_key(&v.key))
-        .collect::<Result<Vec<_>>>()?;
-    let passphrase = m.env.network.passphrase();
-    let lane_id = m.lane.lane_id();
-    // The settlement token, and the asset behind it when it is a Stellar
-    // Asset Contract that apply may deploy.
-    let (token, token_asset) = match &m.env.token {
-        Token::Named(_) => (
-            stellar_strkey::Contract::from_string(crate::versions::testnet_usdc())
-                .map_err(|_| anyhow!("versions.json testnet.usdc_sac"))?
-                .0,
-            None,
-        ),
-        Token::Asset { asset } => {
-            let (code, issuer) = crate::manifest::parse_asset(asset)
-                .ok_or_else(|| anyhow!("token.asset {asset:?}"))?;
-            (
-                asset_contract_id(passphrase, &code, &issuer),
-                Some((code, issuer)),
-            )
-        }
-        Token::Contract { contract } => (
-            stellar_strkey::Contract::from_string(contract)
-                .map_err(|_| anyhow!("token.contract {contract:?}"))?
-                .0,
-            None,
-        ),
-        Token::Local { local } => (
-            asset_contract_id(passphrase, local, &admin),
-            Some((local.clone(), admin)),
-        ),
-    };
+    let keys = Keys::from_keystore(&m)?;
+    let addrs = addresses(&m, &keys)?;
     // A template may need a token with a set number of decimals (perps: 7).
     // A Stellar Asset Contract always has 7; another contract is asked.
-    if let Some(want) = app.token_decimals() {
+    if let Some(want) = t.token_decimals() {
         let have = match &m.env.token {
-            Token::Contract { .. } => Cli::new(&m).token_decimals(&m.env.admin, &token)?,
+            Token::Contract { .. } => Cli::new(&m).token_decimals(&m.env.admin, &addrs.token)?,
             _ => 7,
         };
         if have != want {
             bail!(
                 "the {} template needs a token with {want} decimals; {} has {have}",
                 template,
-                crate::address::strkey(&token)
+                crate::address::strkey(&addrs.token)
             );
         }
     }
-    let (settlement, pinned) = match &m.env.settlement {
-        Some(c) => (
-            stellar_strkey::Contract::from_string(c)
-                .map_err(|_| anyhow!("settlement {c:?}"))?
-                .0,
-            true,
-        ),
-        None => (
-            contract_id(passphrase, &admin, &settlement_salt(&lane_id)),
-            false,
-        ),
-    };
-    let mut signers: Vec<(Key, u32)> = validator_keys
-        .iter()
-        .zip(&m.env.validators)
-        .map(|(k, v)| (*k, v.weight))
-        .collect();
-    signers.sort();
-    let sp = &m.env.settlement_params;
     let host_provider = match m.env.host.provider {
-        Provider::Local => HostProvider::Local(Local::new(&m, &template)?),
-        Provider::Ssh => HostProvider::Ssh(crate::ssh::Ssh::new(&m, &template)?),
+        Provider::Local => HostProvider::Local(Local::new(&m, &template, state_root)?),
+        Provider::Ssh => HostProvider::Ssh(crate::ssh::Ssh::new(&m, &template, state_root)?),
     };
-    let mut desired = Desired {
-        lane_name: m.lane.lane.name.clone(),
-        env: m.env_name.clone(),
-        network: m.env.network,
-        lane_id,
-        config_hash: sha256(&config_bytes),
-        genesis_state_hash: sha256(&genesis_state),
+    let mut desired = desired(
+        &m,
+        &genesis,
+        &keys,
+        &addrs,
         engine_wasm_hash,
-        admin,
-        relayer,
-        token,
-        token_asset,
-        settlement,
-        settlement_pinned: pinned,
         settlement_wasm,
-        params: Params {
-            force_inclusion_window_secs: sp.force_inclusion_window_secs,
-            escape_timeout_secs: sp.escape_timeout_secs,
-            min_rotation_delay_secs: sp.min_rotation_delay_secs,
-            signer_retention_epochs: sp.signer_retention_epochs,
-            min_deposit: m.min_deposit()?,
-        },
-        signers: SignerSet {
-            signers,
-            threshold: m.env.threshold,
-        },
-        validators: m
-            .env
-            .validators
-            .iter()
-            .map(|v| validator_node(&v.name))
-            .collect(),
-        host: DesiredHost {
-            provider: m.env.host.provider,
-            release: release.commit.clone(),
-            files: BTreeMap::new(),
-        },
-    };
+        &release.commit,
+    )?;
 
     if for_apply {
         stellar::ensure_local_network(&m)?;
@@ -244,8 +336,8 @@ pub async fn prepare<A: NodeApp>(
     let resolved = Resolved {
         template,
         engine_wasm_hash,
-        settlement,
-        validator_keys,
+        settlement: addrs.settlement,
+        validator_keys: keys.validators.clone(),
         web: release.web.is_some(),
     };
     let files = render::render(&m, &resolved, &host_provider.root_str(), epoch)?;
@@ -259,7 +351,7 @@ pub async fn prepare<A: NodeApp>(
         .env
         .validators
         .iter()
-        .zip(&resolved.validator_keys)
+        .zip(&keys.validators)
         .map(|(v, k)| (validator_node(&v.name), *k))
         .collect();
     Ok(Prepared {

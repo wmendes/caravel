@@ -9,9 +9,11 @@ use std::process::Command;
 
 use caravel_core::tx::{sep53_preimage, sep53_tx_message, SigScheme, StandardBody, TxEnvelopeV1};
 use caravel_deploy::manifest::Manifest;
+use caravel_deploy::template::{InProcess, Plugin, Template};
 use caravel_harness::{key, pk, sha256};
 use caravel_node::lane_toml::{self, LaneFile};
 use caravel_node::plugin::{example_roles, fill_example, Body, Info, PROTOCOL};
+use caravel_node::NodeApp;
 use caravel_payments::{Transfer, TRANSFER};
 use caravel_payments_node::PaymentsApp;
 use caravel_runtime::app::LaneApp;
@@ -180,4 +182,34 @@ fn an_envelope_around_a_plugin_body_verifies() {
     // A raw signature over the same hash is not a SEP-53 one.
     tx.signature = key(1).sign(&tx_hash).to_bytes();
     assert!(!tx_signature_ok(&tx, &config_hash));
+}
+
+/// The CLI's genesis (the binary, over the document the hosts get) is the
+/// linked app's, for every lane file.
+#[test]
+fn plugin_genesis_is_the_apps() {
+    let plugin = Plugin::at(std::path::Path::new(env!(
+        "CARGO_BIN_EXE_caravel-payments-node"
+    )))
+    .unwrap();
+    assert_eq!(plugin.name(), PaymentsApp::TEMPLATE);
+    assert_eq!(
+        plugin.token_decimals(),
+        InProcess(PaymentsApp).token_decimals()
+    );
+    for path in [
+        "lanes/payments/config/lane.caravel-payments.local.toml",
+        "lanes/payments/node/tests/golden/render/lane.toml",
+    ] {
+        let lane = LaneFile::load(&root().join(path)).unwrap();
+        assert_eq!(
+            plugin.genesis(&lane).unwrap(),
+            InProcess(PaymentsApp).genesis(&lane).unwrap(),
+            "{path}"
+        );
+    }
+    let (kind, _) = plugin
+        .body(&["withdraw".into(), "--amount".into(), "1".into()], Some(7))
+        .unwrap();
+    assert_eq!(kind, caravel_core::tx::kind::WITHDRAW);
 }

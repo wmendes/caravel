@@ -8,8 +8,10 @@ use std::process::Command;
 
 use caravel_core::tx::{sep53_preimage, sep53_tx_message, SigScheme, TxEnvelopeV1};
 use caravel_deploy::manifest::Manifest;
+use caravel_deploy::template::{InProcess, Plugin, Template};
 use caravel_node::lane_toml::{self, LaneFile};
 use caravel_node::plugin::{example_roles, fill_example, Body, Info, PROTOCOL};
+use caravel_node::NodeApp;
 use caravel_perps_node::PerpsApp;
 use caravel_runtime::app::LaneApp;
 use caravel_runtime::checkpoint::sha256;
@@ -202,4 +204,36 @@ fn an_envelope_around_a_plugin_body_verifies() {
         .to_bytes();
     assert!(tx_signature_ok(&tx, &config_hash));
     assert!(PerpsApp.tx_decodes(&tx));
+}
+
+/// The CLI's genesis (the binary, over the document the hosts get) is the
+/// linked app's, for every lane file.
+#[test]
+fn plugin_genesis_is_the_apps() {
+    let plugin = Plugin::at(std::path::Path::new(env!(
+        "CARGO_BIN_EXE_caravel-perps-node"
+    )))
+    .unwrap();
+    assert_eq!(plugin.name(), PerpsApp::TEMPLATE);
+    assert_eq!(
+        plugin.token_decimals(),
+        InProcess(PerpsApp).token_decimals()
+    );
+    for path in [
+        "lanes/perps/config/lane.caravel-perps.testnet.toml",
+        "lanes/perps/config/lane.caravel-perps.local.toml",
+        "lanes/perps/node/tests/fixtures/lane.caravel-perps.testnet.m0.toml",
+        "lanes/perps/node/tests/fixtures/lane.caravel-perps.local.m0.toml",
+    ] {
+        let lane = LaneFile::load(&root().join(path)).unwrap();
+        assert_eq!(
+            plugin.genesis(&lane).unwrap(),
+            InProcess(PerpsApp).genesis(&lane).unwrap(),
+            "{path}"
+        );
+    }
+    let (kind, _) = plugin
+        .body(&["withdraw".into(), "--amount".into(), "1".into()], Some(7))
+        .unwrap();
+    assert_eq!(kind, caravel_core::tx::kind::WITHDRAW);
 }
