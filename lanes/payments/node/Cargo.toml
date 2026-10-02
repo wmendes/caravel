@@ -29,6 +29,7 @@ stellar-strkey = { workspace = true }
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "net", "time", "signal", "sync"] }
 
 [dev-dependencies]
+caravel-cli = { workspace = true }
 caravel-harness = { workspace = true }
 futures-util = "0.3.34"
 proptest = "1.11.0"

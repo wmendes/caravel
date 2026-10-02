@@ -504,6 +504,40 @@ pub fn diff(d: &Desired, chain: &Chain, host: &Host) -> Plan {
 }
 
 impl Plan {
+    /// The plan for scripts (`plan --json`): what it would change and what
+    /// blocks it. Each step keeps its printed line.
+    pub fn to_json(&self, d: &Desired) -> serde_json::Value {
+        let steps: Vec<_> = self
+            .steps
+            .iter()
+            .map(|s| {
+                let line = step_line(s);
+                let mut words = line.split_whitespace();
+                let change = words.next().unwrap_or_default().to_string();
+                let action = words.next().unwrap_or_default().to_string();
+                serde_json::json!({ "change": change, "action": action, "line": line })
+            })
+            .collect();
+        let problems: Vec<_> = self
+            .problems
+            .iter()
+            .map(|p| problem_line(p).trim_start_matches("! ").to_string())
+            .collect();
+        serde_json::json!({
+            "lane": d.lane_name,
+            "env": d.env,
+            "network": d.network.name(),
+            "lane_id": hex(&d.lane_id),
+            "config_hash": hex(&d.config_hash),
+            "settlement": strkey(&d.settlement),
+            "settlement_pinned": d.settlement_pinned,
+            "token": strkey(&d.token),
+            "target_epoch": self.target_epoch,
+            "steps": steps,
+            "problems": problems,
+        })
+    }
+
     /// The plan as the user reads it.
     pub fn render(&self, d: &Desired) -> String {
         let mut o = String::new();
@@ -547,84 +581,14 @@ impl Plan {
         if !self.steps.is_empty() {
             o.push('\n');
             for s in &self.steps {
-                let line = match s {
-                    Step::Fund { who, key } => format!("+ fund      {who} {} (friendbot)", g_short(key)),
-                    Step::DeployToken {
-                        contract,
-                        code,
-                        issuer,
-                    } => format!(
-                        "+ create    token contract {} (the Stellar Asset Contract of {code}:{})",
-                        c_short(contract),
-                        g_short(issuer)
-                    ),
-                    Step::UploadWasm { hash } => format!("+ upload    settlement Wasm {}", short(hash)),
-                    Step::DeploySettlement { contract } => {
-                        format!("+ deploy    settlement {}", strkey(contract))
-                    }
-                    Step::WipeHostData => {
-                        "- wipe      the host's lane data (it belongs to a contract that is gone)".into()
-                    }
-                    Step::InstallRelease { from, to } => match from {
-                        Some(f) => format!("~ release   {f} → {to}"),
-                        None => format!("+ release   {to}"),
-                    },
-                    Step::WriteFile { path } => format!("~ write     {path}"),
-                    Step::Start { node } => format!("+ start     {node}"),
-                    Step::Restart { node } => format!("~ restart   {node}"),
-                    Step::Stop { node } => format!("- stop      {node}"),
-                    Step::RotateSigners {
-                        from_epoch,
-                        to_epoch,
-                    } => format!(
-                        "~ rotate    signers, epoch {from_epoch} → {to_epoch} (admin_rotate_signers: a testnet-only admin power)"
-                    ),
-                };
-                o.push_str(&line);
+                o.push_str(&step_line(s));
                 o.push('\n');
             }
         }
         if !self.problems.is_empty() {
             o.push('\n');
             for p in &self.problems {
-                let line = match p {
-                    Problem::Immutable {
-                        field,
-                        deployed,
-                        file,
-                    } => format!(
-                        "! {field}: the contract has {deployed}, the lane file gives {file}. The constructor fixed it: destroy this lane, or give the lane a new name"
-                    ),
-                    Problem::CodeDrift { code, want } => format!(
-                        "! the settlement contract runs {}, not {}: it was upgraded outside this tool, or settlement_wasm is wrong",
-                        short(code),
-                        short(want)
-                    ),
-                    Problem::UnknownCode { code } => format!(
-                        "! the settlement contract runs {}, a build no one recorded",
-                        short(code)
-                    ),
-                    Problem::Frozen => {
-                        "! the lane is frozen: nothing can be applied (destroy is done)".into()
-                    }
-                    Problem::SettlementMissing { contract } => format!(
-                        "! the network has no contract at {} (a testnet reset?)",
-                        strkey(contract)
-                    ),
-                    Problem::TokenMissing { contract } => {
-                        format!("! the network has no token contract at {}", strkey(contract))
-                    }
-                    Problem::SignersReused { epoch } => format!(
-                        "! this signer set was installed at epoch {epoch}; a set can be installed only once, so change a key"
-                    ),
-                    Problem::HostNotReady { missing } => {
-                        format!("! the host lacks: {}", missing.join(", "))
-                    }
-                    Problem::NodeMismatch { node, field } => format!(
-                        "! {node} reports another {field} than its files give"
-                    ),
-                };
-                o.push_str(&line);
+                o.push_str(&problem_line(p));
                 o.push('\n');
             }
         }
@@ -640,5 +604,83 @@ impl Plan {
             }
         );
         o
+    }
+}
+
+/// One step, as `plan` prints it.
+pub fn step_line(s: &Step) -> String {
+    match s {
+        Step::Fund { who, key } => format!("+ fund      {who} {} (friendbot)", g_short(key)),
+        Step::DeployToken {
+            contract,
+            code,
+            issuer,
+        } => format!(
+            "+ create    token contract {} (the Stellar Asset Contract of {code}:{})",
+            c_short(contract),
+            g_short(issuer)
+        ),
+        Step::UploadWasm { hash } => format!("+ upload    settlement Wasm {}", short(hash)),
+        Step::DeploySettlement { contract } => {
+            format!("+ deploy    settlement {}", strkey(contract))
+        }
+        Step::WipeHostData => {
+            "- wipe      the host's lane data (it belongs to a contract that is gone)".into()
+        }
+        Step::InstallRelease { from, to } => match from {
+            Some(f) => format!("~ release   {f} → {to}"),
+            None => format!("+ release   {to}"),
+        },
+        Step::WriteFile { path } => format!("~ write     {path}"),
+        Step::Start { node } => format!("+ start     {node}"),
+        Step::Restart { node } => format!("~ restart   {node}"),
+        Step::Stop { node } => format!("- stop      {node}"),
+        Step::RotateSigners {
+            from_epoch,
+            to_epoch,
+        } => format!(
+            "~ rotate    signers, epoch {from_epoch} → {to_epoch} (admin_rotate_signers: a testnet-only admin power)"
+        ),
+    }
+}
+
+/// One problem, as `plan` prints it.
+pub fn problem_line(p: &Problem) -> String {
+    match p {
+        Problem::Immutable {
+            field,
+            deployed,
+            file,
+        } => format!(
+            "! {field}: the contract has {deployed}, the lane file gives {file}. The constructor fixed it: destroy this lane, or give the lane a new name"
+        ),
+        Problem::CodeDrift { code, want } => format!(
+            "! the settlement contract runs {}, not {}: it was upgraded outside this tool, or settlement_wasm is wrong",
+            short(code),
+            short(want)
+        ),
+        Problem::UnknownCode { code } => format!(
+            "! the settlement contract runs {}, a build no one recorded",
+            short(code)
+        ),
+        Problem::Frozen => {
+            "! the lane is frozen: nothing can be applied (destroy is done)".into()
+        }
+        Problem::SettlementMissing { contract } => format!(
+            "! the network has no contract at {} (a testnet reset?)",
+            strkey(contract)
+        ),
+        Problem::TokenMissing { contract } => {
+            format!("! the network has no token contract at {}", strkey(contract))
+        }
+        Problem::SignersReused { epoch } => format!(
+            "! this signer set was installed at epoch {epoch}; a set can be installed only once, so change a key"
+        ),
+        Problem::HostNotReady { missing } => {
+            format!("! the host lacks: {}", missing.join(", "))
+        }
+        Problem::NodeMismatch { node, field } => format!(
+            "! {node} reports another {field} than its files give"
+        ),
     }
 }

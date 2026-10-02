@@ -456,6 +456,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "caravel-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "caravel-deploy",
+ "caravel-node",
+ "caravel-runtime",
+ "clap",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "caravel-core"
 version = "0.1.0"
 dependencies = [
@@ -539,6 +553,7 @@ dependencies = [
  "anyhow",
  "axum",
  "caravel-app-sdk",
+ "caravel-cli",
  "caravel-core",
  "caravel-deploy",
  "caravel-harness",

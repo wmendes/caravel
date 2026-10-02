@@ -76,7 +76,7 @@ This brings up a Payments lane on your machine, against a local Stellar network.
 
 ```sh
 ./scripts/build-contracts.sh
-cargo build --release -p caravel-deploy -p caravel-payments-node
+cargo build --release -p caravel-cli -p caravel-payments-node
 npm --prefix platform/relayer ci && npm --prefix platform/relayer run build
 ```
 

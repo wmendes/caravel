@@ -479,7 +479,7 @@ impl Prepared {
         let admin = self.m.env.admin.as_str();
         let mut keys_written = false;
         for step in &plan.steps {
-            println!("→ {}", step_line(step));
+            eprintln!("→ {}", step_line(step));
             match step {
                 Step::Fund { who, .. } => self.cli.fund(self.identity_of(who))?,
                 Step::DeployToken { code, issuer, .. } => {
@@ -601,8 +601,8 @@ pub fn confirm(steps: usize, yes: bool) -> Result<bool> {
     if !std::io::stdin().is_terminal() {
         bail!("apply changes things on Stellar and the host: pass --yes to run without a prompt");
     }
-    print!("Apply these {steps} step(s)? [y/N] ");
-    std::io::stdout().flush()?;
+    eprint!("Apply these {steps} step(s)? [y/N] ");
+    std::io::stderr().flush()?;
     let mut line = String::new();
     std::io::stdin()
         .lock()
@@ -616,8 +616,8 @@ pub fn confirm_destroy(lane: &str) -> Result<bool> {
     if !std::io::stdin().is_terminal() {
         bail!("destroy freezes the lane for good: pass --yes to run without a prompt");
     }
-    print!("This freezes lane {lane} for good; users exit with their proofs. Type the lane's name to go on: ");
-    std::io::stdout().flush()?;
+    eprint!("This freezes lane {lane} for good; users exit with their proofs. Type the lane's name to go on: ");
+    std::io::stderr().flush()?;
     let mut line = String::new();
     std::io::stdin()
         .lock()

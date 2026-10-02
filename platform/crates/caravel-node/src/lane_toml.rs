@@ -33,7 +33,7 @@ const GENERIC: [&str; 5] = ["lane", "app", "node", "access", "limits"];
 /// The deployment tables, `[env.<name>]`; also a reserved template name.
 pub const ENV: &str = "env";
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LaneFile {
     pub lane: LaneSection,
     /// `None` for an M0 file.
@@ -45,13 +45,13 @@ pub struct LaneFile {
     pub env: toml::Table,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LaneSection {
     pub name: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AppSection {
     /// The app this lane runs; its node binary refuses any other.
@@ -61,7 +61,7 @@ pub struct AppSection {
 }
 
 /// Node settings: not consensus, not hashed (spec §10.1).
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NodeSection {
     pub block_time_ms: u64,
@@ -69,7 +69,7 @@ pub struct NodeSection {
     pub max_batch_bytes: u64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Access {
     /// "open" or "allowlist".
@@ -79,7 +79,7 @@ pub struct Access {
 
 /// The platform's limits: accounts, deposits and withdrawals, session keys,
 /// blocks and execution.
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Limits {
     pub min_deposit: i64,

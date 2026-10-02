@@ -65,26 +65,56 @@ pub fn binary_name(template: &str) -> String {
     format!("caravel-{template}-node")
 }
 
+/// Where template binaries are looked for, in order: `CARAVEL_PLUGIN_DIR`,
+/// next to this binary (a `stellar-caravel` link resolved), then PATH.
+pub fn search_dirs() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    if let Some(d) = std::env::var_os("CARAVEL_PLUGIN_DIR") {
+        dirs.push(d.into());
+    }
+    if let Some(d) = std::env::current_exe()
+        .ok()
+        .and_then(|me| std::fs::canonicalize(me).ok())
+        .and_then(|me| me.parent().map(Path::to_path_buf))
+    {
+        dirs.push(d);
+    }
+    if let Some(path) = std::env::var_os("PATH") {
+        dirs.extend(std::env::split_paths(&path));
+    }
+    dirs
+}
+
+/// Every template binary in [`search_dirs`], the first of each template
+/// only; a binary that doesn't answer `plugin info` is reported as an error.
+pub fn installed() -> Vec<(PathBuf, Result<Plugin>)> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for dir in search_dirs() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        let mut names: Vec<String> = entries
+            .flatten()
+            .filter_map(|e| e.file_name().into_string().ok())
+            .filter(|n| n.starts_with("caravel-") && n.ends_with("-node") && n != "caravel-node")
+            .collect();
+        names.sort();
+        for n in names {
+            if seen.insert(n.clone()) {
+                let path = dir.join(&n);
+                out.push((path.clone(), Plugin::at(&path)));
+            }
+        }
+    }
+    out
+}
+
 impl Plugin {
-    /// Finds the template's binary: in `CARAVEL_PLUGIN_DIR`, next to this
-    /// binary (a `stellar-caravel` link resolved), then on PATH.
+    /// Finds the template's binary in [`search_dirs`].
     pub fn locate(template: &str) -> Result<Self> {
         let name = binary_name(template);
-        let mut dirs: Vec<PathBuf> = Vec::new();
-        if let Some(d) = std::env::var_os("CARAVEL_PLUGIN_DIR") {
-            dirs.push(d.into());
-        }
-        if let Some(d) = std::env::current_exe()
-            .ok()
-            .and_then(|me| std::fs::canonicalize(me).ok())
-            .and_then(|me| me.parent().map(Path::to_path_buf))
-        {
-            dirs.push(d);
-        }
-        if let Some(path) = std::env::var_os("PATH") {
-            dirs.extend(std::env::split_paths(&path));
-        }
-        let found = dirs
+        let found = search_dirs()
             .iter()
             .map(|d| d.join(&name))
             .find(|p| p.is_file())

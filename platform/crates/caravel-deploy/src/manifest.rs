@@ -241,6 +241,9 @@ fn default_root() -> String {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct EnvSpec {
+    /// The deployment `caravel` picks when none is named (at most one).
+    #[serde(default)]
+    pub default: bool,
     pub network: Network,
     #[serde(default)]
     pub rpc_url: Option<String>,
@@ -274,6 +277,34 @@ pub struct Manifest {
     pub env: EnvSpec,
 }
 
+/// One `[env.<name>]` table, as listed before any is chosen.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnvInfo {
+    pub name: String,
+    /// `default = true`.
+    pub default: bool,
+    /// `network`, as written.
+    pub network: Option<String>,
+    /// `host.provider`, as written.
+    pub provider: Option<String>,
+}
+
+/// The lane file's deployments, in name order.
+pub fn envs(lane: &LaneFile) -> Vec<EnvInfo> {
+    lane.env
+        .iter()
+        .map(|(name, t)| {
+            let s = |v: Option<&toml::Value>| v.and_then(|v| v.as_str()).map(String::from);
+            EnvInfo {
+                name: name.clone(),
+                default: t.get("default").and_then(|v| v.as_bool()) == Some(true),
+                network: s(t.get("network")),
+                provider: s(t.get("host").and_then(|h| h.get("provider"))),
+            }
+        })
+        .collect()
+}
+
 impl Manifest {
     pub fn load(path: &Path, env: &str) -> Result<Self> {
         let lane = LaneFile::load(path)?;
@@ -284,7 +315,7 @@ impl Manifest {
         Self::from_lane(LaneFile::parse(text)?, env).with_context(|| format!("[env.{env}]"))
     }
 
-    fn from_lane(lane: LaneFile, env: &str) -> Result<Self> {
+    pub fn from_lane(lane: LaneFile, env: &str) -> Result<Self> {
         let table = lane.env.get(env).ok_or_else(|| {
             let known: Vec<_> = lane.env.keys().map(|k| format!("[env.{k}]")).collect();
             if known.is_empty() {

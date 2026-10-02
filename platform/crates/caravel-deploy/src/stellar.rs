@@ -63,17 +63,27 @@ impl Cli {
 
     /// The installed CLI must be the pinned one (versions.json).
     pub fn check_version() -> Result<()> {
-        let v = run(&[s("--version")])?;
-        let have = v
-            .lines()
-            .next()
-            .and_then(|l| l.split_whitespace().nth(1))
-            .unwrap_or("");
+        let have = Self::version()?;
         let want = crate::versions::stellar_cli();
         if have != want {
             bail!("stellar CLI {have} is installed; this tool needs {want} (versions.json)");
         }
         Ok(())
+    }
+
+    /// The installed Stellar CLI's version.
+    pub fn version() -> Result<String> {
+        let v = run(&[s("--version")])?;
+        Ok(v.lines()
+            .next()
+            .and_then(|l| l.split_whitespace().nth(1))
+            .unwrap_or("")
+            .to_string())
+    }
+
+    /// Whether the keystore has this identity.
+    pub fn has_identity(identity: &str) -> bool {
+        run(&[s("keys"), s("public-key"), s(identity)]).is_ok()
     }
 
     pub fn public_key(identity: &str) -> Result<Key> {

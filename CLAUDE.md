@@ -51,7 +51,7 @@ cargo run --release -p caravel-perps-node -- check-store --config lanes/perps/co
 cargo run --release -p caravel-perps-node -- export-proofs --config <validator.toml> [--out exit.json]   # every escape and withdrawal proof a validator holds (DEC-065)
 DURATION=3600 TPS=50 ./scripts/soak-sequencer.sh   # T-007 soak: 1 s blocks, 50 tx/s, restart halfway
 cargo run --release -p caravel-perps-node -- replay --rpc <url> --network-passphrase <p> --settlement C... --genesis-config lanes/perps/config/lane.<lane>.toml --engine-wasm target/contracts/perps_engine.wasm [--prove-escape G...]   # replay from Stellar only
-cargo build --release -p caravel-deploy -p caravel-payments-node && ./target/release/caravel plan lanes/payments/config/lane.caravel-payments.local.toml --env local   # the deploy tool (DEC-066 to DEC-068): plan, apply, status [--json], destroy [--pay-out]
+cargo build --release -p caravel-cli -p caravel-payments-node && ./target/release/caravel plan -f lanes/payments/config/lane.caravel-payments.local.toml   # the CLI (DEC-066 to DEC-068, DEC-075): plan, apply, status, destroy, validate, env list, output, version, doctor; --json on all
 ./scripts/e2e-local.sh                  # the whole lifecycle through the deploy tool on a local quickstart (DEC-068); E2E_TEMPLATE=payments, E2E_NETWORK=testnet
 cargo run --release -p caravel-payments-node -- genesis --config lanes/payments/config/lane.caravel-payments.local.toml   # any template's genesis hashes
 TPS=20 DURATION=600 ./scripts/measure-testnet.sh   # §19.6 numbers on the live testnet lane (docs/RESULTS.md)
@@ -76,7 +76,8 @@ M0.5 splits the repo into the platform (Caravel) and its lanes (Caravel Perps fi
   - `crates/caravel-app-sdk` (no_std: `AppGenesisV1`, the SDK state layout and the standard pipeline for any app engine, DEC-060, DEC-062; `testapp` feature);
   - `crates/caravel-runtime` (executor, store, sequencer and validator cores, checkpoints; any app through the `LaneApp` trait, DEC-053; formerly caravel-lane);
   - `crates/caravel-node` (library: sequencer / validator / replay / genesis / lane files for any app through `NodeApp`, DEC-053, DEC-054; each app's binary links it);
-  - `crates/caravel-deploy` (the deploy tool: a lane file's `[env.<name>]` deployments, derived addresses, the pure plan, the chain reader, node configs, the `local` and `ssh` providers, `plan`/`apply`/`status`/`destroy` and the `caravel` dispatcher; DEC-066 to DEC-069);
+  - `crates/caravel-deploy` (the deploy library: a lane file's `[env.<name>]` deployments, derived addresses, the pure plan, the chain reader, node configs, the `local` and `ssh` providers, `plan`/`apply`/`status`/`destroy`, and templates in process or through their binary's plugin protocol; DEC-066 to DEC-069, DEC-073, DEC-074);
+  - `crates/caravel-cli` (`caravel`, the one CLI for any template: lane-file and env discovery, `--json`, exit codes; DEC-075);
   - `contracts/settlement`;
   - `relayer/` (TS: inbox, checkpoints, metrics, and the host for an app's feed modules, DEC-053);
   - `test-vectors/` (the platform formats' golden vectors).
