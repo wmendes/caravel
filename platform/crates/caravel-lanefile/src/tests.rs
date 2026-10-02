@@ -237,8 +237,8 @@ fn bad_includes_are_reported() {
 
 #[test]
 fn reserved_keys_and_syntax_errors() {
-    let e = err(&[("lane.toml", &format!("{GENESIS}[outputs]\nx = 1\n"))]);
-    assert!(e.contains("`outputs` is reserved"), "{e}");
+    let e = err(&[("lane.toml", &format!("outputs = 1\n{GENESIS}"))]);
+    assert!(e.contains("`outputs` must be a table"), "{e}");
     let e = err(&[("lane.toml", "[lane\nname = 1\n")]);
     assert!(e.contains("--> lanes/lane.toml:1:"), "{e}");
     // Every problem at once.

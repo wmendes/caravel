@@ -2205,7 +2205,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-07 | The expression evaluator: grammar, types, functions, no time or randomness (DEC-079) | C-06 | review |
 | C-08 | Vars, locals, `for_each`, per-env `[env.<name>.node]` (DEC-080) | C-07 | review |
 | C-09 | The manifest on resolved values; `caravel render`; the e2e without heredoc or `sed` (DEC-081) | C-08 | review |
-| C-10 | Attributes and outputs; `caravel output`; references in relayer feeds — **Gate G2** | C-09 | todo |
+| C-10 | Attributes and outputs; `caravel output`; references in relayer feeds (DEC-082) — **Gate G2** | C-09 | review |
 | C-11 | Lifecycle: `stop`, `start`, `restart`, `logs`, `replay` from the lane file, `wait`, `api` | C-10 | todo |
 | C-12 | Users' Stellar flows: `account create/fund`, `balance`, `deposit` (waits for the credit) | C-11 | todo |
 | C-13 | Lane transactions: `tx`, `withdraw`, `claim`, `force-withdraw`, `escape` | C-12 | todo |
@@ -2711,6 +2711,26 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - `scripts/e2e/env.toml` is one `[env.e2e]` for any template, with vars for the network, token, port, validators, a pinned settlement build, and the feeds and feed keys;
   - the e2e copies the template's lane file with `include = ["e2e-env.toml"]` in front, writes the vars to a `--var-file`, and checks `caravel render`;
   - the rotation in step 4b is `--var 'validators=["1","2","4"]'` on every later command. The heredoc and the `sed` edit are gone | Composition is only real once the project's own lifecycle test uses it | The e2e moves fully onto the CLI (C-14), with no raw `stellar`, `curl` or `jq` loops |
+| DEC-082 | **M0.6 (C-10).** Attributes and outputs: what a deployment's expressions read once its keys and addresses are known.
+- **Attributes** (`caravel_deploy::attrs`):
+  - `lane` (`name`, `template`, `id`, `engine_wasm_hash`, `config_hash`, `genesis_state_hash`);
+  - `network` (`name`, `passphrase`, `rpc_url`);
+  - `account.admin` and `account.relayer` (`identity`, `public_key`);
+  - `token.settlement` (`address`, `asset`);
+  - `contract.settlement` (`address`, `pinned`);
+  - `node.sequencer` and `node.validator-<name>` (`url`, `port`, `key`, …);
+  - `validators` (a list);
+  - `signers.settlement` (`threshold`, `count`);
+  - `release.commit`.
+- **Two stages, still no state file.**
+  - Stage 1 reads the deployment with these roots deferred, beside `lane.name`, `lane.template`, `lane.id` and `lane.engine_wasm_hash`. A deferred value stays as written, and its path is listed. Only `relayer.feeds` may hold one; anywhere else is an error that points at the line and says why.
+  - Stage 2 runs in `prepare`, once the keys, addresses, genesis and release are known. It reads the deployment again with the real attributes (`Manifest::finish`), which fills the feeds before the files are rendered.
+  - A deferred local stays deferred.
+- **`[outputs]`** (top level, or included) and **`[env.<name>.outputs]`** (over them) declare outputs. Each is an expression, or `{ value, description, sensitive }`. An output computed from a sensitive var is sensitive.
+  - `caravel output [NAME]` lists the built-in outputs and the declared ones; a declared one wins on a name. Sensitive values are masked in listings and printed when asked for by name.
+  - `status --json` has `outputs`.
+  - An output that needs something unknown says what.
+- **The e2e** reads the settlement and the token through `caravel output`. Its deployment declares `sequencer` and `settlement_contract` outputs, and it checks both, plus `status --json`'s `outputs` | Other tools (a web app's config, scripts) need a lane's addresses without parsing `status`, and feeds need contract ids without hand-copying them | Declared contracts and tokens (C-19, C-20) add their own attributes |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

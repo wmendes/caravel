@@ -873,6 +873,9 @@ fn output(g: &Global, name: Option<&str>) -> Result<u8> {
     let m = ctx.manifest()?;
     let keys = Keys::from_keystore(&m)?;
     let a = addresses(&m, &keys)?;
+    let genesis = ctx.template().and_then(|t| t.genesis(&m.lane)).ok();
+    let attrs = caravel_deploy::attrs::attributes(&m, &keys, &a, genesis.as_ref(), None);
+    let declared = m.outputs(&attrs)?;
     let validators: Vec<Value> = m
         .env
         .validators
@@ -881,7 +884,7 @@ fn output(g: &Global, name: Option<&str>) -> Result<u8> {
         .enumerate()
         .map(|(i, (v, k))| json!({ "name": v.name, "key": g_addr(k), "url": validator_url(&m, i) }))
         .collect();
-    let all = json!({
+    let mut all = json!({
         "lane": m.lane.lane.name,
         "lane_id": hex(&m.lane.lane_id()),
         "template": ctx.template_name()?,
@@ -898,11 +901,34 @@ fn output(g: &Global, name: Option<&str>) -> Result<u8> {
         "api": api_url(&m),
         "validators": validators,
     });
+    // The lane file's own [outputs], over the built-in ones.
+    let mut sensitive = std::collections::BTreeSet::new();
+    for o in &declared {
+        all[&o.name] = caravel_deploy::attrs::json(&o.value);
+        if o.sensitive {
+            sensitive.insert(o.name.clone());
+        }
+    }
+    let shown = |k: &str, v: &Value| -> Value {
+        if sensitive.contains(k) {
+            json!("(sensitive)")
+        } else {
+            v.clone()
+        }
+    };
     match name {
-        None if g.json => print_json(&all)?,
+        None if g.json => {
+            let masked: serde_json::Map<String, Value> = all
+                .as_object()
+                .expect("an object")
+                .iter()
+                .map(|(k, v)| (k.clone(), shown(k, v)))
+                .collect();
+            print_json(&Value::Object(masked))?
+        }
         None => {
             for (k, v) in all.as_object().expect("an object") {
-                match v {
+                match &shown(k, v) {
                     Value::String(s) => println!("{k} = {s}"),
                     Value::Null => println!("{k} = (none)"),
                     other => println!("{k} = {other}"),

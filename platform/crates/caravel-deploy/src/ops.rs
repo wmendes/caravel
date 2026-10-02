@@ -57,6 +57,26 @@ impl Prepared {
         }
     }
 
+    /// The deployment's `[outputs]`, sensitive ones masked; an output that
+    /// can't be computed shows its error.
+    pub fn outputs_json(&self) -> Value {
+        match self.m.outputs(&self.attrs) {
+            Ok(o) => o
+                .iter()
+                .map(|o| {
+                    let v = if o.sensitive {
+                        json!("(sensitive)")
+                    } else {
+                        crate::attrs::json(&o.value)
+                    };
+                    (o.name.clone(), v)
+                })
+                .collect::<serde_json::Map<_, _>>()
+                .into(),
+            Err(e) => json!({ "error": format!("{e:#}") }),
+        }
+    }
+
     pub async fn status_json(&self) -> Value {
         let d = &self.desired;
         let plan = self.plan();
@@ -95,6 +115,7 @@ impl Prepared {
             "nodes": nodes,
             "exit_file": self.host_provider.exit_path().exists().then(|| self.host_provider.exit_path().display().to_string()),
             "plan": { "steps": plan.steps.len(), "problems": plan.problems.len() },
+            "outputs": self.outputs_json(),
         })
     }
 

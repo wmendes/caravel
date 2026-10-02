@@ -543,3 +543,91 @@ fn problems_point_at_the_lane_file() {
         "{e}"
     );
 }
+
+/// Values known once keys and addresses are (M0.6, C-10): a relayer feed
+/// that names the settlement contract, and outputs.
+#[test]
+fn feeds_and_outputs_from_addresses() {
+    use caravel_deploy::attrs::attributes;
+    use caravel_deploy::deploy::{addresses, Keys};
+    use caravel_lanefile::expr::Value;
+
+    let lane = format!(
+        "{LANE}
+[outputs]
+settlement = \"${{contract.settlement.address}}\"
+api = {{ value = \"${{node.sequencer.url}}\", description = \"the lane's API\" }}
+admin = \"${{account.admin.public_key}}\"
+lane_id = \"${{lane.id}}\"
+{}
+[[env.testnet.relayer.feeds]]
+module = \"feeds/x.js\"
+options = {{ settlement = \"${{contract.settlement.address}}\", lane = \"${{lane.name}}\" }}
+",
+        ENV
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("lane.toml");
+    std::fs::write(&path, &lane).unwrap();
+    let mut m = Manifest::load(&path, "testnet").unwrap();
+    assert_eq!(m.deferred, ["relayer.feeds[0].options.settlement"]);
+    assert_eq!(
+        m.env.relayer.feeds[0]["options"]["lane"].as_str(),
+        Some("demo-0")
+    );
+    let keys = Keys {
+        admin: [0xA0; 32],
+        relayer: [0xA1; 32],
+        validators: vec![[1; 32], [2; 32], [3; 32]],
+    };
+    let a = addresses(&m, &keys).unwrap();
+    let attrs = attributes(&m, &keys, &a, None, None);
+    m.finish(&attrs).unwrap();
+    let settlement = stellar_strkey::Contract(a.settlement).to_string();
+    assert_eq!(
+        m.env.relayer.feeds[0]["options"]["settlement"].as_str(),
+        Some(settlement.as_str())
+    );
+    let o = m.outputs(&attrs).unwrap();
+    let get = |n: &str| {
+        o.iter()
+            .find(|x| x.name == n)
+            .map(|x| x.value.clone())
+            .unwrap()
+    };
+    assert_eq!(get("settlement"), Value::Str(settlement.to_string()));
+    assert_eq!(get("api"), Value::Str("https://lane.example".into()));
+    assert_eq!(
+        get("admin"),
+        Value::Str(
+            stellar_strkey::ed25519::PublicKey([0xA0; 32])
+                .to_string()
+                .as_str()
+                .into()
+        )
+    );
+    assert_eq!(
+        get("lane_id"),
+        Value::Str(
+            m.lane
+                .lane_id()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect()
+        )
+    );
+    // Not where the value is needed earlier.
+    std::fs::write(
+        &path,
+        lane.replace(
+            "admin = \"demo-admin\"",
+            "admin = \"${contract.settlement.address}\"",
+        ),
+    )
+    .unwrap();
+    let e = format!("{:#}", Manifest::load(&path, "testnet").unwrap_err());
+    assert!(
+        e.contains("admin uses a value known only once") && e.contains("lane.toml:"),
+        "{e}"
+    );
+}

@@ -136,6 +136,19 @@ pub struct ResolvedEnv {
     pub vars: BTreeMap<String, toml::Value>,
     /// The vars whose values are kept out of messages.
     pub sensitive: BTreeSet<String>,
+    /// Values left as written because they need a root that isn't known yet
+    /// (a `Deferred` root): their paths in the deployment, e.g.
+    /// `relayer.feeds[0].options.oracle`.
+    pub deferred: Vec<String>,
+}
+
+/// One output, evaluated.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Output {
+    pub name: String,
+    pub value: Value,
+    pub description: Option<String>,
+    pub sensitive: bool,
 }
 
 impl ResolvedEnv {
@@ -447,6 +460,133 @@ impl LaneDoc {
 
     /// The deployment `env`, with its vars, locals and `for_each` resolved.
     pub fn resolve_env(&self, env: &str, inputs: &Inputs) -> Result<ResolvedEnv, Error> {
+        self.resolve_env_with(env, inputs, &BTreeMap::new())
+    }
+
+    /// Like [`LaneDoc::resolve_env`], with more names for expressions
+    /// (`extra`, over the built-in ones). A root that is
+    /// [`Value::Deferred`] leaves the values that need it as written, listed
+    /// in [`ResolvedEnv::deferred`].
+    pub fn resolve_env_with(
+        &self,
+        env: &str,
+        inputs: &Inputs,
+        extra: &BTreeMap<String, Value>,
+    ) -> Result<ResolvedEnv, Error> {
+        let (scope, vars, sensitive) = self.scope_for(env, inputs, extra)?;
+        let table = &self.envs[env];
+        let mut diags = Vec::new();
+        let mut deferred = Vec::new();
+        let mut out = toml::Table::new();
+        for (k, v) in table {
+            if k == "outputs" {
+                continue;
+            }
+            let path = format!("env.{env}.{k}");
+            if let Some(v) = self.eval_value(v, &scope, &path, &mut diags, &mut deferred) {
+                out.insert(k.clone(), v);
+            }
+        }
+        if !diags.is_empty() {
+            return Err(self.error(diags));
+        }
+        let prefix = format!("env.{env}.");
+        Ok(ResolvedEnv {
+            name: env.to_string(),
+            table: out,
+            vars,
+            sensitive,
+            deferred: deferred
+                .into_iter()
+                .map(|p| p.strip_prefix(&prefix).unwrap_or(&p).to_string())
+                .collect(),
+        })
+    }
+
+    /// The deployment's outputs: `[outputs]`, then its own `[env.<name>.outputs]`
+    /// over them. Each is an expression, or `{ value, description, sensitive }`.
+    pub fn outputs(
+        &self,
+        env: &str,
+        inputs: &Inputs,
+        extra: &BTreeMap<String, Value>,
+    ) -> Result<Vec<Output>, Error> {
+        let (scope, _, sensitive_vars) = self.scope_for(env, inputs, extra)?;
+        let mut decls: BTreeMap<String, (toml::Value, String)> = self
+            .outputs
+            .iter()
+            .map(|(k, v)| (k.clone(), (v.clone(), format!("outputs.{k}"))))
+            .collect();
+        if let Some(t) = self.envs[env].get("outputs").and_then(|o| o.as_table()) {
+            for (k, v) in t {
+                decls.insert(k.clone(), (v.clone(), format!("env.{env}.outputs.{k}")));
+            }
+        }
+        let mut diags = Vec::new();
+        let mut out = Vec::new();
+        for (name, (decl, path)) in decls {
+            let (expr, description, sensitive) = match &decl {
+                toml::Value::Table(t) => (
+                    t.get("value")
+                        .cloned()
+                        .unwrap_or(toml::Value::Boolean(false)),
+                    t.get("description")
+                        .and_then(|v| v.as_str())
+                        .map(String::from),
+                    t.get("sensitive").and_then(|v| v.as_bool()) == Some(true),
+                ),
+                v => (v.clone(), None, false),
+            };
+            let at = if decl.is_table() {
+                format!("{path}.value")
+            } else {
+                path.clone()
+            };
+            let value = match &expr {
+                toml::Value::String(s) if has_expression(s) => match eval_str(s, &scope) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        diags.push(self.diag_at(&at, format!("output `{name}`: {}", e.message)));
+                        continue;
+                    }
+                },
+                v => Value::from_toml(v),
+            };
+            if let Value::Deferred(r) = &value {
+                diags.push(self.diag_at(
+                    &at,
+                    format!(
+                        "output `{name}` needs {}, which isn't known here",
+                        r.iter().cloned().collect::<Vec<_>>().join(", ")
+                    ),
+                ));
+                continue;
+            }
+            // An output computed from a sensitive var is sensitive too.
+            let mut used = BTreeSet::new();
+            refs("var.", &expr, &mut used);
+            let sensitive = sensitive || used.iter().any(|v| sensitive_vars.contains(v));
+            out.push(Output {
+                name,
+                value,
+                description,
+                sensitive,
+            });
+        }
+        if !diags.is_empty() {
+            return Err(self.error(diags));
+        }
+        Ok(out)
+    }
+
+    /// The names a deployment's expressions can use, and the vars.
+    #[allow(clippy::type_complexity)]
+    fn scope_for(
+        &self,
+        env: &str,
+        inputs: &Inputs,
+        extra: &BTreeMap<String, Value>,
+    ) -> Result<(MapScope, BTreeMap<String, toml::Value>, BTreeSet<String>), Error> {
         let Some(table) = self.envs.get(env) else {
             let mut d = if self.abstract_envs.contains(env) {
                 Diagnostic::new(format!(
@@ -534,25 +674,15 @@ impl LaneDoc {
                 )])),
             ),
         ]);
+        for (k, v) in extra {
+            roots.insert(k.clone(), v.clone());
+        }
         let locals = self.resolve_locals(&roots, &mut diags);
         roots.insert("local".to_string(), Value::Map(locals));
-        let scope = MapScope(roots);
-        let mut out = toml::Table::new();
-        for (k, v) in table {
-            let path = format!("env.{env}.{k}");
-            if let Some(v) = self.eval_value(v, &scope, &path, &mut diags) {
-                out.insert(k.clone(), v);
-            }
-        }
         if !diags.is_empty() {
             return Err(self.error(diags));
         }
-        Ok(ResolvedEnv {
-            name: env.to_string(),
-            table: out,
-            vars,
-            sensitive,
-        })
+        Ok((MapScope(roots), vars, sensitive))
     }
 
     /// Every local, in the order they need each other.
@@ -608,11 +738,28 @@ impl LaneDoc {
             let mut r = roots.clone();
             r.insert("local".to_string(), Value::Map(done.clone()));
             let scope = MapScope(r);
-            if let Some(v) = doc.eval_value(v, &scope, &format!("locals.{name}"), diags) {
-                done.insert(name.to_string(), Value::from_toml(&v));
-            } else {
-                done.insert(name.to_string(), Value::Null);
-            }
+            let value = match v {
+                // A local may be known later; it stays a deferred value.
+                toml::Value::String(s) if has_expression(s) => match eval_str(s, &scope) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        let mut d = doc.diag_at(
+                            &format!("locals.{name}"),
+                            format!("local `{name}`: {}", e.message),
+                        );
+                        if let Some(h) = e.help {
+                            d = d.help(h);
+                        }
+                        diags.push(d);
+                        Value::Null
+                    }
+                },
+                v => doc
+                    .eval_value(v, &scope, &format!("locals.{name}"), diags, &mut Vec::new())
+                    .map(|v| Value::from_toml(&v))
+                    .unwrap_or(Value::Null),
+            };
+            done.insert(name.to_string(), value);
             state.insert(name.to_string(), 2);
         }
         for name in self.locals.keys() {
@@ -636,9 +783,15 @@ impl LaneDoc {
         scope: &MapScope,
         path: &str,
         diags: &mut Vec<Diagnostic>,
+        deferred: &mut Vec<String>,
     ) -> Option<toml::Value> {
         match v {
             toml::Value::String(s) if has_expression(s) => match eval_str(s, scope) {
+                Ok(Value::Deferred(_)) => {
+                    // Known later: left as written.
+                    deferred.push(path.to_string());
+                    Some(v.clone())
+                }
                 Ok(val) => match val.to_toml() {
                     Ok(t) => t,
                     Err(e) => {
@@ -655,13 +808,15 @@ impl LaneDoc {
                     None
                 }
             },
-            toml::Value::Table(t) if t.contains_key("for_each") => {
-                Some(toml::Value::Array(self.expand(t, scope, path, diags)?))
-            }
+            toml::Value::Table(t) if t.contains_key("for_each") => Some(toml::Value::Array(
+                self.expand(t, scope, path, diags, deferred)?,
+            )),
             toml::Value::Table(t) => {
                 let mut out = toml::Table::new();
                 for (k, v) in t {
-                    if let Some(v) = self.eval_value(v, scope, &format!("{path}.{k}"), diags) {
+                    if let Some(v) =
+                        self.eval_value(v, scope, &format!("{path}.{k}"), diags, deferred)
+                    {
                         out.insert(k.clone(), v);
                     }
                 }
@@ -673,9 +828,12 @@ impl LaneDoc {
                     let at = format!("{path}[{i}]");
                     match item {
                         toml::Value::Table(t) if t.contains_key("for_each") => {
-                            out.extend(self.expand(t, scope, &at, diags).unwrap_or_default());
+                            out.extend(
+                                self.expand(t, scope, &at, diags, deferred)
+                                    .unwrap_or_default(),
+                            );
                         }
-                        item => match self.eval_value(item, scope, &at, diags) {
+                        item => match self.eval_value(item, scope, &at, diags, deferred) {
                             Some(v) => out.push(v),
                             None if diags.is_empty() => {
                                 diags.push(
@@ -699,6 +857,7 @@ impl LaneDoc {
         scope: &MapScope,
         path: &str,
         diags: &mut Vec<Diagnostic>,
+        deferred: &mut Vec<String>,
     ) -> Option<Vec<toml::Value>> {
         let at = format!("{path}.for_each");
         let over = match t.get("for_each") {
@@ -754,7 +913,8 @@ impl LaneDoc {
                 if k == "for_each" {
                     continue;
                 }
-                if let Some(v) = self.eval_value(v, &inner, &format!("{path}.{k}"), diags) {
+                if let Some(v) = self.eval_value(v, &inner, &format!("{path}.{k}"), diags, deferred)
+                {
                     one.insert(k.clone(), v);
                 }
             }
@@ -1020,5 +1180,100 @@ host = { provider = "ssh", address = "${var.host}" }
             e.contains("no [env.lcoal]") && e.contains("did you mean \"local\"?"),
             "{e}"
         );
+    }
+
+    #[test]
+    fn values_known_later_and_outputs() {
+        let text = r#"
+[locals]
+oracle = "${contract.oracle.address}"
+
+[outputs]
+api = "${node.sequencer.url}"
+oracle = { value = "${local.oracle}", description = "the oracle contract" }
+plain = "${lane.name}"
+
+[env.x]
+admin = "a"
+relayer = { feeds = [{ options = { oracle = "${local.oracle}", n = "${1 + 1}" } }] }
+[env.x.outputs]
+plain = "overridden"
+"#;
+        let d = doc(text);
+        let later = BTreeMap::from([
+            (
+                "contract".to_string(),
+                Value::Deferred(BTreeSet::from(["contract".to_string()])),
+            ),
+            (
+                "node".to_string(),
+                Value::Deferred(BTreeSet::from(["node".to_string()])),
+            ),
+        ]);
+        let r = d.resolve_env_with("x", &Inputs::default(), &later).unwrap();
+        assert_eq!(r.deferred, ["relayer.feeds[0].options.oracle"]);
+        assert_eq!(
+            r.table["relayer"]["feeds"][0]["options"]["oracle"].as_str(),
+            Some("${local.oracle}"),
+            "left as written"
+        );
+        assert_eq!(
+            r.table["relayer"]["feeds"][0]["options"]["n"].as_integer(),
+            Some(2)
+        );
+        assert!(!r.table.contains_key("outputs"));
+        // Outputs need the real values.
+        let e = d
+            .outputs("x", &Inputs::default(), &later)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("output `api` needs node.sequencer.url"), "{e}");
+        let known = BTreeMap::from([
+            (
+                "contract".to_string(),
+                Value::Map(BTreeMap::from([(
+                    "oracle".to_string(),
+                    Value::Map(BTreeMap::from([(
+                        "address".to_string(),
+                        Value::Str("CABC".into()),
+                    )])),
+                )])),
+            ),
+            (
+                "node".to_string(),
+                Value::Map(BTreeMap::from([(
+                    "sequencer".to_string(),
+                    Value::Map(BTreeMap::from([(
+                        "url".to_string(),
+                        Value::Str("http://x".into()),
+                    )])),
+                )])),
+            ),
+        ]);
+        let r = d.resolve_env_with("x", &Inputs::default(), &known).unwrap();
+        assert!(r.deferred.is_empty());
+        assert_eq!(
+            r.table["relayer"]["feeds"][0]["options"]["oracle"].as_str(),
+            Some("CABC")
+        );
+        let o = d.outputs("x", &Inputs::default(), &known).unwrap();
+        let get = |n: &str| o.iter().find(|x| x.name == n).unwrap();
+        assert_eq!(get("api").value, Value::Str("http://x".into()));
+        assert_eq!(get("oracle").value, Value::Str("CABC".into()));
+        assert_eq!(
+            get("oracle").description.as_deref(),
+            Some("the oracle contract")
+        );
+        assert_eq!(get("plain").value, Value::Str("overridden".into()));
+    }
+
+    #[test]
+    fn an_output_from_a_sensitive_var_is_sensitive() {
+        let text = "[vars.t]\nsensitive = true\ndefault = \"x\"\n[outputs]\nt = \"${var.t}-y\"\nopen = { value = \"z\", sensitive = false }\n[env.x]\na = 1\n";
+        let o = doc(text)
+            .outputs("x", &Inputs::default(), &BTreeMap::new())
+            .unwrap();
+        assert!(o.iter().find(|x| x.name == "t").unwrap().sensitive);
+        assert!(!o.iter().find(|x| x.name == "open").unwrap().sensitive);
     }
 }

@@ -27,6 +27,9 @@ use crate::template::{GenesisHashes, Template};
 /// A deployment resolved and read, ready to diff.
 pub struct Prepared {
     pub m: Manifest,
+    /// What expressions read once keys and addresses are known
+    /// (`crate::attrs`): relayer feeds and outputs.
+    pub attrs: BTreeMap<String, caravel_lanefile::expr::Value>,
     pub desired: Desired,
     /// `validator-<name>` → its public key.
     pub validator_keys: BTreeMap<String, Key>,
@@ -235,7 +238,7 @@ pub async fn prepare(
     state_root: &Path,
 ) -> Result<Prepared> {
     Cli::check_version()?;
-    let m = Manifest::load_with(lane_path, env, inputs)?;
+    let mut m = Manifest::load_with(lane_path, env, inputs)?;
     let mut notes = Vec::new();
     let template = m
         .lane
@@ -319,6 +322,9 @@ pub async fn prepare(
         &release.commit,
     )?;
     desired.host.platform = release::binary_platform(&release.node_binary)?;
+    // What the lane file left for now: values that need keys and addresses.
+    let attrs = crate::attrs::attributes(&m, &keys, &addrs, Some(&genesis), Some(&release.commit));
+    m.finish(&attrs)?;
 
     if for_apply {
         stellar::ensure_local_network(&m)?;
@@ -358,6 +364,7 @@ pub async fn prepare(
         .collect();
     Ok(Prepared {
         m,
+        attrs,
         desired,
         validator_keys,
         files,
