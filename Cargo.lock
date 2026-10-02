@@ -514,6 +514,7 @@ dependencies = [
 name = "caravel-lanefile"
 version = "0.1.0"
 dependencies = [
+ "proptest",
  "tempfile",
  "toml",
 ]
