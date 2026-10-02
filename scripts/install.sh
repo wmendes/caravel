@@ -99,9 +99,10 @@ args=("$STAGE/release" --templates "$TEMPLATES")
 if [[ -n "$WASM_DIR" ]]; then
   [[ -f "$WASM_DIR/settlement.wasm" ]] || fail "$WASM_DIR has no settlement.wasm (the CI contracts-wasm artifact)"
   cp "$WASM_DIR"/*.wasm "$STAGE/release/contracts/"
+  if command -v sha256sum > /dev/null; then SHA256=(sha256sum); else SHA256=(shasum -a 256); fi
+  (cd "$STAGE/release" && find bin contracts relayer relayer-feeds -type f -not -path '*/node_modules/*' 2> /dev/null | LC_ALL=C sort | xargs "${SHA256[@]}" > SHA256SUMS)
   if [[ -z "$COMMIT" ]]; then
-    (cd "$STAGE/release" && find bin contracts relayer relayer-feeds -type f -not -path '*/node_modules/*' 2> /dev/null | LC_ALL=C sort | xargs shasum -a 256 > SHA256SUMS)
-    echo "local-$(shasum -a 256 "$STAGE/release/SHA256SUMS" | cut -c1-8)" > "$STAGE/release/COMMIT"
+    echo "local-$("${SHA256[@]}" "$STAGE/release/SHA256SUMS" | cut -c1-8)" > "$STAGE/release/COMMIT"
   fi
 fi
 NAME="$(cut -c1-12 < "$STAGE/release/COMMIT")"
