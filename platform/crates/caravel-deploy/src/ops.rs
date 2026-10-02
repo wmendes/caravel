@@ -169,7 +169,7 @@ impl Prepared {
         let d = &self.desired;
         let admin = self.m.env.admin.as_str();
         let Some(oc) = &self.chain.settlement else {
-            println!(
+            eprintln!(
                 "No settlement contract at {}: stopping the host's nodes.",
                 strkey(&d.settlement)
             );
@@ -178,7 +178,7 @@ impl Prepared {
         let exit = self.host_provider.exit_path();
         if !oc.frozen {
             self.drain().await?;
-            println!("→ stop the relayer and the sequencer");
+            eprintln!("→ stop the relayer and the sequencer");
             self.host_provider.stop("relayer")?;
             self.host_provider.stop("sequencer")?;
             // A checkpoint already sent can still land.
@@ -186,7 +186,7 @@ impl Prepared {
             self.export(&exit).await?;
             let unprocessed = self.extra.inbox_count > self.extra.inbox_through;
             if !unprocessed {
-                println!("→ trigger: a 1-stroop forced withdrawal of the admin's lane account, left unprocessed");
+                eprintln!("→ trigger: a 1-stroop forced withdrawal of the admin's lane account, left unprocessed");
                 self.cli
                     .request_forced_withdrawal(admin, &d.settlement, &d.admin, 1)?;
             }
@@ -196,7 +196,7 @@ impl Prepared {
                 .map_or(window_end, |t| t.min(window_end))
                 + 5;
             if o.no_wait {
-                println!(
+                eprintln!(
                     "A freeze is possible from {} (in {} s). Run destroy again then.",
                     at,
                     at.saturating_sub(now())
@@ -205,10 +205,10 @@ impl Prepared {
             }
             let wait = at.saturating_sub(now());
             if wait > 0 {
-                println!("→ wait {wait} s for the contract to allow a freeze");
+                eprintln!("→ wait {wait} s for the contract to allow a freeze");
                 tokio::time::sleep(Duration::from_secs(wait)).await;
             }
-            println!("→ freeze");
+            eprintln!("→ freeze");
             let deadline = now() + 600;
             loop {
                 match self.cli.freeze(admin, &d.settlement) {
@@ -219,9 +219,9 @@ impl Prepared {
                     Err(e) => return Err(e),
                 }
             }
-            println!("Frozen. Every account's exit is in {}.", exit.display());
+            eprintln!("Frozen. Every account's exit is in {}.", exit.display());
         } else {
-            println!("The lane is already frozen.");
+            eprintln!("The lane is already frozen.");
             if !exit.exists() {
                 self.export(&exit).await?;
             }
@@ -238,7 +238,7 @@ impl Prepared {
         if self.host_provider.status(port).await.is_none() {
             return Ok(());
         }
-        println!("→ drain: wait until every signed checkpoint is accepted");
+        eprintln!("→ drain: wait until every signed checkpoint is accepted");
         let deadline = now() + 600;
         loop {
             let s = self
@@ -264,7 +264,7 @@ impl Prepared {
 
     /// `export-proofs` on a validator that has seen Stellar's last checkpoint.
     async fn export(&self, exit: &std::path::Path) -> Result<()> {
-        println!("→ export every exit to {}", exit.display());
+        eprintln!("→ export every exit to {}", exit.display());
         let deadline = now() + 300;
         loop {
             let mut last_err = None;
@@ -340,24 +340,24 @@ impl Prepared {
                 skipped += 1;
             }
         }
-        println!("Paid {paid} exit(s); {skipped} not paid (already claimed, or the owner can't hold USDC).");
+        eprintln!("Paid {paid} exit(s); {skipped} not paid (already claimed, or the owner can't hold USDC).");
         Ok(())
     }
 
     fn stop_nodes(&self, validators: bool, wipe: bool) -> Result<()> {
         if wipe {
-            println!("→ stop every node and wipe the host's lane data");
+            eprintln!("→ stop every node and wipe the host's lane data");
             return self.host_provider.wipe(&self.all_nodes());
         }
         self.host_provider.stop("relayer")?;
         self.host_provider.stop("sequencer")?;
         if validators {
-            println!("→ stop the validators");
+            eprintln!("→ stop the validators");
             for v in &self.m.env.validators {
                 self.host_provider.stop(&validator_node(&v.name))?;
             }
         } else {
-            println!("The validators keep running as the public proof source (--stop-validators stops them).");
+            eprintln!("The validators keep running as the public proof source (--stop-validators stops them).");
         }
         Ok(())
     }

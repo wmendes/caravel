@@ -115,7 +115,7 @@ command -v jq > /dev/null || fail "jq is required"
 
 log "build"
 ./scripts/build-contracts.sh
-cargo build --release --locked -p "$NODE" -p caravel-deploy
+cargo build --release --locked -p "$NODE" -p caravel-cli
 npm --prefix platform/relayer ci --silent
 npm --prefix platform/relayer run build --silent
 if [[ "$E2E_TEMPLATE" == perps ]]; then

@@ -2198,7 +2198,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-00 | Baseline pins: every file rendered for lane #1, its Stellar-side values, every lane file's genesis hashes; docs fixes | P-22 | review |
 | C-01 | Plugin protocol in the template binaries: `plugin info`, `plugin example`, `plugin body`; `init` scaffolds (DEC-073) | C-00 | review |
 | C-02 | `caravel-deploy` without `NodeApp`: a `Template` trait (in-process or plugin), pure `addresses()`/`desired()`, a state root (DEC-074) | C-01 | review |
-| C-03 | `caravel-cli`, the one CLI: lane-file and env discovery, `--json`, exit codes; plan, apply, status, destroy, validate, env, output, version, doctor | C-02 | todo |
+| C-03 | `caravel-cli`, the one CLI: lane-file and env discovery, `--json`, exit codes; plan, apply, status, destroy, validate, env, output, version, doctor (DEC-075) | C-02 | review |
 | C-04 | Install from source: `install.sh`, the release next to the binary, a web dir per template, a binary-platform guard | C-03 | todo |
 | C-05 | `init` and `keys`; local applies create the identities they name — **Gate G1** | C-04 | todo |
 | C-06 | `caravel-lanefile`: loader with spans and diagnostics, `include`, `extends`, reserved keys; genesis refuses `${` | C-05 | todo |
@@ -2599,6 +2599,32 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   Lane #1 now has a test that runs these on its lane file, against a matching chain and host, and plans "No changes.".
 - **`prepare` takes a state root:** a local host's processes, and an ssh lane's exit file, live under `<state_root>/.caravel/`. The old commands pass the current directory, as before.
 - **Where users reach the lane:** `api_url()` and `validator_url()`. For an ssh host that is its `public_url` (`/validators/<n>` for validators), so `status --json` no longer reports 127.0.0.1 for lane #1 | A CLI that runs any template can't link them all, and the pure pieces are what later tasks (the language, the graph) change | A template needs more than genesis and decimals at plan time |
+| DEC-075 | **M0.6 (C-03).** `caravel` is one CLI, in `platform/crates/caravel-cli`, for any template. It replaces the dispatcher that exec'd `caravel-<t>-node` (`caravel-deploy/src/bin/caravel.rs`, deleted).
+- **Which lane file:**
+  1. `-f` (or a positional lane file, as before);
+  2. `CARAVEL_FILE`;
+  3. `./lane.toml`;
+  4. the one `lane*.toml` here (several are an error that lists them);
+  5. the nearest `lane.toml` above, stopping at a directory with `.git` or at `$HOME`.
+- **Which deployment:**
+  1. `--env`;
+  2. `CARAVEL_ENV`;
+  3. the one with `default = true` (a new, non-consensus key in `[env.<name>]`; at most one);
+  4. the only one.
+
+  Nothing is remembered between runs: an apply can only land on a deployment the command line names or the file marks.
+- **Which template:** `Plugin::locate` (DEC-074). Stderr names the file and how the deployment was chosen.
+- **Local state** is `.caravel/` next to the lane file. Older deployments with state under the current directory are still found, with a note.
+- **Commands:**
+  - `plan [--diff] [--exit-code]`, `apply [-y]`, `status [--exit-code]`, `destroy`, all as before;
+  - `validate`: offline. It checks the genesis through the template's binary, each deployment's rules, and the identities in the keystore;
+  - `env list`;
+  - `output [NAME]`: the addresses and URLs derived from the lane file and its keys, with no network;
+  - `version`: this CLI, every template binary found, and the Stellar CLI against its pin;
+  - `doctor`: the Stellar CLI, Node.js 22+, the template, genesis, the release and its engine, the rules, the identities, and Docker for local networks.
+- **Output and exit codes:** `--json` works on every command: one document on stdout, and errors as `{"ok":false,"error":…}`. Exit codes are 0 ok, 1 error, 2 usage, and 3 when `--exit-code` finds changes.
+- **The deploy library's progress (`→ …`) and prompts now go to stderr.** Stdout carries only results.
+- **The template binaries' own `plan`, `apply`, `status` and `destroy` are hidden.** They still work for older scripts | A quickstart needs one installed binary with discoverable defaults, not a path into `target/` and two required flags | Several lane files per directory become common, or a hidden "selected env" is asked for |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

@@ -1,5 +1,7 @@
 //! The deploy commands every app's binary has, next to the node commands
-//! (`caravel_node::cli`). An app's binary flattens [`Command`] into its CLI:
+//! (`caravel_node::cli`). They are hidden and kept for scripts written
+//! before the `caravel` CLI (M0.6), which runs any template's lanes; use it
+//! instead. An app's binary flattens [`Command`] into its CLI:
 //!
 //! ```ignore
 //! #[derive(clap::Subcommand)]
@@ -37,6 +39,7 @@ pub struct ReleaseArgs {
 pub enum Command {
     /// Show what `apply` would change, on Stellar and on the host, for one of
     /// the lane file's deployments (`[env.<name>]`). Changes nothing.
+    #[command(hide = true)]
     Plan {
         /// The lane file.
         lane: PathBuf,
@@ -51,6 +54,7 @@ pub enum Command {
     },
     /// Make Stellar and the host match the deployment. Shows the plan and
     /// asks first, unless --yes. Running it again changes nothing.
+    #[command(hide = true)]
     Apply {
         lane: PathBuf,
         #[arg(long)]
@@ -64,6 +68,7 @@ pub enum Command {
     /// Show a deployment's health: height, the last accepted checkpoint, when
     /// a freeze would be possible, the relayer's XLM, TTL horizons, and
     /// whether it matches the lane file.
+    #[command(hide = true)]
     Status {
         lane: PathBuf,
         #[arg(long)]
@@ -77,6 +82,7 @@ pub enum Command {
     /// Wind a lane down for good: drain, stop the sequencer and relayer,
     /// export every exit with its proof to exit.json, then freeze once the
     /// contract allows it. A frozen lane can't be restarted.
+    #[command(hide = true)]
     Destroy {
         lane: PathBuf,
         #[arg(long)]

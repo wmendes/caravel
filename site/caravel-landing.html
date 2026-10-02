@@ -671,7 +671,7 @@ address = <span class="s">"caravel-1"</span></pre>
         </div>
         <pre class="lanefile" aria-label="Quickstart commands"><span class="c"># build, then the keys the lane file names</span>
 ./scripts/build-contracts.sh
-cargo build --release -p caravel-deploy -p caravel-payments-node
+cargo build --release -p caravel-cli -p caravel-payments-node
 npm --prefix platform/relayer ci &amp;&amp; npm --prefix platform/relayer run build
 for k in pay-local-admin pay-local-v1 pay-local-v2 \
   pay-local-v3 pay-local-relayer; do stellar keys generate "$k"; done
