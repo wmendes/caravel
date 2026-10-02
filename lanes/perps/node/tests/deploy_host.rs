@@ -284,6 +284,7 @@ fn lane_1_plans_no_changes() {
     }
     let host = Host {
         missing: vec![],
+        platform: None,
         release: Some("c0ffee".into()),
         files: d.host.files.clone(),
         nodes,

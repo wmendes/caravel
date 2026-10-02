@@ -61,8 +61,8 @@ pub struct Global {
     /// Print JSON on stdout, for scripts; progress and notes go to stderr.
     #[arg(long, global = true)]
     pub json: bool,
-    /// A CI release to install (also CARAVEL_RELEASE_DIR); default: this
-    /// checkout's builds.
+    /// A release to install (also CARAVEL_RELEASE_DIR); default: the one
+    /// installed with caravel, else this checkout's builds.
     #[arg(long, global = true, value_name = "DIR")]
     pub release_dir: Option<PathBuf>,
     /// Take the contracts from here instead, e.g. the CI contracts-wasm
@@ -685,9 +685,15 @@ fn version(g: &Global) -> Result<u8> {
             Err(e) => json!({ "path": path.display().to_string(), "error": format!("{e:#}") }),
         })
         .collect();
+    let release = caravel_deploy::release::installed_dir().map(|d| {
+        let commit = std::fs::read_to_string(d.join("COMMIT")).unwrap_or_default();
+        let dir = std::fs::canonicalize(&d).unwrap_or(d);
+        json!({ "commit": commit.trim(), "dir": dir.display().to_string() })
+    });
     let v = json!({
         "caravel": env!("CARGO_PKG_VERSION"),
-        "commit": option_env!("CARAVEL_COMMIT"),
+        "commit": option_env!("CARAVEL_COMMIT").filter(|c| !c.is_empty()),
+        "release": release,
         "plugin_protocol": caravel_node::plugin::PROTOCOL,
         "stellar_cli": { "installed": stellar, "needed": want },
         "templates": templates,
@@ -699,6 +705,7 @@ fn version(g: &Global) -> Result<u8> {
             "caravel {}{}",
             env!("CARGO_PKG_VERSION"),
             option_env!("CARAVEL_COMMIT")
+                .filter(|c| !c.is_empty())
                 .map(|c| format!(" ({c})"))
                 .unwrap_or_default()
         );
@@ -706,6 +713,14 @@ fn version(g: &Global) -> Result<u8> {
             "stellar CLI {} (needs {want})",
             stellar.as_deref().unwrap_or("not found")
         );
+        match &v["release"] {
+            Value::Null => println!("release: this checkout's builds (no installed release)"),
+            r => println!(
+                "release: {} at {}",
+                r["commit"].as_str().unwrap_or_default(),
+                r["dir"].as_str().unwrap_or_default()
+            ),
+        }
         if templates.is_empty() {
             println!("templates: none found (caravel-<template>-node next to caravel or on PATH)");
         } else {
@@ -864,13 +879,8 @@ fn docker() -> Result<String> {
 
 fn release_check(ctx: &Ctx, t: Option<&Plugin>) -> Result<String> {
     let template = ctx.template_name()?;
-    let mut r = match &ctx.release.release_dir {
-        Some(d) => caravel_deploy::release::Release::from_dir(d, &template)?,
-        None => caravel_deploy::release::Release::from_checkout(
-            &caravel_deploy::release::find_repo()?,
-            &template,
-        )?,
-    };
+    let mut r =
+        caravel_deploy::release::Release::locate(ctx.release.release_dir.as_deref(), &template)?;
     if let Some(w) = &ctx.release.wasm_dir {
         r.use_wasm_from(w)?;
     }

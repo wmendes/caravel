@@ -64,7 +64,9 @@ pub fn info<A: NodeApp>(app: &A) -> Info {
         protocol: PROTOCOL,
         template: A::TEMPLATE.into(),
         version: env!("CARGO_PKG_VERSION").into(),
-        commit: option_env!("CARAVEL_COMMIT").map(String::from),
+        commit: option_env!("CARAVEL_COMMIT")
+            .filter(|c| !c.is_empty())
+            .map(String::from),
         engine_file: format!("{}_engine.wasm", A::TEMPLATE),
         token_decimals: app.token_decimals(),
     }
