@@ -2196,7 +2196,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | ID | Task | Depends | Status |
 |---|---|---|---|
 | C-00 | Baseline pins: every file rendered for lane #1, its Stellar-side values, every lane file's genesis hashes; docs fixes | P-22 | review |
-| C-01 | Plugin protocol in the template binaries: `plugin info`, `plugin example`, `plugin build-tx`; `init` scaffolds | C-00 | todo |
+| C-01 | Plugin protocol in the template binaries: `plugin info`, `plugin example`, `plugin body`; `init` scaffolds (DEC-073) | C-00 | review |
 | C-02 | `caravel-deploy` without `NodeApp`: a `Template` trait (in-process or plugin), `resolve()`, a state root next to the lane file | C-01 | todo |
 | C-03 | `caravel-cli`, the one CLI: lane-file and env discovery, `--json`, exit codes; plan, apply, status, destroy, validate, env, output, version, doctor | C-02 | todo |
 | C-04 | Install from source: `install.sh`, the release next to the binary, a web dir per template, a binary-platform guard | C-03 | todo |
@@ -2577,6 +2577,15 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 - **Decimals guard:** `NodeApp::token_decimals` lets a template require the token's decimals. Perps requires 7, because its collateral, prices and margins are in 10^-7 units. A Stellar Asset Contract always has 7; for another contract, the tool reads `decimals()` by simulation and refuses a mismatch. Payments takes any token.
 - **Lane #1** is now `token = "circle-usdc"`, and its plan still shows no changes. The local payments lane uses `{ local = "USDC" }`. `E2E_TOKEN_CODE=EURC E2E_TEMPLATE=payments ./scripts/e2e-local.sh` passed in 157 s with a EURC lane.
 - **What the tool can't check:** a contract token that takes a fee on transfer, or that rebases, would break the vault's accounting. The claims (§2.4) and the README say so | A lane's economics shouldn't be tied to one stablecoin, and the contract never was | A token interface beyond SEP-41 |
+| DEC-073 | **M0.6 (C-01).** A plugin protocol between the `caravel` CLI and each template's binary.
+- **Where it lives:** every template binary gets a hidden `plugin` subcommand (`caravel_node::plugin`). Each command prints one JSON document, and `PROTOCOL = 1` is bumped when a reply changes shape.
+- **The commands:**
+  - `plugin info`: the template, this binary's version and commit, the engine's file in a release, and the token decimals the template needs;
+  - `plugin example`: the lane file `caravel init` starts from (`lanes/<t>/config/init/lane.toml`). Its placeholders are `{{name}}`, `{{port}}`, `{{id.<role>}}` (a Stellar CLI identity) and `{{g.<role>}}` (that identity's key). `example_roles` and `fill_example` read and fill them;
+  - `plugin body [--decimals D] <body…>`: a transaction body's kind and bytes, in the template's own `tx` syntax. With `--decimals`, token amounts are token units ("12.5"), parsed with integer arithmetic.
+- **Bodies, not envelopes.** The envelope is the platform's `TxEnvelopeV1` for every template (perps' `LaneTxV1` is the same bytes, `format_compat.rs`). So `caravel` builds, hashes, signs (SEP-53) and submits it, and no key ever reaches a template's binary. That replaces the `build-tx` command in the plan of record.
+- **The perps example** generates its own backstop, treasury and oracle identities rather than the public fixture keys, so its oracle key in genesis and the relayer's feed key are one identity.
+- **Unchanged:** the `tx` command still reads base units, and the existing node commands are as they were. Together with `genesis`, `replay` and `export-proofs`, this is everything the CLI needs from a template | The CLI must work for any template without linking it, and a third party's template must not need a fork | A template needs a deploy-time hook beyond these (e.g. validating its `[env]` feeds) |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

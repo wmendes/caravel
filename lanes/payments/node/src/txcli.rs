@@ -8,6 +8,7 @@ use std::time::Duration;
 use anyhow::{anyhow, bail, Result};
 use caravel_core::tx::{SigScheme, StandardBody, TxEnvelopeV1};
 use caravel_node::lane_toml::{parse_account, LaneFile};
+use caravel_node::plugin::parse_amount;
 use caravel_payments::{Transfer, TRANSFER};
 use caravel_runtime::checkpoint::sha256;
 use caravel_runtime::sequencer::hex;
@@ -40,23 +41,59 @@ pub struct TxArgs {
     pub body: Body,
 }
 
+/// Amounts are the token's base units (stroops for USDC); under `caravel tx`
+/// (`plugin body --decimals`) they are token units.
 #[derive(Subcommand, Debug)]
 pub enum Body {
-    /// USDC stroops to another lane account (it must have deposited once).
+    /// Pay another lane account (it must have deposited once).
     Transfer {
         /// The recipient's G... account.
         #[arg(long)]
         to: String,
         #[arg(long)]
-        amount: i128,
+        amount: String,
         #[arg(long, default_value_t = 0)]
         memo: u64,
     },
-    /// USDC stroops to move to the pending withdrawal queue.
+    /// Move an amount to the pending withdrawal queue.
     Withdraw {
         #[arg(long)]
-        amount: i128,
+        amount: String,
     },
+}
+
+/// A body's kind and bytes; token amounts are read with `decimals`
+/// ([`caravel_node::plugin::parse_amount`]).
+pub fn body(b: &Body, decimals: Option<u32>) -> Result<(u8, Vec<u8>)> {
+    Ok(match b {
+        Body::Transfer { to, amount, memo } => (
+            TRANSFER,
+            Transfer {
+                to: parse_account(to)?,
+                amount: parse_amount(amount, decimals)?,
+                memo: *memo,
+            }
+            .encode(),
+        ),
+        Body::Withdraw { amount } => {
+            let b = StandardBody::Withdraw {
+                amount: parse_amount(amount, decimals)?,
+            };
+            (b.kind(), b.encode())
+        }
+    })
+}
+
+/// `plugin body`: a body from its arguments, as `tx` takes them.
+pub fn plugin_body(args: &[String], decimals: Option<u32>) -> Result<(u8, Vec<u8>)> {
+    #[derive(clap::Parser)]
+    #[command(name = "body", no_binary_name = true)]
+    struct Parsed {
+        #[command(subcommand)]
+        body: Body,
+    }
+    let p = <Parsed as clap::Parser>::try_parse_from(args).map_err(|e| anyhow!("{e}"))?;
+    body(&p.body, decimals)
 }
 
 pub async fn run(a: TxArgs) -> Result<()> {
@@ -89,21 +126,7 @@ pub async fn run(a: TxArgs) -> Result<()> {
                 .parse()?
         }
     };
-    let (kind, body) = match &a.body {
-        Body::Transfer { to, amount, memo } => (
-            TRANSFER,
-            Transfer {
-                to: parse_account(to)?,
-                amount: *amount,
-                memo: *memo,
-            }
-            .encode(),
-        ),
-        Body::Withdraw { amount } => {
-            let b = StandardBody::Withdraw { amount: *amount };
-            (b.kind(), b.encode())
-        }
-    };
+    let (kind, body) = body(&a.body, None)?;
     let now_ms = caravel_node::sequencer::now_ms();
     let mut tx = TxEnvelopeV1 {
         lane_id: lane.lane_id(),

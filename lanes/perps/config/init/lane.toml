@@ -1,0 +1,160 @@
+# A Caravel Perps lane: a perpetual futures exchange with three markets.
+# `caravel init perps` wrote this file and created the Stellar CLI identities
+# it names.
+#
+# Everything above [env.*] is the lane's genesis: it fixes the lane's id and
+# its config hash, so it can't change once the lane is deployed. Edit it
+# before the first `caravel apply`.
+
+[lane]
+name = "{{name}}"                          # lane_id = H("CARAVEL/LANE/V1" || name)
+
+[app]
+template = "perps"                         # the app this lane runs (DEC-054)
+engine_wasm_sha256 = "4571cd252d4b78d523d01fc4a31ab763a1aff77aecafbb9d7302cfb879abbf0a"   # the perps engine of record; nodes refuse another
+
+[node]                                     # not consensus
+block_time_ms = 1000                       # allowed 200..=5000
+checkpoint_every_blocks = 10
+max_batch_bytes = 96000
+
+[access]
+mode = "open"                              # "open" | "allowlist"
+allowlist = []
+
+[limits]                                   # the platform's limits
+min_deposit = 10000000                     # 1 USDC (the settlement contract also enforces its own min, §13.1)
+min_withdrawal = 10000000
+max_accounts = 256                         # caps from the T-005 benchmark (DEC-028)
+max_session_keys = 4
+max_txs_per_account_per_block = 50
+max_entries_per_block = 256                # all entry types together
+max_block_bytes = 12000                    # ~56 PLACE_ORDER txs; see §3.3
+max_pending_withdrawals = 512
+exec_cpu_limit = 200000000                 # T-005: worst block at these caps is 95.8M host insns
+exec_mem_limit = 41943040
+
+[perps.accounts]
+backstop_key = "{{g.backstop}}"           # identity {{id.backstop}}: system account 0 (insurance fund + liquidation backstop)
+treasury_key = "{{g.treasury}}"           # identity {{id.treasury}}: system account 1 (fees)
+
+[perps.oracle]
+keys = ["{{g.oracle}}"]                   # identity {{id.oracle}}: signs the prices the relayer posts
+max_staleness_ms = 30000
+max_future_ms = 5000
+circuit_breaker_bps = 1000                 # 10% base move allowed per update ...
+breaker_bps_per_sec = 10                   # ... plus 0.1% per second since the last accepted update
+
+[perps.funding]
+interval_ms = 3600000
+damping = 8
+max_rate_ppm = 500                         # 0.05% per interval
+
+[perps.fees]
+insurance_share_bps = 3000                 # 30% of every fee to backstop, rest to treasury
+
+[perps.limits]                             # the order book's
+max_orders_per_side = 128
+max_open_orders_per_account = 32
+
+[[perps.markets]]
+market_id = 1
+symbol = "BTC-PERP"
+display_lot_base_units = 10000             # 1 lot = 0.0001 BTC (base decimals 8)
+display_base_decimals = 8
+tick = 1000                                # 0.0001 USDC per lot = $1 per BTC
+imf_bps = 1000                             # 10x max
+mmf_bps = 500
+taker_fee_bps = 5
+maker_fee_bps = 0
+liq_fee_bps = 100
+band_bps = 500
+max_position_lots = 20000                  # 2 BTC
+max_oi_lots = 200000                       # 20 BTC
+impact_lots = 1000                         # 0.1 BTC of depth for the funding premium
+
+[[perps.markets]]
+market_id = 2
+symbol = "ETH-PERP"
+display_lot_base_units = 100000            # 1 lot = 0.001 ETH (base decimals 8)
+display_base_decimals = 8
+tick = 1000                                # $0.10 per ETH
+imf_bps = 1000
+mmf_bps = 500
+taker_fee_bps = 5
+maker_fee_bps = 0
+liq_fee_bps = 100
+band_bps = 500
+max_position_lots = 50000
+max_oi_lots = 500000
+impact_lots = 2000                         # 2 ETH
+
+[[perps.markets]]
+market_id = 3
+symbol = "XLM-PERP"
+display_lot_base_units = 100000000         # 1 lot = 10 XLM (base decimals 7)
+display_base_decimals = 7
+tick = 1000                                # $0.00001 per XLM
+imf_bps = 2000                             # 5x max
+mmf_bps = 1000
+taker_fee_bps = 5
+maker_fee_bps = 0
+liq_fee_bps = 100
+band_bps = 500
+max_position_lots = 100000
+max_oi_lots = 1000000
+impact_lots = 1000                         # 10,000 XLM
+
+# A deployment on this machine, against a local Stellar network that
+# `caravel apply` starts. Keys are Stellar CLI identities, never secrets.
+[env.local]
+network = "local"
+admin = "{{id.admin}}"                     # deploys the settlement contract, issues the test token
+token = { local = "USDC" }                 # a test asset USDC:<admin>
+threshold = 2
+
+[env.local.settlement_params]
+force_inclusion_window_secs = 20           # short, for a local lane
+escape_timeout_secs = 30
+min_rotation_delay_secs = 3600
+signer_retention_epochs = 2
+
+[[env.local.validators]]
+name = "1"
+key = "{{id.v1}}"
+
+[[env.local.validators]]
+name = "2"
+key = "{{id.v2}}"
+
+[[env.local.validators]]
+name = "3"
+key = "{{id.v3}}"
+
+[env.local.sequencer]
+port = {{port}}                            # validators listen on port + 1, + 2, + 3
+
+[env.local.validator_polling]
+stellar_secs = 2
+
+[env.local.relayer]
+account = "{{id.relayer}}"
+intervals_ms = { inbox = 1000, checkpoints = 1000 }
+feed_keys = { CARAVEL_ORACLE_SECRET = "{{id.oracle}}" }
+
+# The oracle feed posts fixed prices here. For live ones, give each market
+# sources such as [{ coinbaseStream = "BTC-USD" }, { coinbase = "BTC-USD" }].
+[[env.local.relayer.feeds]]
+module = "relayer-feeds/perps/dist/index.js"
+intervalMs = 2000
+
+[env.local.relayer.feeds.options]
+maxSourceAgeSecs = 900
+
+[env.local.relayer.feeds.options.markets]
+"1" = [{ fixed = "65000" }]
+"2" = [{ fixed = "3500" }]
+"3" = [{ fixed = "0.40" }]
+
+[env.local.host]
+provider = "local"
