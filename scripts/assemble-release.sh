@@ -37,7 +37,9 @@ if [[ -z "$TEMPLATES" ]]; then
   TEMPLATES="$(cd "$ROOT/lanes" && for d in */; do [[ -d "$d/node" ]] && printf '%s ' "${d%/}"; done)"
 fi
 
-sha256() { if command -v sha256sum > /dev/null; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
+# `sha256sum` (Linux) or `shasum -a 256` (macOS): the same "<hash>  <file>"
+# lines either way. An array, so xargs can run it.
+if command -v sha256sum > /dev/null; then SHA256=(sha256sum); else SHA256=(shasum -a 256); fi
 need() { [[ -e "$1" ]] || { echo "assemble-release: no $1 (build first: $2)" >&2; exit 1; }; }
 
 need "$ROOT/target/release/caravel" "cargo build --release -p caravel-cli"
@@ -69,14 +71,14 @@ for d in "$OUT"/relayer-feeds/*/; do
   [[ -d "$d" ]] && npm --prefix "$d" ci --omit=dev --no-audit --no-fund --loglevel=error
 done
 
-(cd "$OUT" && find bin contracts relayer relayer-feeds -type f -not -path '*/node_modules/*' 2> /dev/null | LC_ALL=C sort | xargs sha256 > SHA256SUMS)
+(cd "$OUT" && find bin contracts relayer relayer-feeds -type f -not -path '*/node_modules/*' 2> /dev/null | LC_ALL=C sort | xargs "${SHA256[@]}" > SHA256SUMS)
 if [[ -z "$COMMIT" ]]; then
   # A build from a clean tree is its commit; anything else is named by
   # what it holds.
   if git -C "$ROOT" diff --quiet HEAD 2> /dev/null && [[ -z "$(git -C "$ROOT" status --porcelain 2> /dev/null)" ]]; then
     COMMIT="$(git -C "$ROOT" rev-parse HEAD)"
   else
-    COMMIT="local-$(sha256 "$OUT/SHA256SUMS" | cut -c1-8)"
+    COMMIT="local-$("${SHA256[@]}" "$OUT/SHA256SUMS" | cut -c1-8)"
   fi
 fi
 echo "$COMMIT" > "$OUT/COMMIT"
