@@ -2203,7 +2203,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-05 | `init` and `keys`; local applies create the identities they name (DEC-077) — **Gate G1** | C-04 | done |
 | C-06 | `caravel-lanefile`: loader with spans and diagnostics, `include`, `extends`, reserved keys; genesis refuses `${` (DEC-078) | C-05 | review |
 | C-07 | The expression evaluator: grammar, types, functions, no time or randomness (DEC-079) | C-06 | review |
-| C-08 | Vars, locals, `for_each`, per-env `[env.<name>.node]` | C-07 | todo |
+| C-08 | Vars, locals, `for_each`, per-env `[env.<name>.node]` (DEC-080) | C-07 | review |
 | C-09 | The manifest on resolved values; `caravel render`; the e2e without heredoc or `sed` | C-08 | todo |
 | C-10 | Attributes and outputs; `caravel output`; references in relayer feeds — **Gate G2** | C-09 | todo |
 | C-11 | Lifecycle: `stop`, `start`, `restart`, `logs`, `replay` from the lane file, `wait`, `api` | C-10 | todo |
@@ -2687,6 +2687,23 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - `file()` and hashing functions are left for when a task needs them.
 - **`Value::Deferred(refs)`:** a value known only after Stellar and the host are read, such as `contract.settlement.address`. Anything computed from it is deferred with the references it needs, for the attributes stage (C-10).
 - **Errors** carry the byte range in the string and a did-you-mean for names, fields and functions. Typos are measured as optimal string alignment, so a swap of two letters counts once | A lane file needs computed values (thresholds, names, lists of validators) without a full programming language or any I/O | Real need for floats, file reads or hashing in deployments |
+| DEC-080 | **M0.6 (C-08).** Vars, locals, `for_each` and per-deployment `[node]`.
+- **`[vars.<name>]`** declares a var:
+  - `type`: string, integer, boolean, list, map or any;
+  - `default`, which is literal, since vars are inputs;
+  - `description`;
+  - `sensitive`: kept out of messages and masked in the plan;
+  - `validation = [{ condition = "${…}", message = "…" }]`.
+
+  A var's value comes from its default, then `CARAVEL_VAR_<name>`, then each `--var-file` (TOML, literal), then each `--var name=value`, the last one winning. A `--var` is read by the var's type: a string as written, anything else as a TOML value. A value for an undeclared var is an error with a did-you-mean. A var with no value is an error only in a deployment that uses it.
+- **`[locals]`** are named values. They are computed per deployment, in the order they need each other, from `var`, `lane` (`name`, `template`), `env` (`name`) and other locals. A cycle is an error.
+- **A table with `for_each`** becomes a list of tables, one per item of a list or map, with `each.key` and `each.value` in scope. That holds both for a key (`[env.x.validators]`) and for an element of an array of tables. It allows up to 1,024 instances, and `for_each` must be known before anything is read.
+- **A value of `${null}`** leaves its key out, so a deployment can drop what it inherits.
+- **Vars and locals** may be in included files. Each name is defined once.
+- **`[env.<name>.node]`** merges over the lane file's `[node]` for that deployment. It reaches the hosts' `lane.toml` and never genesis, because `[node]` isn't consensus (tested).
+- **`Manifest::load_with(path, env, inputs)`** resolves the one deployment a command needs. The CLI has `--var` and `--var-file`, and `CARAVEL_VAR_*` is read. `prepare` takes the inputs.
+- **Secrets** are refused where they are written (vars, locals) and where they land, including through `--var`. Mainnet is refused on the resolved `network`.
+- **The plan's header** shows `vars: …` only when the file declares vars, so lane #1's plan text is unchanged | A rotation, a second network or another validator count is a `--var`, not an edited or duplicated file | Remote var sources (a secrets store), or per-deployment var defaults |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

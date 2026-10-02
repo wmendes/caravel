@@ -21,6 +21,9 @@
 
 pub mod diag;
 pub mod expr;
+mod resolve;
+
+pub use resolve::{Inputs, ResolvedEnv, VarType};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -31,8 +34,8 @@ pub use diag::{did_you_mean, Diagnostic, Error, Source, Sources, Span};
 /// parsers set them aside, and no template may use them as its section.
 pub const DEPLOYMENT_KEYS: [&str; 5] = ["env", "include", "vars", "locals", "outputs"];
 
-/// Reserved for the expression layer, which comes later (M0.6, C-07).
-const LATER: [&str; 3] = ["vars", "locals", "outputs"];
+/// Reserved for what comes later (M0.6, C-10: outputs).
+const LATER: [&str; 1] = ["outputs"];
 
 /// Where a value of a deployment came from.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -52,7 +55,13 @@ pub struct LaneDoc {
     pub envs: BTreeMap<String, toml::Table>,
     /// Deployments that are only there to be extended.
     pub abstract_envs: BTreeSet<String>,
-    /// `env.<name>.<path>` → where the value came from.
+    /// `[vars.<name>]`: each var's declaration (`resolve`).
+    pub vars: BTreeMap<String, toml::Value>,
+    /// `[locals]`: named values computed from vars, other locals, `lane`
+    /// and `env`.
+    pub locals: BTreeMap<String, toml::Value>,
+    /// `env.<name>.<path>`, `vars.<name>…`, `locals.<name>…` → where the
+    /// value came from.
     origins: BTreeMap<String, Origin>,
 }
 
@@ -72,6 +81,8 @@ impl LaneDoc {
             diags: Vec::new(),
             stack: Vec::new(),
             envs: BTreeMap::new(),
+            vars: BTreeMap::new(),
+            locals: BTreeMap::new(),
             origins: BTreeMap::new(),
         };
         let genesis = l.file(path, None).unwrap_or_default();
@@ -142,6 +153,8 @@ struct Loader<'a> {
     /// The includes being loaded, to catch a cycle.
     stack: Vec<PathBuf>,
     envs: BTreeMap<String, RawEnv>,
+    vars: BTreeMap<String, (toml::Value, usize)>,
+    locals: BTreeMap<String, (toml::Value, usize)>,
     /// Per file, `path` → its span, and whether it is a table (tables
     /// merge; anything else replaces what it inherits).
     origins: BTreeMap<(usize, String), (Span, bool)>,
@@ -208,7 +221,7 @@ impl Loader<'_> {
         for k in LATER {
             if table.contains_key(k) {
                 self.diags.push(
-                    Diagnostic::new(format!("`{k}` is reserved for the lane file's expressions, which this version doesn't have yet"))
+                    Diagnostic::new(format!("`{k}` is reserved for the lane file's outputs, which this version doesn't have yet"))
                         .at(self.span(file, k)),
                 );
             }
@@ -288,6 +301,48 @@ impl Loader<'_> {
                     .at(self.span(file, "env")),
             ),
         }
+        for (section, kind) in [("vars", "var"), ("locals", "local")] {
+            match table.remove(section) {
+                None => {}
+                Some(toml::Value::Table(items)) => {
+                    for (name, v) in items {
+                        let here = format!("{section}.{name}");
+                        let into = if section == "vars" {
+                            &mut self.vars
+                        } else {
+                            &mut self.locals
+                        };
+                        if let Some((_, prev)) = into.get(&name) {
+                            let prev = *prev;
+                            let (line, _) = self.sources.line_col(
+                                prev,
+                                self.span(prev, &here).map_or(0, |s| s.range.start),
+                            );
+                            let note = format!(
+                                "it is also defined in {}:{line}",
+                                self.sources.0[prev].path.display()
+                            );
+                            self.diags.push(
+                                Diagnostic::new(format!("{kind} `{name}` is defined twice"))
+                                    .at(self.span(file, &here))
+                                    .note(note),
+                            );
+                            continue;
+                        }
+                        let into = if section == "vars" {
+                            &mut self.vars
+                        } else {
+                            &mut self.locals
+                        };
+                        into.insert(name, (v, file));
+                    }
+                }
+                Some(_) => self.diags.push(
+                    Diagnostic::new(format!("`{section}` must be a table, [{section}]"))
+                        .at(self.span(file, section)),
+                ),
+            }
+        }
         for k in LATER {
             table.remove(k);
         }
@@ -341,11 +396,36 @@ impl Loader<'_> {
                 diagnostics: self.diags,
             });
         }
+        for ((file, p), (span, _)) in &self.origins {
+            let top = p.split(['.', '[']).next().unwrap_or_default();
+            let owner = match top {
+                "vars" => p
+                    .split('.')
+                    .nth(1)
+                    .and_then(|n| self.vars.get(n.split('[').next().unwrap_or(n))),
+                "locals" => p
+                    .split('.')
+                    .nth(1)
+                    .and_then(|n| self.locals.get(n.split('[').next().unwrap_or(n))),
+                _ => None,
+            };
+            if owner.is_some_and(|(_, f)| f == file) {
+                origins.insert(
+                    p.clone(),
+                    Origin {
+                        span: span.clone(),
+                        via: None,
+                    },
+                );
+            }
+        }
         Ok(LaneDoc {
             sources: self.sources,
             genesis,
             envs,
             abstract_envs,
+            vars: self.vars.into_iter().map(|(k, (v, _))| (k, v)).collect(),
+            locals: self.locals.into_iter().map(|(k, (v, _))| (k, v)).collect(),
             origins,
         })
     }

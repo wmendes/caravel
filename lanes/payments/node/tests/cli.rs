@@ -32,7 +32,7 @@ fn check<'a>(report: &'a serde_json::Value, name: &str) -> &'a serde_json::Value
 fn validate_checks_genesis_and_every_deployment() {
     use_this_plugin();
     let lane = root().join("lanes/payments/config/lane.caravel-payments.local.toml");
-    let (_, report) = validate_report(&lane, None).unwrap();
+    let (_, report) = validate_report(&lane, None, &Default::default()).unwrap();
     let genesis = check(&report, "genesis");
     assert_eq!(genesis["ok"], true);
     // The local lane's pinned hashes (tests/lane_file.rs).
@@ -63,7 +63,7 @@ fn validate_reports_a_broken_deployment() {
         + "\n[env.other]\nnetwork = \"mainnet\"\n";
     let lane = dir.path().join("lane.toml");
     std::fs::write(&lane, text).unwrap();
-    let (ok, report) = validate_report(&lane, None).unwrap();
+    let (ok, report) = validate_report(&lane, None, &Default::default()).unwrap();
     assert!(!ok);
     assert_eq!(check(&report, "genesis")["ok"], true);
     let local = check(&report, "[env.local]");
@@ -78,7 +78,7 @@ fn validate_reports_a_broken_deployment() {
         "{other}"
     );
     // --env narrows it to one deployment.
-    let (_, one) = validate_report(&lane, Some("other")).unwrap();
+    let (_, one) = validate_report(&lane, Some("other"), &Default::default()).unwrap();
     assert_eq!(one["checks"].as_array().unwrap().len(), 2);
 }
 
@@ -93,7 +93,7 @@ fn a_bad_genesis_is_the_templates_error() {
     .replace("min_transfer = 1", "min_transfer = 0");
     let lane = dir.path().join("lane.toml");
     std::fs::write(&lane, text).unwrap();
-    let (ok, report) = validate_report(&lane, None).unwrap();
+    let (ok, report) = validate_report(&lane, None, &Default::default()).unwrap();
     assert!(!ok);
     let g = check(&report, "genesis");
     assert_eq!(g["ok"], false);
@@ -153,7 +153,7 @@ fn init_writes_a_lane_file_and_its_identities() {
     assert!(ids.iter().all(|i| i["created"] == true));
     assert!(ids.iter().any(|i| i["identity"] == "acme-pay-treasury"));
     // The lane file passes every check, and the keystore has what it names.
-    let (ok, report) = validate_report(&done.lane_file, None).unwrap();
+    let (ok, report) = validate_report(&done.lane_file, None, &Default::default()).unwrap();
     assert!(ok, "{report}");
     let m = Manifest::load(&done.lane_file, "local").unwrap();
     assert!(m.env.default);

@@ -367,7 +367,7 @@ force_inclusion_window_secs = 20
     assert_eq!(local.env.relayer.account, "demo-relayer");
     // The base itself can't be planned.
     let e = format!("{:#}", Manifest::load(&path, "base").unwrap_err());
-    assert!(e.contains("no [env.base]"), "{e}");
+    assert!(e.contains("[env.base] is abstract"), "{e}");
     // The genesis is the lane file's own.
     assert_eq!(local.lane.raw, testnet.lane.raw);
     assert!(!local.lane.raw.contains_key("include"));
@@ -384,4 +384,112 @@ force_inclusion_window_secs = 20
     );
     assert!(e.contains("lane.toml:"), "{e}");
     assert!(e.contains("did you mean \"base\"?"), "{e}");
+}
+
+/// Vars, locals, for_each and a deployment's own [node] (M0.6, C-08).
+#[test]
+fn deployments_from_vars() {
+    let lane = format!(
+        "{LANE}
+[vars.validators]
+type = \"list\"
+default = [\"1\", \"2\", \"3\"]
+[vars.network]
+type = \"string\"
+default = \"testnet\"
+
+[locals]
+prefix = \"demo-${{env.name}}\"
+
+[env.testnet]
+network = \"${{var.network}}\"
+admin = \"${{local.prefix}}-admin\"
+token = \"circle-usdc\"
+threshold = \"${{length(var.validators) * 2 / 3 + 1}}\"
+relayer = {{ account = \"${{local.prefix}}-relayer\" }}
+host = {{ provider = \"ssh\", address = \"ops@lane.example\" }}
+node = {{ checkpoint_every_blocks = 5 }}
+[env.testnet.settlement_params]
+force_inclusion_window_secs = 600
+escape_timeout_secs = 1800
+min_rotation_delay_secs = 3600
+signer_retention_epochs = 2
+[env.testnet.validators]
+for_each = \"${{var.validators}}\"
+name = \"${{each.value}}\"
+key = \"${{local.prefix}}-v${{each.value}}\"
+"
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("lane.toml");
+    std::fs::write(&path, &lane).unwrap();
+    let m = Manifest::load(&path, "testnet").unwrap();
+    assert_eq!(m.env.admin, "demo-testnet-admin");
+    assert_eq!(m.env.threshold, 3);
+    let keys: Vec<_> = m.env.validators.iter().map(|v| v.key.as_str()).collect();
+    assert_eq!(
+        keys,
+        ["demo-testnet-v1", "demo-testnet-v2", "demo-testnet-v3"]
+    );
+    assert_eq!(
+        m.vars,
+        r#"network = "testnet", validators = ["1", "2", "3"]"#
+    );
+    // The deployment's [node] over the lane file's; genesis is the same.
+    assert_eq!(m.lane.node.checkpoint_every_blocks, 5);
+    assert_eq!(m.lane.raw["node"]["block_time_ms"].as_integer(), Some(1000));
+    let plain = Manifest::parse(&file(ENV), "testnet").unwrap();
+    assert_eq!(m.lane.lane_id(), plain.lane.lane_id());
+    for k in ["lane", "app", "access", "limits", "demo"] {
+        assert_eq!(m.lane.raw[k], plain.lane.raw[k], "[{k}]");
+    }
+
+    // Inputs: a rotation is a --var.
+    let rotated = caravel_deploy::manifest::Inputs {
+        vars: vec![("validators".into(), r#"["1","2","4"]"#.into())],
+        ..Default::default()
+    };
+    let r = Manifest::load_with(&path, "testnet", &rotated).unwrap();
+    assert_eq!(r.env.validators[2].key, "demo-testnet-v4");
+
+    // Mainnet and secrets are refused when a var brings them, too.
+    let main = caravel_deploy::manifest::Inputs {
+        vars: vec![("network".into(), "mainnet".into())],
+        ..Default::default()
+    };
+    let e = format!(
+        "{:#}",
+        Manifest::load_with(&path, "testnet", &main).unwrap_err()
+    );
+    assert!(e.contains("testnet only"), "{e}");
+    let secret = stellar_strkey::ed25519::PrivateKey([7; 32]).to_string();
+    let secret = secret.as_str();
+    std::fs::write(
+        &path,
+        lane.replace("default = \"testnet\"", &format!("default = \"{secret}\"")),
+    )
+    .unwrap();
+    let e = format!("{:#}", Manifest::load(&path, "testnet").unwrap_err());
+    assert!(e.contains("vars.network") && !e.contains(secret), "{e}");
+    std::fs::write(&path, &lane).unwrap();
+    let via_flag = caravel_deploy::manifest::Inputs {
+        vars: vec![("network".into(), secret.into())],
+        ..Default::default()
+    };
+    let e = format!(
+        "{:#}",
+        Manifest::load_with(&path, "testnet", &via_flag).unwrap_err()
+    );
+    assert!(e.contains("--var network") && !e.contains(secret), "{e}");
+    // A bad node setting names the deployment.
+    std::fs::write(
+        &path,
+        lane.replace("checkpoint_every_blocks = 5", "block_time_ms = 10"),
+    )
+    .unwrap();
+    let e = format!("{:#}", Manifest::load(&path, "testnet").unwrap_err());
+    assert!(
+        e.contains("[env.testnet.node]") && e.contains("block_time_ms"),
+        "{e}"
+    );
 }
