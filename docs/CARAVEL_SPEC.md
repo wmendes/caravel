@@ -2204,7 +2204,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-06 | `caravel-lanefile`: loader with spans and diagnostics, `include`, `extends`, reserved keys; genesis refuses `${` (DEC-078) | C-05 | review |
 | C-07 | The expression evaluator: grammar, types, functions, no time or randomness (DEC-079) | C-06 | review |
 | C-08 | Vars, locals, `for_each`, per-env `[env.<name>.node]` (DEC-080) | C-07 | review |
-| C-09 | The manifest on resolved values; `caravel render`; the e2e without heredoc or `sed` | C-08 | todo |
+| C-09 | The manifest on resolved values; `caravel render`; the e2e without heredoc or `sed` (DEC-081) | C-08 | review |
 | C-10 | Attributes and outputs; `caravel output`; references in relayer feeds — **Gate G2** | C-09 | todo |
 | C-11 | Lifecycle: `stop`, `start`, `restart`, `logs`, `replay` from the lane file, `wait`, `api` | C-10 | todo |
 | C-12 | Users' Stellar flows: `account create/fund`, `balance`, `deposit` (waits for the credit) | C-11 | todo |
@@ -2704,6 +2704,13 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 - **`Manifest::load_with(path, env, inputs)`** resolves the one deployment a command needs. The CLI has `--var` and `--var-file`, and `CARAVEL_VAR_*` is read. `prepare` takes the inputs.
 - **Secrets** are refused where they are written (vars, locals) and where they land, including through `--var`. Mainnet is refused on the resolved `network`.
 - **The plan's header** shows `vars: …` only when the file declares vars, so lane #1's plan text is unchanged | A rotation, a second network or another validator count is a `--var`, not an edited or duplicated file | Remote var sources (a secrets store), or per-deployment var defaults |
+| DEC-081 | **M0.6 (C-09).** Deployments are read resolved, and problems point at the lane file.
+- **Locations.** A broken rule in a deployment now ends with `at <file>:<line>:<col>`, and an inherited value adds `(from [env.<base>])`. The location is found through the language's origins, by the field the message names: its leading path, serde's "in \`a.b\`" or "unknown field \`x\`", or `validator "<name>"`. A shorter path is used when the full one has no origin.
+- **`caravel render [--genesis]`** prints the deployment as `plan` reads it: includes, inheritance, vars and expressions resolved, with `# vars: …`. With `--genesis` it prints exactly the document the template hashes and the hosts get as `lane.toml` (`--json` too). That is the input to check before an apply, and the right `replay --genesis-config`.
+- **The e2e composes its deployment** instead of generating it:
+  - `scripts/e2e/env.toml` is one `[env.e2e]` for any template, with vars for the network, token, port, validators, a pinned settlement build, and the feeds and feed keys;
+  - the e2e copies the template's lane file with `include = ["e2e-env.toml"]` in front, writes the vars to a `--var-file`, and checks `caravel render`;
+  - the rotation in step 4b is `--var 'validators=["1","2","4"]'` on every later command. The heredoc and the `sed` edit are gone | Composition is only real once the project's own lifecycle test uses it | The e2e moves fully onto the CLI (C-14), with no raw `stellar`, `curl` or `jq` loops |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

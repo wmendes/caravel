@@ -149,6 +149,15 @@ pub enum Cmd {
         /// The lane file (the same as -f).
         lane: Option<PathBuf>,
     },
+    /// The deployment as `plan` reads it: includes, inheritance, vars and
+    /// expressions resolved. With --genesis, the genesis document the
+    /// template hashes and the hosts get as lane.toml.
+    Render {
+        /// The lane file (the same as -f).
+        lane: Option<PathBuf>,
+        #[arg(long)]
+        genesis: bool,
+    },
     /// The lane file's deployments.
     Env {
         #[command(subcommand)]
@@ -544,6 +553,39 @@ fn dispatch(cli: Cli) -> Result<u8> {
             })
         }
         Cmd::Validate { lane } => validate(g, lane.as_deref()),
+        Cmd::Render { lane, genesis } => {
+            let ctx = context(g, lane.as_deref())?;
+            let m = ctx.manifest()?;
+            let doc = if genesis {
+                toml::to_string(&m.lane.raw)?
+            } else {
+                let env = m
+                    .lane
+                    .env
+                    .get(&ctx.env)
+                    .cloned()
+                    .ok_or_else(|| anyhow!("no [env.{}]", ctx.env))?;
+                let mut t = toml::Table::new();
+                t.insert(
+                    "env".into(),
+                    toml::Value::Table(toml::Table::from_iter([(ctx.env.clone(), env)])),
+                );
+                toml::to_string(&t)?
+            };
+            if g.json {
+                let v: Value = serde_json::to_value(toml::from_str::<toml::Table>(&doc)?)?;
+                print_json(
+                    &json!({ "env": ctx.env, "vars": m.vars, "genesis": genesis, "document": v }),
+                )?;
+            } else {
+                eprintln!("{}", ctx.describe());
+                if !genesis && !m.vars.is_empty() {
+                    println!("# vars: {}", m.vars);
+                }
+                print!("{doc}");
+            }
+            Ok(exit::OK)
+        }
         Cmd::Env { cmd: EnvCmd::List } => env_list(g),
         Cmd::Output { name } => output(g, name.as_deref()),
         Cmd::Init {

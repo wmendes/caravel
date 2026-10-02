@@ -370,12 +370,27 @@ impl Manifest {
                 toml::Value::Table(r.table.clone()),
             )])),
         );
-        let mut m = Self::from_lane(LaneFile::from_table(t)?, env)?;
+        let locate = |msg: &str| locate_problem(doc, env, &r.table, msg);
+        let mut m = Self::from_lane_with(LaneFile::from_table(t)?, env, &locate)?;
         m.vars = r.vars_line();
         Ok(m)
     }
 
     pub fn from_lane(lane: LaneFile, env: &str) -> Result<Self> {
+        Self::from_lane_with(lane, env, &|_| None)
+    }
+
+    /// Like [`Manifest::from_lane`]; `locate` says where in the lane file a
+    /// problem's value is (`file:line:col`).
+    fn from_lane_with(
+        lane: LaneFile,
+        env: &str,
+        locate: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<Self> {
+        let at = |msg: String| match locate(&msg) {
+            Some(loc) => format!("{msg}\n    at {loc}"),
+            None => msg,
+        };
         let table = lane.env.get(env).ok_or_else(|| {
             let known: Vec<_> = lane.env.keys().map(|k| format!("[env.{k}]")).collect();
             if known.is_empty() {
@@ -396,10 +411,15 @@ impl Manifest {
                 bail!("network {n:?}: Caravel runs on testnet only (spec §0)");
             }
         }
-        let spec: EnvSpec = toml::Value::Table(table.clone()).try_into()?;
+        let spec: EnvSpec = toml::Value::Table(table.clone())
+            .try_into()
+            .map_err(|e: toml::de::Error| anyhow!("{}", at(e.to_string().trim().to_string())))?;
         let problems = spec.check();
         if !problems.is_empty() {
-            bail!("{}", problems.join("\n"));
+            bail!(
+                "{}",
+                problems.into_iter().map(at).collect::<Vec<_>>().join("\n")
+            );
         }
         // The deployment's [node] over the lane file's: not consensus.
         let lane = match &spec.node {
@@ -483,6 +503,64 @@ fn shorten(s: &str) -> String {
 fn is_secret(s: &str) -> bool {
     stellar_strkey::ed25519::PrivateKey::from_string(s).is_ok()
         || s.split_whitespace().count() >= 12
+}
+
+/// Where a problem's value is written: the field a message names (its
+/// leading `a.b`, or serde's "in `a.b`"), looked up in the lane file's
+/// origins, a shorter path when the full one has none.
+fn locate_problem(
+    doc: &caravel_lanefile::LaneDoc,
+    env: &str,
+    table: &toml::Table,
+    msg: &str,
+) -> Option<String> {
+    let path = if let Some(i) = msg.find("unknown field `") {
+        msg[i + 15..]
+            .split('`')
+            .next()
+            .unwrap_or_default()
+            .to_string()
+    } else if let Some(i) = msg.find("in `") {
+        msg[i + 4..]
+            .split('`')
+            .next()
+            .unwrap_or_default()
+            .to_string()
+    } else if let Some(rest) = msg.strip_prefix("validator \"") {
+        // `validator "<name>" …`: the validator with that name.
+        let name = rest.split('"').next().unwrap_or_default();
+        let i = table
+            .get("validators")
+            .and_then(|v| v.as_array())
+            .and_then(|a| {
+                a.iter()
+                    .position(|v| v.get("name").and_then(|n| n.as_str()) == Some(name))
+            })?;
+        format!("validators[{i}]")
+    } else {
+        msg.split([' ', '=', ':', ','])
+            .next()
+            .unwrap_or_default()
+            .trim_matches(['[', ']'])
+            .to_string()
+    };
+    let mut p = path.as_str();
+    loop {
+        if !p.is_empty() {
+            if let Some(loc) = doc.locate(&format!("env.{env}.{p}")) {
+                return Some(loc);
+            }
+        }
+        match p.rfind(['.', '[']) {
+            Some(i) => p = &p[..i],
+            None => {
+                return doc
+                    .locate(&format!("env.{env}.{p}"))
+                    .or_else(|| doc.locate(&format!("env.{env}.validators")))
+                    .filter(|_| path.starts_with("validators"))
+            }
+        }
+    }
 }
 
 /// The path of every string in the table that holds a secret.
