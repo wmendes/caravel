@@ -7,6 +7,7 @@
 //! Every command takes `--json` (one JSON document on stdout; progress and
 //! notes on stderr). Exit codes are in [`exit`].
 
+pub mod init;
 pub mod project;
 
 use std::path::{Path, PathBuf};
@@ -15,7 +16,7 @@ use std::process::ExitCode;
 use anyhow::{anyhow, bail, Context, Result};
 use caravel_deploy::cli::ReleaseArgs;
 use caravel_deploy::deploy::{self, addresses, api_url, validator_url, Keys};
-use caravel_deploy::manifest::{envs, Manifest};
+use caravel_deploy::manifest::{envs, Manifest, Network};
 use caravel_deploy::ops::DestroyOptions;
 use caravel_deploy::stellar::Cli as Stellar;
 use caravel_deploy::template::{self, Plugin, Template};
@@ -144,11 +145,54 @@ pub enum Cmd {
         /// e.g. settlement, token, api, lane_id.
         name: Option<String>,
     },
+    /// Start a lane: write DIR/lane.toml from a template's example, and
+    /// create the Stellar CLI identities it names (`<name>-<role>`).
+    Init {
+        /// The template (one of `caravel init --list`); the only one
+        /// installed, if there is one.
+        template: Option<String>,
+        /// Where to write lane.toml (default: here); its name is the
+        /// lane's unless --name.
+        dir: Option<PathBuf>,
+        /// The lane's name ([lane] name; it fixes the lane's id).
+        #[arg(long)]
+        name: Option<String>,
+        /// The sequencer's port (default: the first free one from 18080;
+        /// validators take the next ones).
+        #[arg(long)]
+        port: Option<u16>,
+        /// The identities' prefix (default: the lane's name).
+        #[arg(long)]
+        prefix: Option<String>,
+        /// Replace an existing lane.toml.
+        #[arg(long)]
+        force: bool,
+        /// List the templates instead.
+        #[arg(long)]
+        list: bool,
+    },
+    /// The Stellar CLI identities a deployment names.
+    Keys {
+        #[command(subcommand)]
+        cmd: KeysCmd,
+    },
     /// This CLI, the templates it finds and the Stellar CLI it needs.
     Version,
     /// Check that this machine can run the deployment: the Stellar CLI,
     /// Node.js, the template, the release and the identities.
     Doctor,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum KeysCmd {
+    /// Each role's identity, and whether the keystore has it.
+    List,
+    /// Create the identities the keystore lacks (they stay in the Stellar
+    /// CLI's keystore).
+    Ensure,
+    /// An identity's public key: an identity name, or a role (admin,
+    /// relayer, validator-<name>).
+    Show { who: String },
 }
 
 #[derive(Subcommand, Debug)]
@@ -264,6 +308,10 @@ impl Ctx {
             .ok_or_else(|| anyhow!("{} has no [app] template", self.lane_path.display()))
     }
 
+    fn manifest(&self) -> Result<Manifest> {
+        Manifest::from_lane(self.lane.clone(), &self.env)
+    }
+
     fn template(&self) -> Result<Plugin> {
         Plugin::locate(&self.template_name()?)
     }
@@ -307,6 +355,30 @@ fn dispatch(cli: Cli) -> Result<u8> {
             exit_code,
         } => {
             let ctx = context(g, lane.as_deref())?;
+            let m = ctx.manifest()?;
+            let missing = init::missing_identities(&m);
+            if !missing.is_empty() {
+                if m.env.network != Network::Local {
+                    bail!(
+                        "the keystore lacks {}: create them with `caravel keys ensure`",
+                        missing.join(", ")
+                    );
+                }
+                // Addresses derive from the admin's key: the rest of the plan
+                // needs these first.
+                if g.json {
+                    print_json(
+                        &json!({ "create_identities": missing, "steps": [], "problems": [] }),
+                    )?;
+                } else {
+                    eprintln!("{}", ctx.describe());
+                    for id in &missing {
+                        println!("+ identity  {id} (Stellar CLI keystore)");
+                    }
+                    println!("\napply creates these identities first, then plans the rest with their keys.");
+                }
+                return Ok(if exit_code { exit::CHANGES } else { exit::OK });
+            }
             runtime()?.block_on(async {
                 let p = ctx.prepare(false).await?;
                 let plan = p.plan();
@@ -333,6 +405,21 @@ fn dispatch(cli: Cli) -> Result<u8> {
         }
         Cmd::Apply { lane, yes } => {
             let ctx = context(g, lane.as_deref())?;
+            let m = ctx.manifest()?;
+            let missing = init::missing_identities(&m);
+            if !missing.is_empty() {
+                if m.env.network != Network::Local {
+                    bail!(
+                        "the keystore lacks {}: create them with `caravel keys ensure` (and fund them), then apply",
+                        missing.join(", ")
+                    );
+                }
+                // A local network's identities are throwaway keys: apply
+                // makes the ones its lane file names.
+                for id in init::ensure_identities(&m)? {
+                    eprintln!("+ identity  {id} (created in the Stellar CLI keystore)");
+                }
+            }
             runtime()?.block_on(async {
                 let p = ctx.prepare(true).await?;
                 let plan = p.plan();
@@ -441,6 +528,115 @@ fn dispatch(cli: Cli) -> Result<u8> {
         Cmd::Validate { lane } => validate(g, lane.as_deref()),
         Cmd::Env { cmd: EnvCmd::List } => env_list(g),
         Cmd::Output { name } => output(g, name.as_deref()),
+        Cmd::Init {
+            template,
+            dir,
+            name,
+            port,
+            prefix,
+            force,
+            list,
+        } => {
+            if list {
+                return version(g);
+            }
+            let done = init::init(&init::InitArgs {
+                template: template.as_deref(),
+                dir: dir.as_deref(),
+                name: name.as_deref(),
+                port,
+                prefix: prefix.as_deref(),
+                force,
+            })?;
+            if g.json {
+                print_json(&done.report)?;
+            } else {
+                let r = &done.report;
+                println!(
+                    "Wrote {} ({} lane {}, sequencer on port {}).",
+                    r["lane_file"].as_str().unwrap_or_default(),
+                    r["template"].as_str().unwrap_or_default(),
+                    r["name"].as_str().unwrap_or_default(),
+                    r["port"]
+                );
+                println!("Identities, in the Stellar CLI keystore:");
+                for i in r["identities"].as_array().into_iter().flatten() {
+                    println!(
+                        "  {:<10} {:<28} {}{}",
+                        i["role"].as_str().unwrap_or_default(),
+                        i["identity"].as_str().unwrap_or_default(),
+                        i["key"].as_str().unwrap_or_default(),
+                        if i["created"] == true { "  (new)" } else { "" }
+                    );
+                }
+                let cwd = std::env::current_dir()?;
+                let dir = done.lane_file.parent().unwrap_or(&cwd);
+                println!("\nNext:");
+                if dir != cwd {
+                    let shown = dir.strip_prefix(&cwd).unwrap_or(dir);
+                    println!("  cd {}", shown.display());
+                }
+                println!("  caravel plan     # what apply would do");
+                println!("  caravel apply    # a local Stellar network, the contracts, the nodes");
+            }
+            Ok(exit::OK)
+        }
+        Cmd::Keys { cmd } => {
+            let ctx = context(g, None)?;
+            let m = ctx.manifest()?;
+            match cmd {
+                KeysCmd::List => {
+                    let r = init::keys_report(&m);
+                    if g.json {
+                        print_json(&r)?;
+                    } else {
+                        for k in r.as_array().into_iter().flatten() {
+                            println!(
+                                "{} {:<20} {:<28} {}",
+                                if k["exists"] == true { "ok " } else { "-- " },
+                                k["role"].as_str().unwrap_or_default(),
+                                k["identity"].as_str().unwrap_or_default(),
+                                k["key"].as_str().unwrap_or("(not in the keystore)")
+                            );
+                        }
+                    }
+                    Ok(exit::OK)
+                }
+                KeysCmd::Ensure => {
+                    let created = init::ensure_identities(&m)?;
+                    if g.json {
+                        print_json(&json!({ "created": created }))?;
+                    } else if created.is_empty() {
+                        println!(
+                            "The keystore has every identity [env.{}] names.",
+                            m.env_name
+                        );
+                    } else {
+                        for id in &created {
+                            println!("+ identity  {id}");
+                        }
+                        if m.env.network != Network::Local {
+                            println!("\napply funds the admin and the relayer with friendbot on testnet.");
+                        }
+                    }
+                    Ok(exit::OK)
+                }
+                KeysCmd::Show { who } => {
+                    let identity = init::roles(&m)
+                        .into_iter()
+                        .find(|(role, _)| *role == who)
+                        .map(|(_, id)| id)
+                        .unwrap_or(who);
+                    let key = caravel_runtime::views::g_address(&Stellar::public_key(&identity)?);
+                    if g.json {
+                        print_json(&json!({ "identity": identity, "key": key }))?;
+                    } else {
+                        println!("{key}");
+                    }
+                    Ok(exit::OK)
+                }
+            }
+        }
         Cmd::Version => version(g),
         Cmd::Doctor => doctor(g),
     }
@@ -461,7 +657,7 @@ fn validate(g: &Global, positional: Option<&Path>) -> Result<u8> {
             } else if let Some(m) = r["missing_identities"].as_array().filter(|m| !m.is_empty()) {
                 let ids: Vec<_> = m.iter().filter_map(|v| v.as_str()).collect();
                 format!(
-                    "identities missing from the Stellar CLI keystore: {} (create them with `stellar keys generate <name>`)",
+                    "identities missing from the Stellar CLI keystore: {} (create them with `caravel keys ensure`)",
                     ids.join(", ")
                 )
             } else if let Some(c) = r["config_hash"].as_str() {
@@ -816,7 +1012,7 @@ fn doctor(g: &Global) -> Result<u8> {
                             ))
                         } else {
                             Err(anyhow!(
-                                "missing: {} (create them with `stellar keys generate <name>`)",
+                                "missing: {} (create them with `caravel keys ensure`)",
                                 missing.join(", ")
                             ))
                         },
