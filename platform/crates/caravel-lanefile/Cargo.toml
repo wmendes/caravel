@@ -1,0 +1,16 @@
+[package]
+name = "caravel-lanefile"
+description = "The lane file language: includes, env inheritance, and diagnostics with file and line (M0.6)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Default features only: never `preserve_order`, which would reorder the
+# genesis document the hosts get and change lane #1's file hashes.
+toml = "1.1.6"
+
+[dev-dependencies]
+tempfile = "3.27.0"

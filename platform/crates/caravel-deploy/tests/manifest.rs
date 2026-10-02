@@ -312,3 +312,76 @@ fn any_token_can_settle_a_lane() {
         Manifest::parse(&file(&env), "testnet").unwrap_or_else(|e| panic!("{token}: {e:#}"));
     }
 }
+
+/// Deployments composed with `include` and `extends` (M0.6): one shared
+/// base, a local and a testnet deployment of the same lane.
+#[test]
+fn composed_deployments() {
+    let dir = tempfile::tempdir().unwrap();
+    // The base holds what both share; each deployment says where it runs.
+    let host = "\n[env.testnet.host]\nprovider = \"ssh\"\naddress = \"ops@lane.example\"\npublic_url = \"https://lane.example\"\n";
+    let base = ENV
+        .replace(host, "\n")
+        .replace("[env.testnet]", "[env.base]\nabstract = true")
+        .replace("[env.testnet.", "[env.base.")
+        .replace("[[env.testnet.", "[[env.base.");
+    assert!(!base.contains("host"));
+    std::fs::write(dir.path().join("base.toml"), base).unwrap();
+    let lane = format!(
+        "include = [\"base.toml\"]\n{LANE}
+[env.testnet]
+extends = \"base\"
+default = true
+host = {{ provider = \"ssh\", address = \"ops@lane.example\", public_url = \"https://lane.example\" }}
+
+[env.local]
+extends = \"base\"
+network = \"local\"
+token = {{ local = \"USDC\" }}
+host = {{ provider = \"local\" }}
+[env.local.settlement_params]
+force_inclusion_window_secs = 20
+"
+    );
+    let path = dir.path().join("lane.toml");
+    std::fs::write(&path, &lane).unwrap();
+    let testnet = Manifest::load(&path, "testnet").unwrap();
+    assert!(testnet.env.default);
+    assert_eq!(testnet.env.network, Network::Testnet);
+    assert_eq!(testnet.env.host.provider, Provider::Ssh);
+    assert_eq!(testnet.env.validators.len(), 3);
+    let local = Manifest::load(&path, "local").unwrap();
+    assert!(!local.env.default, "default is not inherited");
+    assert_eq!(local.env.network, Network::Local);
+    assert_eq!(
+        local.env.token,
+        Token::Local {
+            local: "USDC".into()
+        }
+    );
+    assert_eq!(local.env.host.provider, Provider::Local);
+    assert_eq!(local.env.host.address, None);
+    // A table merges: the base's other params stay.
+    assert_eq!(local.env.settlement_params.force_inclusion_window_secs, 20);
+    assert_eq!(local.env.settlement_params.escape_timeout_secs, 1800);
+    assert_eq!(local.env.relayer.account, "demo-relayer");
+    // The base itself can't be planned.
+    let e = format!("{:#}", Manifest::load(&path, "base").unwrap_err());
+    assert!(e.contains("no [env.base]"), "{e}");
+    // The genesis is the lane file's own.
+    assert_eq!(local.lane.raw, testnet.lane.raw);
+    assert!(!local.lane.raw.contains_key("include"));
+    // A typo in extends points at the line.
+    std::fs::write(
+        &path,
+        lane.replace("extends = \"base\"\nnetwork", "extends = \"bsae\"\nnetwork"),
+    )
+    .unwrap();
+    let e = format!("{:#}", Manifest::load(&path, "local").unwrap_err());
+    assert!(
+        e.contains("extends \"bsae\", which the lane file doesn't have"),
+        "{e}"
+    );
+    assert!(e.contains("lane.toml:"), "{e}");
+    assert!(e.contains("did you mean \"base\"?"), "{e}");
+}

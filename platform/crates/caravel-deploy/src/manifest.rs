@@ -305,14 +305,23 @@ pub fn envs(lane: &LaneFile) -> Vec<EnvInfo> {
         .collect()
 }
 
+/// A lane file from disk, with its includes and inheritance resolved
+/// (`caravel_lanefile`): every deployment fully merged.
+pub fn load_lane(path: &Path) -> Result<LaneFile> {
+    let doc = caravel_lanefile::LaneDoc::load(path).map_err(anyhow::Error::new)?;
+    LaneFile::from_table(doc.to_table()).with_context(|| format!("parsing {}", path.display()))
+}
+
 impl Manifest {
     pub fn load(path: &Path, env: &str) -> Result<Self> {
-        let lane = LaneFile::load(path)?;
+        let lane = load_lane(path)?;
         Self::from_lane(lane, env).with_context(|| format!("{} [env.{env}]", path.display()))
     }
 
     pub fn parse(text: &str, env: &str) -> Result<Self> {
-        Self::from_lane(LaneFile::parse(text)?, env).with_context(|| format!("[env.{env}]"))
+        let doc = caravel_lanefile::LaneDoc::parse(text).map_err(anyhow::Error::new)?;
+        Self::from_lane(LaneFile::from_table(doc.to_table())?, env)
+            .with_context(|| format!("[env.{env}]"))
     }
 
     pub fn from_lane(lane: LaneFile, env: &str) -> Result<Self> {

@@ -182,3 +182,19 @@ fn env_tables_change_no_hash() {
         "8c16d400bca53cd17af142f1b8cb0517a9c320bd1b4255db4d493a17edb3d66d"
     );
 }
+
+/// Through the lane file language (M0.6, caravel_lanefile): the same lane
+/// file, deployments and hashes as the plain parser gives.
+#[test]
+fn the_lane_file_language_changes_no_file() {
+    let path = root().join("lanes/payments/config/lane.caravel-payments.local.toml");
+    let plain = LaneFile::parse(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let loaded = caravel_deploy::manifest::load_lane(&path).unwrap();
+    assert_eq!(loaded.raw, plain.raw);
+    assert_eq!(loaded.env, plain.env);
+    let (a, _, _) = lane_toml::genesis(&PaymentsApp, &loaded).unwrap();
+    assert_eq!(
+        a.config_hash,
+        "8c16d400bca53cd17af142f1b8cb0517a9c320bd1b4255db4d493a17edb3d66d"
+    );
+}

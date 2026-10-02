@@ -30,6 +30,7 @@ caravel-core = { path = "platform/crates/caravel-core" }
 caravel-node = { path = "platform/crates/caravel-node" }
 caravel-deploy = { path = "platform/crates/caravel-deploy" }
 caravel-cli = { path = "platform/crates/caravel-cli" }
+caravel-lanefile = { path = "platform/crates/caravel-lanefile" }
 caravel-app-sdk = { path = "platform/crates/caravel-app-sdk" }
 caravel-harness = { path = "platform/crates/caravel-harness" }
 caravel-payments = { path = "lanes/payments/app" }
