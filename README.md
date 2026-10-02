@@ -69,7 +69,8 @@ This brings up a Payments lane on your machine, against a local Stellar network.
 - Rust 1.93 with the `wasm32v1-none` target (both pinned in `rust-toolchain.toml`);
 - the Stellar CLI 28.1.0: `cargo install --locked stellar-cli@28.1.0`;
 - Node.js 22;
-- Docker, for the local Stellar network.
+- Docker, for the local Stellar network;
+- jq, for `scripts/e2e-local.sh`.
 
 **Build:**
 

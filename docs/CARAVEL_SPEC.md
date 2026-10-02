@@ -2070,6 +2070,8 @@ This drops the lane registry contract, the console and its web packages, hosted 
 | P-18 | README, §2.4 claims (proposed), security pass over the tool; the landing copy after the human approves §2.4 — **Gate P4** | P-17 | review |
 | P-19 | A configurable settlement token: Stellar assets, SEP-41 contracts, Circle's USDC; template decimals (DEC-072) | P-18 | review |
 | P-20 | Landing page for declarative lanes, from the approved §2.4 (a preview first; deployed only after the human's OK) | P-19 | review |
+| P-21 | Open source: README, CONTRIBUTING, licenses and an open-source landing page | P-20 | review |
+| P-22 | A shorter landing page, from the approved design canvas | P-21 | review |
 
 ### 20.4 Phase 2 consensus formats (approved by the human 2026-09-30, DEC-060)
 
@@ -2161,6 +2163,64 @@ ext_len u16 · ext[]                          # the app's per-account data
 - **INV-PAY1:** `Σ balances + Σ pending.amount == deposits_credited_total − withdrawals_committed_total`.
 - **Engine and version:** the `payments-engine` contract, `version()` = `H("CARAVEL/ENGINE/V1" ‖ "payments/0.1.0")`, a 64 KB Wasm budget, and its hash in `versions.json` `lanes.payments`.
 - **Lane file** (DEC-054): `[app] template = "payments"`, and `[payments] treasury_key` (G..., system account 0), `transfer_fee`, `min_transfer`. The node is `caravel-payments-node` (DEC-064).
+
+### 20.5 Milestone M0.6: a real CLI and the lane file language
+
+**Decided with the human on 2026-10-02.** The deploy tool works, but it is a fixed-shape deployer:
+- one settlement contract, one sequencer, N validators and one relayer, all on one host;
+- no variables, references, env inheritance, outputs or extra resources;
+- a quickstart that is a set of build commands and a shell loop.
+
+M0.6 makes Caravel a real infrastructure-as-code CLI. The human chose:
+- **Language:** keep TOML, and add an expression layer: vars, `${…}` references, env `extends`, `for_each`, outputs and local modules.
+- **Priorities:** composition first, then chain resources, then topology. Host-provider plugins come later.
+- **CLI scope:** a single `caravel` CLI for operators and for users' flows (fund, deposit, tx, withdraw, claim, escape) with built-in waits.
+- **Install:** from source for now (`scripts/install.sh`). There are no public releases yet.
+
+**Rules that hold for every task:**
+- Lane #1 keeps `plan` = "No changes." and its genesis hashes.
+- Genesis sections stay literal, because they are consensus config.
+- There is still no state file.
+- The frozen engine is untouched.
+- `platform/` never depends on `lanes/`.
+
+The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.md`. Phase gates are G1 (C-05), G2 (C-10), G3 (C-14), G4 (C-17), G5 (C-21) and G6 (C-25).
+
+**Needs the human first (§0.4):**
+- signing users' lane transactions through the Stellar CLI keystore (SEP-53);
+- how a declared contract's constructor arguments are checked after deploy;
+- the trust boundary between hosts (`/v1/sign`, `/internal/*`);
+- README and landing copy;
+- each release to the live VM.
+
+| ID | Task | Depends | Status |
+|---|---|---|---|
+| C-00 | Baseline pins: every file rendered for lane #1, its Stellar-side values, every lane file's genesis hashes; docs fixes | P-22 | review |
+| C-01 | Plugin protocol in the template binaries: `plugin info`, `plugin example`, `plugin build-tx`; `init` scaffolds | C-00 | todo |
+| C-02 | `caravel-deploy` without `NodeApp`: a `Template` trait (in-process or plugin), `resolve()`, a state root next to the lane file | C-01 | todo |
+| C-03 | `caravel-cli`, the one CLI: lane-file and env discovery, `--json`, exit codes; plan, apply, status, destroy, validate, env, output, version, doctor | C-02 | todo |
+| C-04 | Install from source: `install.sh`, the release next to the binary, a web dir per template, a binary-platform guard | C-03 | todo |
+| C-05 | `init` and `keys`; local applies create the identities they name — **Gate G1** | C-04 | todo |
+| C-06 | `caravel-lanefile`: loader with spans and diagnostics, `include`, `extends`, reserved keys; genesis refuses `${` | C-05 | todo |
+| C-07 | The expression evaluator: grammar, types, functions, no time or randomness | C-06 | todo |
+| C-08 | Vars, locals, `for_each`, per-env `[env.<name>.node]` | C-07 | todo |
+| C-09 | The manifest on resolved values; `caravel render`; the e2e without heredoc or `sed` | C-08 | todo |
+| C-10 | Attributes and outputs; `caravel output`; references in relayer feeds — **Gate G2** | C-09 | todo |
+| C-11 | Lifecycle: `stop`, `start`, `restart`, `logs`, `replay` from the lane file, `wait`, `api` | C-10 | todo |
+| C-12 | Users' Stellar flows: `account create/fund`, `balance`, `deposit` (waits for the credit) | C-11 | todo |
+| C-13 | Lane transactions: `tx`, `withdraw`, `claim`, `force-withdraw`, `escape` | C-12 | todo |
+| C-14 | The e2e on the CLI only; README, landing quickstart, RUNBOOK, `docs/LANE_FILE.md` — **Gate G3** | C-13 | todo |
+| C-15 | The resource graph, with identical plans (goldens byte for byte) | C-14 | todo |
+| C-16 | Addresses in plans; `plan --json`; `graph`; `depends_on`, `--target`, `--replace` | C-15 | todo |
+| C-17 | Saved plans: `plan --out`, `apply <planfile>` refused when anything moved — **Gate G4** | C-16 | todo |
+| C-18 | Accounts: funding, trustlines, balances topped up | C-17 | todo |
+| C-19 | Tokens: issued assets and their contracts; a declared token as the settlement token | C-18 | todo |
+| C-20 | Contracts: any Wasm, constructor arguments, derived addresses, `prevent_destroy` | C-19 | todo |
+| C-21 | Local modules with inputs and outputs — **Gate G5** | C-20 | todo |
+| C-22 | Several hosts per deployment and node placement | C-21 | todo |
+| C-23 | Networking across hosts (private addresses) | C-22 | todo |
+| C-24 | Lane namespaces: several lanes on one host | C-23 | todo |
+| C-25 | The web app as a resource, configured from outputs — **Gate G6** | C-24 | todo |
 
 ---
 
