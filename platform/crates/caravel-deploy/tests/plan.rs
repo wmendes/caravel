@@ -80,6 +80,7 @@ fn desired() -> Desired {
         host: DesiredHost {
             provider: Provider::Local,
             release: "0a1b2c3d".into(),
+            platform: Some("Linux x86_64".into()),
             files: files(1, &["1", "2", "3"]),
         },
     }
@@ -140,6 +141,7 @@ fn running(d: &Desired) -> Host {
     }
     Host {
         missing: vec![],
+        platform: Some("Linux x86_64".into()),
         release: Some(d.host.release.clone()),
         files: d.host.files.clone(),
         nodes,
@@ -486,4 +488,25 @@ fn a_sequencer_on_the_old_epoch_is_restarted() {
             node: "validator-2".into()
         }]
     );
+}
+
+/// A release built for another platform is never installed (a macOS build
+/// on lane #1's Linux VM); once the host runs the release, it is no problem.
+#[test]
+fn a_release_for_another_platform() {
+    let mut d = desired();
+    d.host.platform = Some("Darwin arm64".into());
+    let mut host = running(&d);
+    host.release = Some("an-older-one".into());
+    let plan = diff(&d, &deployed(&d), &host);
+    assert_eq!(
+        plan.problems,
+        [Problem::WrongPlatform {
+            release: "Darwin arm64".into(),
+            host: "Linux x86_64".into()
+        }]
+    );
+    check("wrong-platform", &d, &plan);
+    host.release = Some(d.host.release.clone());
+    assert!(diff(&d, &deployed(&d), &host).problems.is_empty());
 }

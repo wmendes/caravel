@@ -170,26 +170,25 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - run: ./scripts/build-contracts.sh
       # Each node reports this commit in /v1/status (the deploy tool's host check).
-      - run: cargo build --release --locked -p caravel-perps-node -p caravel-payments-node
+      - run: cargo build --release --locked -p caravel-cli -p caravel-perps-node -p caravel-payments-node
         env:
           CARAVEL_COMMIT: ${{ github.sha }}
       - run: npm --prefix platform/relayer ci && npm --prefix platform/relayer run build
       - run: npm --prefix lanes/perps/relayer-feeds ci && npm --prefix lanes/perps/relayer-feeds run build
       - run: npm --prefix lanes/perps/web ci && npm --prefix lanes/perps/web run build
+      # The same script assembles a local install (scripts/install.sh, DEC-076).
       - name: Assemble the release
         run: |
-          mkdir -p release/bin release/contracts release/relayer release/relayer-feeds/perps release/web
-          cp -r lanes/perps/web/dist/. release/web/
-          cp target/release/caravel-perps-node target/release/caravel-payments-node release/bin/
-          cp target/contracts/*.wasm release/contracts/
-          cp -r platform/relayer/dist platform/relayer/package.json platform/relayer/package-lock.json release/relayer/
-          cp -r lanes/perps/relayer-feeds/dist lanes/perps/relayer-feeds/package.json lanes/perps/relayer-feeds/package-lock.json release/relayer-feeds/perps/
-          # Production dependencies ship in the release (pure JS, checked by
-          # package-lock integrity here), so hosts never run npm.
-          npm --prefix release/relayer ci --omit=dev --no-audit --no-fund
-          npm --prefix release/relayer-feeds/perps ci --omit=dev --no-audit --no-fund
-          (cd release && find bin contracts relayer relayer-feeds -type f -not -path '*/node_modules/*' | LC_ALL=C sort | xargs sha256sum > SHA256SUMS && echo "${GITHUB_SHA}" > COMMIT)
+          ./scripts/assemble-release.sh release --commit "${GITHUB_SHA}"
           cat release/SHA256SUMS
+      # The quickstart's install path, from the builds above.
+      - name: Install it
+        run: |
+          ./scripts/install.sh --skip-build --prefix "$RUNNER_TEMP/caravel"
+          "$RUNNER_TEMP/caravel/bin/caravel" version
+          # The runner's keystore has none of the lane's identities, so only the genesis is asserted.
+          "$RUNNER_TEMP/caravel/bin/caravel" validate --json -f lanes/payments/config/lane.caravel-payments.local.toml > validate.json || true
+          jq -e '.checks[] | select(.check == "genesis") | .ok' validate.json
       - uses: actions/upload-artifact@v4
         with:
           name: caravel-release-linux-x86_64

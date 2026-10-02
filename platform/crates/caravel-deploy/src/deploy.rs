@@ -192,6 +192,7 @@ pub fn desired(
         host: DesiredHost {
             provider: m.env.host.provider,
             release: release.to_string(),
+            platform: None,
             files: BTreeMap::new(),
         },
     })
@@ -251,10 +252,7 @@ pub async fn prepare(
         .engine_wasm_hash()?
         .ok_or_else(|| anyhow!("[app] engine_wasm_sha256 is required"))?;
 
-    let mut release = match &source.release_dir {
-        Some(d) => Release::from_dir(d, &template)?,
-        None => Release::from_checkout(&release::find_repo()?, &template)?,
-    };
+    let mut release = Release::locate(source.release_dir.as_deref(), &template)?;
     if let Some(w) = &source.wasm_dir {
         release.use_wasm_from(w)?;
     }
@@ -317,6 +315,7 @@ pub async fn prepare(
         settlement_wasm,
         &release.commit,
     )?;
+    desired.host.platform = release::binary_platform(&release.node_binary)?;
 
     if for_apply {
         stellar::ensure_local_network(&m)?;

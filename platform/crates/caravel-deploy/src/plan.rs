@@ -66,6 +66,9 @@ pub struct DesiredHost {
     pub provider: Provider,
     /// The release's commit.
     pub release: String,
+    /// What the release's node binary runs on (`uname -sm` form, e.g.
+    /// "Linux x86_64"), when it is known.
+    pub platform: Option<String>,
     /// Every generated file (path under the lane's config dir → sha256).
     pub files: BTreeMap<String, Key>,
 }
@@ -104,6 +107,8 @@ pub struct OnChain {
 pub struct Host {
     /// Prerequisites the host lacks.
     pub missing: Vec<String>,
+    /// `uname -sm`, when the host reports it (ssh hosts).
+    pub platform: Option<String>,
     pub release: Option<String>,
     pub files: BTreeMap<String, Key>,
     pub nodes: BTreeMap<String, NodeState>,
@@ -222,6 +227,11 @@ pub enum Problem {
         missing: Vec<String>,
     },
     /// A node runs something its files don't say.
+    /// The release's node binary can't run on the host.
+    WrongPlatform {
+        release: String,
+        host: String,
+    },
     NodeMismatch {
         node: String,
         field: &'static str,
@@ -421,6 +431,16 @@ pub fn diff(d: &Desired, chain: &Chain, host: &Host) -> Plan {
         problems.push(Problem::HostNotReady {
             missing: host.missing.clone(),
         });
+    }
+    // A release that would be installed must run there (a macOS build never
+    // reaches a Linux host).
+    if let (Some(want), Some(have)) = (&d.host.platform, &host.platform) {
+        if want != have && host.release.as_deref() != Some(d.host.release.as_str()) {
+            problems.push(Problem::WrongPlatform {
+                release: want.clone(),
+                host: have.clone(),
+            });
+        }
     }
     let mut all: Vec<String> = vec!["sequencer".into()];
     all.extend(d.validators.iter().cloned());
@@ -679,6 +699,9 @@ pub fn problem_line(p: &Problem) -> String {
         Problem::HostNotReady { missing } => {
             format!("! the host lacks: {}", missing.join(", "))
         }
+        Problem::WrongPlatform { release, host } => format!(
+            "! the release's node binary is built for {release}, and the host is {host}: install the CI release (--release-dir) or build on the host's platform"
+        ),
         Problem::NodeMismatch { node, field } => format!(
             "! {node} reports another {field} than its files give"
         ),

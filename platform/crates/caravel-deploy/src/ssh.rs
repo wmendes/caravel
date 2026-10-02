@@ -194,7 +194,8 @@ impl Ssh {
         if m.env.host.public_url.is_some() {
             script += "command -v caddy >/dev/null || echo 'MISSING caddy'\n";
         }
-        script += "echo \"COMMIT $(sudo cat $R/COMMIT 2>/dev/null | cut -c1-12)\"\n\
+        script += "echo \"UNAME $(uname -sm)\"\n\
+            echo \"COMMIT $(sudo cat $R/COMMIT 2>/dev/null | cut -c1-12)\"\n\
             for f in $R/config/*; do [ -f \"$f\" ] && echo \"FILE $(basename $f) $(sudo sha256sum $f | cut -c1-64)\"; done\n\
             for f in /etc/systemd/system/caravel-*.service; do [ -f \"$f\" ] && echo \"FILE systemd/$(basename $f) $(sha256sum $f | cut -c1-64)\"; done\n\
             [ -f /etc/caddy/Caddyfile ] && echo \"FILE caddy/Caddyfile $(sha256sum /etc/caddy/Caddyfile | cut -c1-64)\"\n\
@@ -218,6 +219,7 @@ impl Ssh {
             let (tag, rest) = line.split_once(' ').unwrap_or((line, ""));
             match tag {
                 "MISSING" => host.missing.push(rest.to_string()),
+                "UNAME" if !rest.trim().is_empty() => host.platform = Some(rest.trim().to_string()),
                 "COMMIT" if !rest.trim().is_empty() => host.release = Some(rest.trim().to_string()),
                 "FILE" => {
                     if let Some((name, h)) = rest.split_once(' ') {

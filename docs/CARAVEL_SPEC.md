@@ -2199,7 +2199,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-01 | Plugin protocol in the template binaries: `plugin info`, `plugin example`, `plugin body`; `init` scaffolds (DEC-073) | C-00 | review |
 | C-02 | `caravel-deploy` without `NodeApp`: a `Template` trait (in-process or plugin), pure `addresses()`/`desired()`, a state root (DEC-074) | C-01 | review |
 | C-03 | `caravel-cli`, the one CLI: lane-file and env discovery, `--json`, exit codes; plan, apply, status, destroy, validate, env, output, version, doctor (DEC-075) | C-02 | review |
-| C-04 | Install from source: `install.sh`, the release next to the binary, a web dir per template, a binary-platform guard | C-03 | todo |
+| C-04 | Install from source: `install.sh`, the release next to the binary, a web dir per template, a binary-platform guard (DEC-076) | C-03 | review |
 | C-05 | `init` and `keys`; local applies create the identities they name — **Gate G1** | C-04 | todo |
 | C-06 | `caravel-lanefile`: loader with spans and diagnostics, `include`, `extends`, reserved keys; genesis refuses `${` | C-05 | todo |
 | C-07 | The expression evaluator: grammar, types, functions, no time or randomness | C-06 | todo |
@@ -2625,6 +2625,26 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 - **Output and exit codes:** `--json` works on every command: one document on stdout, and errors as `{"ok":false,"error":…}`. Exit codes are 0 ok, 1 error, 2 usage, and 3 when `--exit-code` finds changes.
 - **The deploy library's progress (`→ …`) and prompts now go to stderr.** Stdout carries only results.
 - **The template binaries' own `plan`, `apply`, `status` and `destroy` are hidden.** They still work for older scripts | A quickstart needs one installed binary with discoverable defaults, not a path into `target/` and two required flags | Several lane files per directory become common, or a hidden "selected env" is asked for |
+| DEC-076 | **M0.6 (C-04).** Caravel installs from source, and the release travels with the binary.
+- **`scripts/assemble-release.sh <out>`** is shared by CI's release job and the installer. It makes the release layout `apply` installs on hosts:
+  - `bin/caravel` and `bin/caravel-<t>-node`;
+  - `contracts/*.wasm`;
+  - `relayer/` with production `node_modules`;
+  - `relayer-feeds/<t>/`;
+  - `web/<t>/`;
+  - `COMMIT` and `SHA256SUMS`.
+
+  `COMMIT` is the git sha of a clean tree (also passed to the build as `CARAVEL_COMMIT`), otherwise `local-` and the start of the hash of `SHA256SUMS`.
+- **`scripts/install.sh`** checks the tools (cargo, Node 22+, npm, and the pinned Stellar CLI), builds everything, and installs:
+  - `$PREFIX/share/caravel/<release>/` with a `current` link;
+  - the binaries in `$PREFIX/bin`;
+  - `stellar-caravel` as a link.
+
+  `PREFIX` defaults to `$CARAVEL_HOME`, else `~/.caravel`. Options: `--templates`, `--with-web`, `--wasm-dir` (take the record Wasm from CI) and `--skip-build`. It never edits shell files; it prints the PATH line instead.
+- **`Release::locate`** looks for a release in this order: `--release-dir` (or `CARAVEL_RELEASE_DIR`), then `<exe>/../share/caravel/current`, then the checkout's builds. So an installed `caravel` needs no checkout and no `--release-dir`.
+- **A web app per template:** `web/<t>/`. Releases from before M0.6 have the perps app at `web/`, which only perps lanes take. This fixes a payments lane on an ssh host serving the perps web app.
+- **A platform guard.** The release's node binary is read as ELF or Mach-O (the `uname -sm` form), and an ssh host's read reports `uname -sm`. A release that would be installed on another platform is the plan problem `WrongPlatform`, so a macOS build never reaches lane #1's Linux VM.
+- **CI** builds `caravel-cli` too, assembles with the script, and runs the installer over its builds | The quickstart needs one install step and no checkout paths, and the VM must never get a binary for another platform | Public prebuilt releases (needs the human: an outward-facing publish) |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

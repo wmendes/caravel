@@ -97,7 +97,7 @@ impl Identity {
 /// This binary: its version, and the commit CI built it from (`CARAVEL_COMMIT`
 /// at build time; `null` for a local build).
 pub fn release() -> Value {
-    json!({ "version": env!("CARGO_PKG_VERSION"), "commit": option_env!("CARAVEL_COMMIT") })
+    json!({ "version": env!("CARGO_PKG_VERSION"), "commit": option_env!("CARAVEL_COMMIT").filter(|c| !c.is_empty()) })
 }
 
 pub fn parse_account(s: &str) -> Result<[u8; 32], ApiError> {
