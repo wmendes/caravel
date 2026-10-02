@@ -10,6 +10,8 @@
 //! - [`chain`] and [`local`]: what Stellar and a local host have.
 //! - [`render`]: the node configs, [`release`]: what gets installed,
 //!   [`stellar`]: every transaction, through the pinned Stellar CLI.
+//! - [`template`]: what the tool needs from a lane's template, linked in or
+//!   through its binary's plugin protocol.
 //! - [`deploy`] and [`cli`]: `plan` and `apply`.
 //!
 //! There is no state file. The lane file and the chain are the only truth,
@@ -28,4 +30,5 @@ pub mod release;
 pub mod render;
 pub mod ssh;
 pub mod stellar;
+pub mod template;
 pub mod versions;

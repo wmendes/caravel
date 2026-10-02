@@ -53,8 +53,10 @@ pub fn unit_of(node: &str) -> String {
 }
 
 impl Ssh {
-    pub fn new(m: &Manifest, template: &str) -> Result<Self> {
-        let local_dir = std::env::current_dir()?
+    /// The host's files are under `[host] root`; this machine keeps the
+    /// lane's exit file under `<state_root>/.caravel/<lane>/<env>`.
+    pub fn new(m: &Manifest, template: &str, state_root: &std::path::Path) -> Result<Self> {
+        let local_dir = std::path::absolute(state_root)?
             .join(".caravel")
             .join(&m.lane.lane.name)
             .join(&m.env_name);

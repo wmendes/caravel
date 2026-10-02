@@ -103,7 +103,8 @@ pub enum Command {
     /// Build the genesis config and state from a lane file, and print
     /// config_hash, genesis_state_hash and sizes as JSON (spec §10.3).
     Genesis {
-        /// The lane file, e.g. lanes/perps/config/lane.caravel-perps.testnet.toml.
+        /// The lane file, e.g. lanes/perps/config/lane.caravel-perps.testnet.toml,
+        /// or `-` to read it from stdin.
         #[arg(long)]
         config: PathBuf,
         /// Also write the genesis config bytes to this file.
@@ -273,7 +274,13 @@ pub fn run<A: NodeApp>(app: A, command: Command) -> Result<()> {
             config_out,
             state_out,
         } => {
-            let file = crate::lane_toml::LaneFile::load(&config)?;
+            let file = if config.as_os_str() == "-" {
+                let mut text = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut text)?;
+                crate::lane_toml::LaneFile::parse(&text)?
+            } else {
+                crate::lane_toml::LaneFile::load(&config)?
+            };
             let (report, config_bytes, state) = crate::lane_toml::genesis(&app, &file)?;
             if let Some(path) = config_out {
                 std::fs::write(path, &config_bytes)?;

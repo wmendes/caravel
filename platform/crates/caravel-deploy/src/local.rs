@@ -60,9 +60,9 @@ fn alive(pid: u32) -> bool {
 }
 
 impl Local {
-    /// `.caravel/<lane>/<env>` under the current directory, absolute.
-    pub fn new(m: &Manifest, template: &str) -> Result<Self> {
-        let root = std::env::current_dir()?
+    /// `.caravel/<lane>/<env>` under `state_root`, absolute.
+    pub fn new(m: &Manifest, template: &str, state_root: &std::path::Path) -> Result<Self> {
+        let root = std::path::absolute(state_root)?
             .join(".caravel")
             .join(&m.lane.lane.name)
             .join(&m.env_name);

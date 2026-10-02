@@ -8,8 +8,14 @@
 
 use std::path::PathBuf;
 
+use std::collections::{BTreeMap, BTreeSet};
+
+use caravel_deploy::deploy::{addresses, desired, Keys};
 use caravel_deploy::manifest::{Manifest, Network, SettlementParams, Token};
+use caravel_deploy::plan::{diff, fingerprint, Chain, Host, NodeReport, NodeState, OnChain};
 use caravel_deploy::render::{render, Resolved};
+use caravel_deploy::template::{InProcess, Template};
+use caravel_perps_node::PerpsApp;
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
@@ -167,4 +173,130 @@ fn the_values_on_stellar_are_lane_1s() {
             .map(String::as_str),
         Some("caravel-oracle")
     );
+}
+
+fn hex32(h: &str) -> [u8; 32] {
+    caravel_runtime::sequencer::unhex(h)
+        .unwrap()
+        .try_into()
+        .unwrap()
+}
+
+/// Lane #1's deployment through the same code `prepare` runs (with keys in
+/// place of the keystore), against a Stellar and a host that match it: the
+/// plan is empty. The live values it derives are pinned.
+#[test]
+fn lane_1_plans_no_changes() {
+    let m = manifest();
+    let genesis = InProcess(PerpsApp).genesis(&m.lane).unwrap();
+    assert_eq!(
+        genesis.config_hash,
+        hex32("f4b9db09137583ba9d66ea0b8a3a2b658a163f7b72993e0f242f04ea3ac93997")
+    );
+    assert_eq!(
+        genesis.genesis_state_hash,
+        hex32("22702d9f4c45f88306aca02169cf7a86ccaec3b45ed85103c7a9fc4277291e77")
+    );
+    let keys = Keys {
+        admin: [0xA0; 32],
+        relayer: [0xA1; 32],
+        validators: vec![[1; 32], [2; 32], [3; 32]],
+    };
+    let a = addresses(&m, &keys).unwrap();
+    assert!(a.settlement_pinned);
+    assert_eq!(
+        stellar_strkey::Contract(a.settlement).to_string().as_str(),
+        "CBIHBEUZYFZQZEQPBJH2ID6CDRDZFEDI6XHAXVOCHG6FO5XWUIGPONWO"
+    );
+    assert_eq!(
+        stellar_strkey::Contract(a.token).to_string().as_str(),
+        caravel_deploy::versions::testnet_usdc()
+    );
+    assert_eq!(a.token_asset, None);
+    let engine = m.lane.engine_wasm_hash().unwrap().unwrap();
+    let code = hex32(m.env.settlement_wasm.as_deref().unwrap());
+    let mut d = desired(&m, &genesis, &keys, &a, engine, code, "c0ffee").unwrap();
+    let files = render(
+        &m,
+        &Resolved {
+            template: "perps".into(),
+            engine_wasm_hash: engine,
+            settlement: a.settlement,
+            validator_keys: keys.validators.clone(),
+            web: true,
+        },
+        "/opt/caravel",
+        1,
+    )
+    .unwrap();
+    d.host.files = files
+        .iter()
+        .map(|(k, v)| (k.clone(), caravel_runtime::checkpoint::sha256(v.as_bytes())))
+        .collect();
+    let chain = Chain {
+        accounts: BTreeSet::from([d.admin, d.relayer]),
+        token_exists: true,
+        settlement_wasm_uploaded: true,
+        settlement: Some(OnChain {
+            code,
+            admin: d.admin,
+            token: d.token,
+            lane_id: d.lane_id,
+            engine_wasm_hash: d.engine_wasm_hash,
+            genesis_state_hash: d.genesis_state_hash,
+            config_hash: d.config_hash,
+            params: d.params.clone(),
+            epoch: 1,
+            signers: d.signers.clone(),
+            desired_set_epoch: Some(1),
+            frozen: false,
+        }),
+    };
+    let mut nodes = BTreeMap::new();
+    for (n, key, epoch) in [
+        ("sequencer".to_string(), None, Some(1)),
+        ("relayer".to_string(), None, None),
+    ]
+    .into_iter()
+    .chain(
+        d.validators
+            .iter()
+            .zip(&keys.validators)
+            .map(|(n, k)| (n.clone(), Some(*k), None)),
+    ) {
+        let report = (n != "relayer").then(|| NodeReport {
+            lane_id: d.lane_id,
+            config_hash: d.config_hash,
+            settlement: d.settlement,
+            engine_wasm_hash: d.engine_wasm_hash,
+            key,
+            epoch,
+            release: Some("c0ffee".into()),
+        });
+        nodes.insert(
+            n.clone(),
+            NodeState {
+                running: true,
+                report,
+                started_with: Some(fingerprint(&d.host.files, &n)),
+            },
+        );
+    }
+    let host = Host {
+        missing: vec![],
+        release: Some("c0ffee".into()),
+        files: d.host.files.clone(),
+        nodes,
+        has_data: true,
+    };
+    let plan = diff(&d, &chain, &host);
+    assert!(plan.is_empty(), "{}", plan.render(&d));
+    assert!(plan.render(&d).contains("No changes."));
+    // Not vacuous: another release, or another signer set, is a change.
+    let mut other = host.clone();
+    other.release = Some("0ther".into());
+    assert!(!diff(&d, &chain, &other).is_empty());
+    let mut rotated = d.clone();
+    rotated.signers.threshold = 3;
+    assert!(!diff(&rotated, &chain, &host).is_empty());
 }

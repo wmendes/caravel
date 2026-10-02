@@ -2197,7 +2197,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 |---|---|---|---|
 | C-00 | Baseline pins: every file rendered for lane #1, its Stellar-side values, every lane file's genesis hashes; docs fixes | P-22 | review |
 | C-01 | Plugin protocol in the template binaries: `plugin info`, `plugin example`, `plugin body`; `init` scaffolds (DEC-073) | C-00 | review |
-| C-02 | `caravel-deploy` without `NodeApp`: a `Template` trait (in-process or plugin), `resolve()`, a state root next to the lane file | C-01 | todo |
+| C-02 | `caravel-deploy` without `NodeApp`: a `Template` trait (in-process or plugin), pure `addresses()`/`desired()`, a state root (DEC-074) | C-01 | review |
 | C-03 | `caravel-cli`, the one CLI: lane-file and env discovery, `--json`, exit codes; plan, apply, status, destroy, validate, env, output, version, doctor | C-02 | todo |
 | C-04 | Install from source: `install.sh`, the release next to the binary, a web dir per template, a binary-platform guard | C-03 | todo |
 | C-05 | `init` and `keys`; local applies create the identities they name — **Gate G1** | C-04 | todo |
@@ -2586,6 +2586,19 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 - **Bodies, not envelopes.** The envelope is the platform's `TxEnvelopeV1` for every template (perps' `LaneTxV1` is the same bytes, `format_compat.rs`). So `caravel` builds, hashes, signs (SEP-53) and submits it, and no key ever reaches a template's binary. That replaces the `build-tx` command in the plan of record.
 - **The perps example** generates its own backstop, treasury and oracle identities rather than the public fixture keys, so its oracle key in genesis and the relayer's feed key are one identity.
 - **Unchanged:** the `tx` command still reads base units, and the existing node commands are as they were. Together with `genesis`, `replay` and `export-proofs`, this is everything the CLI needs from a template | The CLI must work for any template without linking it, and a third party's template must not need a fork | A template needs a deploy-time hook beyond these (e.g. validating its `[env]` feeds) |
+| DEC-074 | **M0.6 (C-02).** The deploy tool no longer links a template.
+- **The interface:** `caravel_deploy::template::Template` has `name`, `token_decimals` and `genesis` (lane id, config hash, genesis state hash). It has two implementations:
+  - `InProcess<A: NodeApp>` is used by the template binaries' own `plan`, `apply`, `status` and `destroy`, which still work;
+  - `Plugin` drives `caravel-<t>-node` through its plugin protocol (DEC-073). It is found in `CARAVEL_PLUGIN_DIR`, then next to the running binary, then on PATH, and is refused when it speaks another protocol or is another template.
+- **The plugin's genesis input.** The plugin runs `genesis --config -` (stdin, new) over the genesis document the hosts get (`lane.toml`, the parsed sections re-serialized). A test pins it equal to the linked app's for every lane file, including lane #1 and the M0 fixtures.
+- **`prepare` is split** so the pieces can be tested without a keystore or a network:
+  - `Keys::from_keystore` reads the keystore;
+  - `addresses()` gives the token, its asset and the settlement address, derived or pinned;
+  - `desired()` builds the plan's `Desired`.
+
+  Lane #1 now has a test that runs these on its lane file, against a matching chain and host, and plans "No changes.".
+- **`prepare` takes a state root:** a local host's processes, and an ssh lane's exit file, live under `<state_root>/.caravel/`. The old commands pass the current directory, as before.
+- **Where users reach the lane:** `api_url()` and `validator_url()`. For an ssh host that is its `public_url` (`/validators/<n>` for validators), so `status --json` no longer reports 127.0.0.1 for lane #1 | A CLI that runs any template can't link them all, and the pure pieces are what later tasks (the language, the graph) change | A template needs more than genesis and decimals at plan time |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

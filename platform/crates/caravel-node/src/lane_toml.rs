@@ -242,7 +242,7 @@ impl LaneFile {
 }
 
 /// What `genesis` reports.
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct GenesisReport {
     pub lane_name: String,
     pub lane_id: String,
