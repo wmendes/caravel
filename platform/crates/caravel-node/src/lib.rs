@@ -9,6 +9,7 @@ pub mod check;
 pub mod cli;
 pub mod lane_toml;
 pub mod node_config;
+pub mod plugin;
 pub mod replay;
 pub mod scval;
 pub mod sequencer;

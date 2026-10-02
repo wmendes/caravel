@@ -15,6 +15,7 @@ use ed25519_dalek::Signer;
 use serde_json::{json, Value};
 
 use caravel_node::lane_toml::LaneFile;
+use caravel_node::plugin::parse_amount;
 
 use crate::PerpsApp;
 
@@ -53,6 +54,8 @@ pub enum TifArg {
     PostOnly,
 }
 
+/// Token amounts (`price`, `amount`) are the token's base units (stroops for
+/// USDC); under `caravel tx` (`plugin body --decimals`) they are token units.
 #[derive(Subcommand, Debug)]
 pub enum Body {
     PlaceOrder {
@@ -62,9 +65,9 @@ pub enum Body {
         side: SideArg,
         #[arg(long, value_enum, default_value = "gtc")]
         tif: TifArg,
-        /// USDC stroops per lot.
+        /// Per lot.
         #[arg(long)]
-        price: i64,
+        price: String,
         #[arg(long)]
         lots: i64,
         #[arg(long)]
@@ -83,14 +86,40 @@ pub enum Body {
         #[arg(long)]
         market: String,
     },
-    /// USDC stroops to move to the pending withdrawal queue.
+    /// Move an amount to the pending withdrawal queue.
     Withdraw {
         #[arg(long)]
-        amount: i128,
+        amount: String,
     },
 }
 
-fn body(b: &Body) -> Result<TxBody> {
+/// `plugin body`: a body from its arguments, as `tx` takes them.
+pub fn plugin_body(args: &[String], decimals: Option<u32>) -> Result<(u8, Vec<u8>)> {
+    #[derive(clap::Parser)]
+    #[command(name = "body", no_binary_name = true)]
+    struct Parsed {
+        #[command(subcommand)]
+        body: Body,
+    }
+    let p = <Parsed as clap::Parser>::try_parse_from(args).map_err(|e| anyhow!("{e}"))?;
+    // The perps body codec is the frozen engine's; its envelope is the
+    // platform's `TxEnvelopeV1` byte for byte (tests/format_compat.rs).
+    let tx = LaneTxV1 {
+        lane_id: [0; 32],
+        account: [0; 32],
+        signer: [0; 32],
+        nonce: 0,
+        expiry_ms: 0,
+        sig_scheme: SigScheme::RawEd25519,
+        body: body(&p.body, decimals)?,
+        signature: [0; 64],
+    };
+    let env = caravel_core::tx::TxEnvelopeV1::decode(&tx.encode())
+        .map_err(|e| anyhow!("perps body: {e:?}"))?;
+    Ok((env.kind, env.body))
+}
+
+fn body(b: &Body, decimals: Option<u32>) -> Result<TxBody> {
     Ok(match b {
         Body::PlaceOrder {
             market,
@@ -112,7 +141,7 @@ fn body(b: &Body) -> Result<TxBody> {
                 TifArg::PostOnly => Tif::PostOnly,
             },
             reduce_only: *reduce_only,
-            price: *price,
+            price: i64::try_from(parse_amount(price, decimals)?).context("--price")?,
             lots: *lots,
             client_order_id: *client_order_id,
         }),
@@ -127,7 +156,9 @@ fn body(b: &Body) -> Result<TxBody> {
                 market.parse().context("--market")?
             },
         },
-        Body::Withdraw { amount } => TxBody::Withdraw { amount: *amount },
+        Body::Withdraw { amount } => TxBody::Withdraw {
+            amount: parse_amount(amount, decimals)?,
+        },
     })
 }
 
@@ -169,7 +200,7 @@ pub async fn run(a: TxArgs) -> Result<()> {
         nonce,
         expiry_ms: now_ms + a.expiry_secs * 1000,
         sig_scheme: SigScheme::RawEd25519,
-        body: body(&a.body)?,
+        body: body(&a.body, None)?,
         signature: [0; 64],
     };
     let tx_hash = sha256(&tx.tx_hash_preimage(&sha256(&config_bytes)));
