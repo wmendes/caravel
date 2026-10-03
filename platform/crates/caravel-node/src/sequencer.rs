@@ -204,13 +204,28 @@ pub async fn start<A: NodeApp>(
     if cfg.signers.is_none() {
         tracing::warn!("no [signers]: checkpoints are sealed but never signed");
     }
+    let mut cache = A::Cache::default();
+    let warm_started = std::time::Instant::now();
+    match app.warm(
+        &mut cache,
+        &cfg.db,
+        core.store(),
+        &core.state(),
+        core.height(),
+    ) {
+        Ok(()) => tracing::info!(
+            ms = warm_started.elapsed().as_millis() as u64,
+            "view cache warmed"
+        ),
+        Err(e) => tracing::warn!("view cache not warmed, it starts empty: {e:#}"),
+    }
     let snapshot = RwLock::new(core.state());
     let (events, _) = broadcast::channel(1024);
     let node = Arc::new(SequencerNode {
         app,
         core: Mutex::new(core),
         snapshot,
-        cache: Mutex::new(A::Cache::default()),
+        cache: Mutex::new(cache),
         events,
         sealed: Notify::new(),
         halted: Mutex::new(None),

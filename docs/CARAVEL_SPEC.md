@@ -1643,12 +1643,13 @@ All JSON uses:
 | `GET /v1/accounts/{G...}` | collateral, equity, free collateral, positions (with upnl, liq price), open orders, next_nonce, pending_nonce (the nonce after the account's queued transactions, DEC-085), session keys |
 | `GET /v1/markets` | params + oracle price + funding |
 | `GET /v1/markets/{id}/book?depth=50` | aggregated levels |
-| `GET /v1/markets/{id}/trades?limit=100` | recent fills (from receipts) |
+| `GET /v1/markets/{id}/trades?limit=100` | recent fills (from receipts), kept across restarts (DEC-103) |
+| `GET /v1/markets/{id}/candles?interval=1m\|5m\|15m\|1h&limit=500` | candles of the oracle price (the mark), built by the node from its blocks (DEC-103) |
 | `GET /v1/blocks/{height}` | record hex + decoded entries + receipts |
 | `GET /v1/checkpoints/{seq}` | header (hex + decoded), batch hash, signatures, Stellar tx hash, status |
 | `GET /v1/proofs/withdrawals?account=G...` | all unclaimed withdrawal leaves for the account: `{seq, index, amount, proof[]}` |
 | `GET /v1/proofs/escape?account=G...` | leaf from the **last accepted** checkpoint: `{seq, index, equity, proof[]}` |
-| `WS /v1/stream` | subscribe `{"blocks":true,"markets":[1,2,3],"account":"G..."}` → messages `block`, `fill`, `book`, `account`, `checkpoint` |
+| `WS /v1/stream` | subscribe `{"blocks":true,"markets":[1,2,3],"tickers":true,"account":"G..."}` → messages `block`, `tickers` (every market's price line, each block, DEC-103), `fill`, `book`, `account`, `checkpoint` |
 | `POST /internal/inbox` | relayer → sequencer: `{index, msg_hex, acc_after_hex}`; sequencer checks the acc chain matches its own fold, and on mismatch halts inbox inclusion and alerts |
 | `POST /internal/oracle` | relayer → sequencer: `OracleUpdateV1` hex (pre-verified) |
 | `GET /internal/checkpoints/pending` | relayer pulls `{seq, header, batch, epoch, sigs}` |
@@ -2270,6 +2271,7 @@ Branches are `h-0x-short-name`. Gates: H1 (H-01), H2 (H-04), H3 (H-06, the Groun
 | H-12 | **The docs site** (DEC-100). Docusaurus in `docs-site/`, its own Vercel project. It has Getting started, Concepts, Guides and Reference. The lane-file reference moves there from `docs/LANE_FILE.md`, and the CLI reference is generated from `caravel help` and checked in CI. Local search, the landing page's palette, copy checks. Deploy only with the human's OK | H-01 | review |
 | H-13 | **The perps trading terminal** (DEC-101). A full redesign of `lanes/perps/web` as a professional perps DEX: market bar, chart, book and trades, order ticket with Market and Post-only, positions with Close, first-run steps, soft and settled everywhere, stale-oracle and halted states, phone layout. Same API and signing code. Ships to lane #1 only with the human's OK | H-01 | review |
 | H-14 | **The oracle feed never stops silently** (DEC-102). On 2026-10-03 the testnet oracle stopped at 00:59 UTC for about 19 hours while blocks and checkpoints went on: a feed tick waited forever on a Stellar RPC call. Give every RPC client a timeout and every feed tick a deadline, and add the symptom to the runbook. Ships to lane #1 with the human's OK | H-01 | review |
+| H-15 | **The live terminal** (DEC-103). Prices on every block over the stream (`tickers`), candles of the oracle price from the lane's own blocks, trades kept across restarts, and the web app driven by the stream: candle chart with history, live last candle, trade highlights, a Live indicator. The relayer feed runs at a fixed rate with markets in parallel | H-13 | review |
 
 ---
 
@@ -2368,7 +2370,7 @@ For lanes that need classic Stellar operations or SCP among many validators:
 - the `buffer` package installed as `globalThis.Buffer` for the SDK and Freighter;
 - the session key in IndexedDB, 24 h, `PERM_TRADE | PERM_CANCEL`;
 - trades and cancels signed by that key when it exists, everything else through Freighter's SEP-53 `signMessage`;
-- the price chart sampled in the browser from `/v1/markets` (the lane keeps no price history);
+- the price chart sampled in the browser from `/v1/markets` (the lane keeps no price history; superseded by DEC-103: candles from the node, prices on the stream);
 - buy/sell, bids/asks and PnL shown with words, signs and weight, not color, because `lane` and `harbor` are reserved for lane and Stellar things (§18.1);
 - served from the same origin as the API on the VM (DEC-046), configurable with `VITE_*` for local lanes;
 - `/v1/status` gains `config_hash`, which the browser needs to compute tx hashes | Fewer dependencies; the brand rule forbids a third accent | — |
@@ -3120,6 +3122,12 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 - `rpc.Server.httpClient.defaults.timeout` is set on every RPC client: 10 s for Reflector reads (`RpcReflector`), 30 s for the relayer's settlement calls (`RpcContract`), so a hung checkpoint call cannot run out the escape timeout either;
 - the relayer runs each feed tick under a deadline (`feeds[].deadlineMs`, default 30 s): a late tick is abandoned and logged as `<feed> tick: no answer in N ms`, and the loop goes on. It is not cancelled; feed updates carry their own publish time, so a late post is harmless;
 - tests: an RPC server that never answers (`reflector.test.ts`), a feed module whose tick never settles, and the client's default timeout. | A silent stop is the worst failure for an oracle: positions are marked at a stale price and nothing says so. The stock option does nothing in this SDK version, so the timeout is set where requests read it | An SDK that honours `timeout`; a liveness alert on `oracle_time_ms` |
+| DEC-103 | **M0.7 (H-15).** The perps terminal runs on the stream and the lane's own price history:
+- **`tickers`:** a stream subscriber that sets `tickers: true` gets one message per block, `{type: "tickers", height, timestamp_ms, markets: [{market_id, oracle_price, oracle_time_ms, best_bid, best_ask, open_interest_lots}]}`, before its `fill`/`book`/`receipt`/`account` messages. The web app polled `/v1/markets` every 2 s; it now patches prices and the block height from this message and polls only as a fallback (15 s while the stream is up, 2 s while it is down).
+- **Candles:** the perps node indexes every accepted oracle update (`Event::Oracle {accepted: true}` in a block's receipts) into one-minute candles of the oracle price per market, which is the mark price, and keeps 7 days. `GET /v1/markets/{id}/candles?interval=1m|5m|15m|1h&limit=` (default 500, at most 5,000) serves them oldest first, the last one open; 5m, 15m and 1h are built from the minutes. Prices are stroops per lot, like every price.
+- **Kept across restarts:** candles and the last 1,000 fills per market go to `perps-history.sqlite` beside the node's store, written once a minute with the height they reach. At start the node loads it and replays the stored blocks after that height (at most 200,000, about a day at 0.5 s) through the same indexing code, by a new `NodeApp::warm` hook (platform, default no-op). Before this, `/v1/markets/{id}/trades` came back empty after every restart. The file is display data, not consensus; deleting it rebuilds the last day from the store.
+- **Relayer:** the loop sleeps the rest of its interval after a step, not the whole interval, so a 500 ms feed publishes every 500 ms; the oracle feeder fetches its markets in parallel, so one slow source does not hold up the others.
+- **Web:** a candlestick chart (lightweight-charts 5.2.1) with 1m/5m/15m/1h, history on open, the last candle moving with every ticker; new trades flash in the tape; the status bar shows Live while the stream is up and Reconnecting when it is not. | The page polled every 2 s and the chart started empty, which is not how a trading venue feels. Every number still comes from the lane: candles are the oracle prices the lane accepted, not an outside feed | A candle store that outlives 7 days, or OHLC of fills |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

@@ -7,7 +7,7 @@ import { Chip, useNow } from "./ui";
 
 export function Layout({ children }: { children: ReactNode }) {
   const { path } = useRoute();
-  const { account, status, statusError, onChain, frozen, address, connecting, walletError, connect, disconnect } = useApp();
+  const { account, status, statusError, live, onChain, frozen, address, connecting, walletError, connect, disconnect } = useApp();
   const now = useNow(1000);
   const acceptedAt = onChain ? Number(onChain.accepted_at) * 1000 : null;
   const lastBlock = status ? Number(status.last_block_timestamp_ms) : null;
@@ -101,7 +101,17 @@ export function Layout({ children }: { children: ReactNode }) {
           {acceptedAt ? <span>on Stellar {ago(acceptedAt, now)}</span> : null}
         </span>
         <span className="sp" />
-        <span>{statusError ? <span className="down">● disconnected</span> : status ? <span>● connected to {status.lane_name}</span> : "connecting…"}</span>
+        <span>
+          {statusError ? (
+            <span className="down">● Lane API unreachable</span>
+          ) : live ? (
+            <span className="live-dot" title="Prices and blocks arrive on every block">
+              Live · {status?.lane_name ?? "lane"}
+            </span>
+          ) : (
+            <Chip kind="warn">Reconnecting to the stream…</Chip>
+          )}
+        </span>
         <span>Testnet only · not audited</span> {/* claims-ok: states it is not audited */}
       </footer>
     </div>
