@@ -137,28 +137,36 @@ pub fn did_you_mean<'a>(word: &str, known: impl IntoIterator<Item = &'a str>) ->
     known
         .into_iter()
         .map(|k| (distance(word, k), k))
-        .filter(|(d, k)| {
-            *d <= (k.len().max(word.len()) / 3).max(if word.len() > 3 { 2 } else { 1 })
-        })
+        .filter(|(d, k)| *d <= (k.len().max(word.len()) / 3).max(1))
         .min_by_key(|(d, _)| *d)
         .map(|(_, k)| k)
 }
 
+/// Edits from `a` to `b`, a swap of two neighbours counting as one
+/// (optimal string alignment).
 fn distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();
-    let mut prev: Vec<usize> = (0..=b.len()).collect();
-    for (i, ca) in a.chars().enumerate() {
-        let mut cur = vec![i + 1];
-        for (j, cb) in b.iter().enumerate() {
-            cur.push(
-                (prev[j] + usize::from(ca != *cb))
-                    .min(prev[j + 1] + 1)
-                    .min(cur[j] + 1),
-            );
-        }
-        prev = cur;
+    let mut d = vec![vec![0usize; b.len() + 1]; a.len() + 1];
+    for (i, row) in d.iter_mut().enumerate() {
+        row[0] = i;
     }
-    prev[b.len()]
+    for (j, cell) in d[0].iter_mut().enumerate() {
+        *cell = j;
+    }
+    for i in 1..=a.len() {
+        for j in 1..=b.len() {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            let mut v = (d[i - 1][j] + 1)
+                .min(d[i][j - 1] + 1)
+                .min(d[i - 1][j - 1] + cost);
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                v = v.min(d[i - 2][j - 2] + 1);
+            }
+            d[i][j] = v;
+        }
+    }
+    d[a.len()][b.len()]
 }
 
 #[cfg(test)]
@@ -198,5 +206,6 @@ mod tests {
         assert_eq!(did_you_mean("bsae", ["base", "local"]), Some("base"));
         assert_eq!(did_you_mean("lcoal", ["base", "local"]), Some("local"));
         assert_eq!(did_you_mean("ab", ["xy"]), None);
+        assert_eq!(did_you_mean("vra", ["var", "lane"]), Some("var"));
     }
 }

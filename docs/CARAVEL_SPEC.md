@@ -2202,7 +2202,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-04 | Install from source: `install.sh`, the release next to the binary, a web dir per template, a binary-platform guard (DEC-076) | C-03 | done |
 | C-05 | `init` and `keys`; local applies create the identities they name (DEC-077) — **Gate G1** | C-04 | done |
 | C-06 | `caravel-lanefile`: loader with spans and diagnostics, `include`, `extends`, reserved keys; genesis refuses `${` (DEC-078) | C-05 | review |
-| C-07 | The expression evaluator: grammar, types, functions, no time or randomness | C-06 | todo |
+| C-07 | The expression evaluator: grammar, types, functions, no time or randomness (DEC-079) | C-06 | review |
 | C-08 | Vars, locals, `for_each`, per-env `[env.<name>.node]` | C-07 | todo |
 | C-09 | The manifest on resolved values; `caravel render`; the e2e without heredoc or `sed` | C-08 | todo |
 | C-10 | Attributes and outputs; `caravel output`; references in relayer feeds — **Gate G2** | C-09 | todo |
@@ -2671,6 +2671,22 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 - **`vars`, `locals` and `outputs`** are reserved and refused for now, until the expression layer (C-07, C-08).
 - **The node's parser** (`LaneFile::from_table`/`parse`) sets aside every deployment key (`env`, `include`, `vars`, `locals`, `outputs`). It refuses any `${` outside `[env]`: genesis sections are consensus config and stay literal. No template may be named after a deployment key.
 - **Who uses the loader:** `caravel_deploy::manifest::load_lane` and `Manifest::load`/`parse` read lane files through it, and so does the CLI. Every existing lane file loads to the same tables and genesis hashes (tested) | The quickstart's lane files repeat a deployment per environment, and the e2e builds one with a heredoc | A deployment needs to drop an inherited key (comes with expressions: a value of `${null}`) |
+| DEC-079 | **M0.6 (C-07).** The lane file's expressions: `caravel_lanefile::expr`. A hand-written parser and evaluator, with no dependency.
+- **Strings:** a string that is exactly one `${…}` takes the expression's type (`threshold = "${var.n}"` is a number). Any other string with `${…}` in it is a string. `$${` writes `${`. Strings inside an expression interpolate too, and see comprehension variables (`[for v in xs : 'acme-v${v}']`).
+- **Values:** null, booleans, 64-bit integers, strings, lists and maps. TOML floats and dates pass through but can't be computed with.
+  - Arithmetic is checked: overflow and division by zero are errors, and `/` truncates.
+  - `+` adds numbers only; strings join through templates or `format()`.
+  - `==` compares values of one kind, or anything against `null`.
+  - `<` and the other orderings compare two numbers or two strings.
+- **Grammar:** `?:`, `||`, `&&` (both short-circuit), comparisons, `+ -`, `* / %`, unary `! -`, `.name`, `[index]` and calls.
+  - Literals: lists, maps (`{ k = v }`), and comprehensions (`[for k, v in m : e if c]`).
+  - Names may contain `-` (`node.validator-1`), so subtraction needs spaces.
+  - Nesting is capped at 64, operator chains at 256 and lists at 10,000. A property test checks that no input panics.
+- **Functions:** `range length concat merge lookup keys contains join split replace upper lower tostring tonumber min max coalesce format`.
+  - No function reads the clock, randomness, the environment or files, so a lane file and its inputs always give the same deployment.
+  - `file()` and hashing functions are left for when a task needs them.
+- **`Value::Deferred(refs)`:** a value known only after Stellar and the host are read, such as `contract.settlement.address`. Anything computed from it is deferred with the references it needs, for the attributes stage (C-10).
+- **Errors** carry the byte range in the string and a did-you-mean for names, fields and functions. Typos are measured as optimal string alignment, so a swap of two letters counts once | A lane file needs computed values (thresholds, names, lists of validators) without a full programming language or any I/O | Real need for floats, file reads or hashing in deployments |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

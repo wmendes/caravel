@@ -20,6 +20,7 @@
 //! changes them, and they are read from the lane file itself only.
 
 pub mod diag;
+pub mod expr;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
