@@ -21,8 +21,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::plan::{
-    c_short, fingerprint, g_short, hex, short, target_epoch, Chain, Desired, Host, Key, Options,
-    Plan, Problem, Step,
+    c_short, fingerprint, g_short, hex, res_addr, short, target_epoch, Chain, Desired, Host, Key,
+    Options, Plan, Problem, Step,
 };
 
 /// What a resource is.
@@ -294,20 +294,20 @@ pub fn build(d: &Desired, host: &Host) -> Result<Graph, String> {
     let account_ids: Vec<usize> = d
         .accounts
         .iter()
-        .map(|a| g.add(format!("account.{}", a.name), Kind::Account))
+        .map(|a| g.add(res_addr("account", &a.name), Kind::Account))
         .collect();
     let token = g.add("token.settlement", Kind::Token);
     let token_ids: Vec<usize> = d
         .tokens
         .iter()
-        .map(|t| g.add(format!("token.{}", t.name), Kind::Token))
+        .map(|t| g.add(res_addr("token", &t.name), Kind::Token))
         .collect();
     let wasm = g.add("wasm.settlement", Kind::Wasm);
     let contract = g.add("contract.settlement", Kind::Contract);
     let contract_ids: Vec<usize> = d
         .contracts
         .iter()
-        .map(|c| g.add(format!("contract.{}", c.name), Kind::Contract))
+        .map(|c| g.add(res_addr("contract", &c.name), Kind::Contract))
         .collect();
     let signers = g.add("signers.settlement", Kind::Signers);
     let host_r = g.add("host", Kind::Host);
@@ -399,12 +399,13 @@ pub fn build(d: &Desired, host: &Host) -> Result<Graph, String> {
             .map(|(_, &i)| i)
     };
     for (a, &i) in d.accounts.iter().zip(&account_ids) {
-        for line in &a.trustlines {
+        // An issuer needs nothing of its own token (and comes before it).
+        for line in a.trustlines.iter().filter(|(_, issuer)| *issuer != a.key) {
             if let Some(t) = token_of(line) {
                 g.edge(t, i, Order);
             }
         }
-        for h in &a.balances {
+        for h in a.balances.iter().filter(|h| h.issuer != a.key) {
             if let Some(t) = token_of(&(h.code.clone(), h.issuer)) {
                 g.edge(t, i, Order);
             }
@@ -446,13 +447,13 @@ pub fn build(d: &Desired, host: &Host) -> Result<Graph, String> {
     }
     for a in &d.accounts {
         for on in &a.depends_on {
-            g.depends_on(&format!("account.{}", a.name), on)
+            g.depends_on(&res_addr("account", &a.name), on)
                 .map_err(|e| format!("accounts.{}.depends_on: {e}", a.name))?;
         }
     }
     for c in &d.contracts {
         for on in &c.depends_on {
-            g.depends_on(&format!("contract.{}", c.name), on)
+            g.depends_on(&res_addr("contract", &c.name), on)
                 .map_err(|e| format!("contracts.{}.depends_on: {e}", c.name))?;
         }
     }
@@ -730,14 +731,16 @@ pub fn diff(d: &Desired, chain: &Chain, host: &Host, opts: &Options) -> Result<P
                 }
             }
             (Kind::Account, addr) => {
-                let name = addr.trim_start_matches("account.");
-                if let Some(a) = d.accounts.iter().find(|a| a.name == name) {
+                if let Some(a) = d
+                    .accounts
+                    .iter()
+                    .find(|a| res_addr("account", &a.name) == addr)
+                {
                     o = declared_outcome(chain, a);
                 }
             }
             (Kind::Token, addr) if addr != "token.settlement" => {
-                let name = addr.trim_start_matches("token.");
-                if let Some(t) = d.tokens.iter().find(|t| t.name == name) {
+                if let Some(t) = d.tokens.iter().find(|t| res_addr("token", &t.name) == addr) {
                     if !chain.tokens.contains(&t.contract) {
                         o.steps.push(Step::DeployToken {
                             name: t.name.clone(),
@@ -775,8 +778,11 @@ pub fn diff(d: &Desired, chain: &Chain, host: &Host, opts: &Options) -> Result<P
             }
             (Kind::Contract, "contract.settlement") => o = contract_outcome(d, chain),
             (Kind::Contract, addr) => {
-                let name = addr.trim_start_matches("contract.");
-                if let Some(c) = d.contracts.iter().find(|c| c.name == name) {
+                if let Some(c) = d
+                    .contracts
+                    .iter()
+                    .find(|c| res_addr("contract", &c.name) == addr)
+                {
                     o = declared_contract_outcome(chain, c);
                 }
             }

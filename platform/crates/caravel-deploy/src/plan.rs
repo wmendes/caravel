@@ -413,16 +413,25 @@ pub struct Options {
     pub replace: Vec<String>,
 }
 
+/// A declared resource's address: `<kind>.<name>`, or for a module's
+/// (`<instance>.<name>`, C-21) `module.<instance>.<kind>.<name>`.
+pub fn res_addr(kind: &str, name: &str) -> String {
+    match name.split_once('.') {
+        Some((module, n)) => format!("module.{module}.{kind}.{n}"),
+        None => format!("{kind}.{name}"),
+    }
+}
+
 /// The resource a step changes (its address in the graph, [`crate::graph`]).
 pub fn step_addr(s: &Step) -> String {
     match s {
         Step::Fund { who, .. } | Step::Trust { who, .. } | Step::Mint { who, .. } => {
-            format!("account.{who}")
+            res_addr("account", who)
         }
-        Step::DeployToken { name, .. } => format!("token.{name}"),
+        Step::DeployToken { name, .. } => res_addr("token", name),
         Step::UploadWasm { name, .. } if name == "settlement" => "wasm.settlement".into(),
         Step::UploadWasm { name, .. } | Step::DeployContract { name, .. } => {
-            format!("contract.{name}")
+            res_addr("contract", name)
         }
         Step::DeploySettlement { .. } => "contract.settlement".into(),
         Step::RotateSigners { .. } => "signers.settlement".into(),
@@ -448,10 +457,10 @@ pub fn problem_addr(p: &Problem) -> String {
         Problem::HostNotReady { .. } | Problem::WrongPlatform { .. } => "host".into(),
         Problem::NodeMismatch { node, .. } => format!("node.{node}"),
         Problem::AccountMissing { who } | Problem::CannotMint { who, .. } => {
-            format!("account.{who}")
+            res_addr("account", who)
         }
         Problem::ContractCodeDrift { name, .. } | Problem::WasmMissing { name, .. } => {
-            format!("contract.{name}")
+            res_addr("contract", name)
         }
     }
 }

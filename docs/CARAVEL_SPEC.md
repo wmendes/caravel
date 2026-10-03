@@ -2216,7 +2216,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-18 | Accounts: funding, trustlines, balances topped up (DEC-090) | C-17 | review |
 | C-19 | Tokens: issued assets and their contracts; a declared token as the settlement token (DEC-091) | C-18 | review |
 | C-20 | Contracts: any Wasm, constructor arguments, derived addresses, `prevent_destroy` (DEC-092) | C-19 | review |
-| C-21 | Local modules with inputs and outputs — **Gate G5** | C-20 | todo |
+| C-21 | Local modules with inputs and outputs — **Gate G5** (DEC-093) | C-20 | review |
 | C-22 | Several hosts per deployment and node placement | C-21 | todo |
 | C-23 | Networking across hosts (private addresses) | C-22 | todo |
 | C-24 | Lane namespaces: several lanes on one host | C-23 | todo |
@@ -2931,6 +2931,25 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - "No changes." with the note once deployed;
   - `ContractCodeDrift`, `WasmMissing`, and the `--replace` refusal;
   - on a local lane: a contract with no constructor (Wasm uploaded and deployed), and a second settlement contract whose arguments come from expressions (addresses, the lane's hashes, a signer struct, params). It was deployed at the planned address, then "No changes." with the note, and `--replace` and `destroy` refused | Lanes need their own contracts (oracles, registries) next to the settlement one, wired by address | Upgrades of declared contracts, and checking arguments that a contract exposes through a getter |
+| DEC-093 | **M0.6 (C-21), Gate G5.** Local modules: `[env.<name>.modules.<m>]`, with `source` (a local `.toml`; anything with `://` is refused), `inputs`, and optionally `for_each`. The language crate expands them (`caravel_lanefile::modules`).
+- **A module file** holds only `[inputs.<n>]` (`type`, `default`), `[locals]`, `[accounts]`, `[tokens]`, `[contracts]` and `[outputs]`.
+  - Inputs are read in the deployment's scope (with `each` under `for_each`), defaulted, type-checked, and refused when unknown (did-you-mean) or missing.
+  - Its expressions read `input`, its own `local`, `lane`, `env`, and the deployment's later names (`account`, `token`, `contract`, `network`, …), where its own resources answer to their short names. It doesn't read the lane file's `var`.
+- **Its resources join the deployment** as `<instance>.<n>` in `accounts`, `tokens` and `contracts`. With `for_each`, an instance is `<m>-<key>` (the map key, or the list's string value).
+  - References to its own resources are qualified: a token's issuer, a contract's deployer, trustlines and balances, and `depends_on` (as `module.<instance>.<kind>.<n>`).
+  - A module account's identity defaults to `<instance>-<n>`.
+  - A contract's Wasm file is found next to the module file.
+  - A `.` in a name declared outside a module is refused.
+- **Two stages, as for the deployment:** at the first read, the later names are deferred; once keys are known, the module is read again with them. A module contract's `args` therefore wait at `contracts.<instance>.<n>.args…`, a path where deferred values are allowed.
+- **The deploy tool** gives `<instance>.<n>` the address `module.<instance>.<kind>.<n>` (`plan::res_addr`), in the graph, plan lines, problems, `--target` and `depends_on`.
+- **Outputs:** an instance's are `module.<instance>.<name>` in the deployment's `[outputs]`.
+- **Fixes found on the way, now covered by tests:**
+  - An issuer that lists its own token got edges both ways, a false cycle. An issuer needs nothing of its own token, so those edges are gone.
+  - The chain reader asked for duplicate ledger keys when two contracts shared a Wasm, and the RPC refuses such a batch ("could not query captive core … 404"). Every declared batch now asks for each key once, and never for an issuer's trustline to itself.
+- **Checked:**
+  - unit tests: resources joining, qualification, Wasm paths, deferred args, the second stage with own names, outputs, `for_each` instances, and every refusal;
+  - a plan test of an issuer holding its own token;
+  - on a local lane: one module file used twice (`for_each` btc and eth). Each instance's feeder was funded and issued its token, and each instance's contract (a settlement Wasm, args from the module's own names and the lane's hashes) was deployed by its feeder at the planned address. Then "No changes.", outputs through `module.<instance>`, and `--target 'module.oracle-eth.*'` | Repeated groups of resources (one oracle per market, one vault per asset) were copy-paste in the lane file | Remote module sources, and module outputs read elsewhere than `[outputs]` |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 
@@ -2948,6 +2967,7 @@ Agents append new decisions here as `DEC-018+` with the same columns.
 | OQ-006 | License for the repo | `MIT OR Apache-2.0` |
 | OQ-007 | Should the deck be updated to match §2.3 (ed25519 now, BLS later; no stellar-core close-time claim)? | Yes, before any public pitch |
 | OQ-008 | Open access invites slot squatting (1,024 accounts × 1 USDC of free testnet USDC). Use an allowlist for the public demo? | Open mode with `min_deposit` 10 USDC; switch the demo instance to allowlist if squatted |
+| OQ-009 | C-23: once nodes run on several hosts, what protects the sequencer's call to each validator's `/v1/sign`, and who may run a validator? | **Answered 2026-10-03.** Every call is authenticated, as the zero-trust tools do; the network isn't the boundary. **(1) Signed requests:** the sequencer gets its own identity (`[env.X.sequencer] key`), signs each `/v1/sign` request (ed25519 over the time and the body's hash), and validators check it against that key from the lane file, within a time window. No token, no CA and no state file. **(2) A private network is optional:** `private_address` per host carries node-to-node traffic when declared; otherwise traffic goes over public HTTPS. It's defence in depth, not the boundary. **(3) External validators are in C-23:** a validator run elsewhere is a reference (its URL and key), put in the signer set and called by the sequencer, never deployed. `/internal/*` stays on localhost (the relayer shares the sequencer's host) |
 
 ---
 

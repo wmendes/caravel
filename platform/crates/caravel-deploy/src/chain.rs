@@ -73,31 +73,51 @@ fn contract_data(e: &Option<Entry>) -> Option<&ScVal> {
 async fn read_declared(rpc: &Rpc, d: &Desired, chain: &mut Chain) -> Result<()> {
     // Declared contracts (C-20): the Wasm each runs, and which Wasm is
     // uploaded.
+    // Each key once: the RPC refuses a batch that asks for one twice (two
+    // contracts can share their Wasm).
     if !d.contracts.is_empty() {
-        let mut keys = Vec::new();
-        for c in &d.contracts {
-            keys.push(instance_key(&c.address));
-            keys.push(code_key(&c.wasm));
-        }
+        let wasms: Vec<Key> = d
+            .contracts
+            .iter()
+            .map(|c| c.wasm)
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let mut keys: Vec<_> = d
+            .contracts
+            .iter()
+            .map(|c| instance_key(&c.address))
+            .collect();
+        keys.extend(wasms.iter().map(code_key));
         let (entries, _) = rpc.ledger_entries(&keys).await?;
-        for (c, pair) in d.contracts.iter().zip(entries.chunks(2)) {
-            if let Some(ScVal::ContractInstance(i)) = contract_data(&pair[0]) {
+        let (instances, codes) = entries.split_at(d.contracts.len());
+        for (c, e) in d.contracts.iter().zip(instances) {
+            if let Some(ScVal::ContractInstance(i)) = contract_data(e) {
                 if let ContractExecutable::Wasm(h) = &i.executable {
                     chain.contracts.insert(c.address, h.0);
                 }
             }
-            if pair[1].is_some() {
-                chain.wasms.insert(c.wasm);
+        }
+        for (w, e) in wasms.iter().zip(codes) {
+            if e.is_some() {
+                chain.wasms.insert(*w);
             }
         }
     }
     // Declared tokens' contracts.
     if !d.tokens.is_empty() {
-        let keys: Vec<_> = d.tokens.iter().map(|t| instance_key(&t.contract)).collect();
+        let contracts: Vec<Key> = d
+            .tokens
+            .iter()
+            .map(|t| t.contract)
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let keys: Vec<_> = contracts.iter().map(instance_key).collect();
         let (entries, _) = rpc.ledger_entries(&keys).await?;
-        for (t, e) in d.tokens.iter().zip(entries) {
+        for (c, e) in contracts.iter().zip(entries) {
             if e.is_some() {
-                chain.tokens.insert(t.contract);
+                chain.tokens.insert(*c);
             }
         }
     }
@@ -106,11 +126,19 @@ async fn read_declared(rpc: &Rpc, d: &Desired, chain: &mut Chain) -> Result<()> 
     for a in &d.accounts {
         keys.push(account_key(&a.key));
         what.push((a.key, None));
-        for (code, issuer) in &a.trustlines {
+        // An issuer has no trustline to its own asset (and the ledger has no
+        // such key to ask for).
+        for (code, issuer) in a.trustlines.iter().filter(|(_, issuer)| *issuer != a.key) {
             keys.push(crate::address::trustline_key(&a.key, code, issuer));
             what.push((a.key, Some((code.clone(), *issuer))));
         }
     }
+    let mut seen = std::collections::BTreeSet::new();
+    let (keys, what): (Vec<_>, Vec<_>) = keys
+        .into_iter()
+        .zip(what)
+        .filter(|(_, w)| seen.insert(w.clone()))
+        .unzip();
     for chunk in keys.chunks(100).zip(what.chunks(100)) {
         let (entries, _) = rpc.ledger_entries(chunk.0).await?;
         for (entry, (account, line)) in entries.iter().zip(chunk.1) {
