@@ -94,6 +94,13 @@ pub enum Command {
         #[arg(long)]
         out: Option<PathBuf>,
     },
+    /// Prune a stopped node's store to the end (DEC-105) and give the space
+    /// back with VACUUM. The node prunes as it runs; this also shrinks the file.
+    Compact {
+        /// The sequencer or validator config whose store to compact.
+        #[arg(long)]
+        config: PathBuf,
+    },
     /// Run the sequencer (spec §14): blocks, checkpoints and the API.
     Sequencer {
         /// The sequencer config, e.g. lanes/perps/config/sequencer.local.toml.
@@ -260,6 +267,41 @@ pub fn run<A: NodeApp>(app: A, command: Command) -> Result<()> {
                 Some(path) => std::fs::write(&path, text)?,
                 None => print!("{text}"),
             }
+        }
+        Command::Compact { config } => {
+            let text = std::fs::read_to_string(&config)?;
+            let (lane, db) = if text.contains("[sequencer]") {
+                let c = crate::node_config::SequencerConfig::load_offline(&config)?;
+                (c.lane, c.db)
+            } else {
+                let c = crate::validator::ValidatorConfig::load(&config)?;
+                (c.lane, c.db)
+            };
+            let (_, config_bytes, genesis_state) = crate::lane_toml::genesis(&app, &lane)?;
+            let before = std::fs::metadata(&db)?.len();
+            let mut store = caravel_runtime::store::Store::open(
+                &db,
+                &lane.lane_id(),
+                &caravel_runtime::checkpoint::sha256(&config_bytes),
+                &genesis_state,
+            )?;
+            let (mut snapshots, mut batches) = (0, 0);
+            loop {
+                let p = store.prune(10_000)?;
+                snapshots += p.snapshots;
+                batches += p.batches;
+                if p.snapshots + p.batches == 0 {
+                    break;
+                }
+            }
+            store.vacuum()?;
+            drop(store);
+            let after = std::fs::metadata(&db)?.len();
+            println!(
+                "pruned {snapshots} snapshot(s) and {batches} batch(es); {} MB -> {} MB",
+                before / 1_000_000,
+                after / 1_000_000
+            );
         }
         Command::Sequencer { config } => {
             init_logging();

@@ -324,6 +324,7 @@ impl<A: LaneApp> Follower<A> {
         self.store.insert_checkpoint(&CheckpointRow {
             seq: header.seq,
             header: header_bytes.to_vec(),
+            batch_len: batch.len(),
             batch,
             first_height: self.batch_start,
             last_height: height,
