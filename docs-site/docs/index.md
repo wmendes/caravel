@@ -1,5 +1,5 @@
 ---
-title: Caravel
+title: What is Caravel
 slug: /
 sidebar_label: What is Caravel
 sidebar_position: 1
