@@ -239,7 +239,19 @@ h3 { font-size: var(--t-l); font-weight: 600; }
 /* chart */
 .chart-head { display: flex; min-width: 0; overflow: hidden; align-items: center; gap: 14px; padding: 8px 12px; border-bottom: 1px solid var(--hair); font-size: var(--t-s); color: var(--ink-3); }
 .chart-head b { color: var(--ink-2); font-weight: 600; }
+.chart-wrap { position: relative; flex: 1; min-height: 320px; display: flex; }
 .chart { flex: 1; min-height: 320px; }
+.chart-src { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.chart-note { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3); font-size: var(--t-s); pointer-events: none; }
+.seg.intervals { padding: 2px; gap: 2px; flex: none; }
+.seg.intervals button { height: 22px; padding: 0 8px; font-size: var(--t-xs); }
+.live-dot { display: inline-flex; align-items: center; gap: 6px; }
+.live-dot::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--soft); animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+.trades-row.fresh-up { animation: fresh-up 0.9s var(--ease); }
+.trades-row.fresh-down { animation: fresh-down 0.9s var(--ease); }
+@keyframes fresh-up { from { background: var(--buy-soft); } }
+@keyframes fresh-down { from { background: var(--sell-soft); } }
 
 /* order book */
 .book { font-variant-numeric: tabular-nums; font-size: var(--t-s); display: flex; flex-direction: column; flex: 1; min-height: 0; }

@@ -311,7 +311,7 @@ async fn sequencer_api_end_to_end() {
     .await
     .unwrap();
     ws.send(tokio_tungstenite::tungstenite::Message::Text(
-        json!({ "blocks": true, "markets": [1], "account": g(A) })
+        json!({ "blocks": true, "markets": [1], "tickers": true, "account": g(A) })
             .to_string()
             .into(),
     ))
@@ -367,10 +367,22 @@ async fn sequencer_api_end_to_end() {
     assert_eq!(trades[0]["lots"], 4);
     assert_eq!(trades[0]["taker"], g(B));
 
+    // Candles of the oracle price (H-15): the one-minute candle holds the
+    // price posted above; an unknown interval or market is refused.
+    let (_, candles) = lane.get("/v1/markets/1/candles?interval=1m").await;
+    let last = candles.as_array().unwrap().last().unwrap().clone();
+    assert_eq!(last["close"], BTC_PRICE.to_string());
+    assert!(last["t"].as_u64().unwrap() % 60_000 == 0);
+    let (_, hourly) = lane.get("/v1/markets/1/candles?interval=1h&limit=1").await;
+    assert_eq!(hourly.as_array().unwrap().len(), 1);
+    assert_eq!(lane.get("/v1/markets/1/candles?interval=2m").await.0, 400);
+    assert_eq!(lane.get("/v1/markets/99/candles").await.0, 404);
+
     // The stream delivered a block, the fill and A's receipt.
     let mut seen = std::collections::BTreeSet::new();
     let deadline = Instant::now() + Duration::from_secs(10);
     while !(seen.contains("fill")
+        && seen.contains("tickers")
         && seen.contains("receipt")
         && seen.contains("block")
         && seen.contains("account"))
@@ -382,6 +394,12 @@ async fn sequencer_api_end_to_end() {
         };
         if let tokio_tungstenite::tungstenite::Message::Text(t) = msg {
             let v: Value = serde_json::from_str(t.as_str()).unwrap();
+            if v["type"] == "tickers" {
+                // Every market's price line, on every block.
+                assert_eq!(v["markets"].as_array().unwrap().len(), 3);
+                assert!(v["markets"][0]["oracle_price"].is_string());
+                assert!(v["timestamp_ms"].is_string());
+            }
             seen.insert(v["type"].as_str().unwrap().to_string());
         }
     }

@@ -4,9 +4,9 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
 
-import { lane, stream, type Account, type Book, type Fill, type Level, type Market } from "../api/lane";
+import { lane, stream, type Account, type Book, type CandleInterval, type Fill, type Level, type Market } from "../api/lane";
 import { Side, Tif } from "../codec/tx";
-import { PriceChart } from "../components/Chart";
+import { INTERVALS, PriceChart } from "../components/Chart";
 import { Chip, Empty, SidePill, Signed, Skel, Tabs, useFlash, useNow, useToast } from "../components/ui";
 import { ago, base, baseAmount, perUnit, price, short, toPricePerLot, usdc } from "../format";
 import { Link, useRoute } from "../router";
@@ -39,20 +39,22 @@ export function Trade({ symbol }: { symbol: string }) {
   const market = markets.find((m) => m.symbol === symbol) ?? markets[0];
   const [book, setBook] = useState<Book | null>(null);
   const [fills, setFills] = useState<Fill[] | null>(null);
-  const [points, setPoints] = useState<{ t: number; v: number }[]>([]);
+  const [interval, setInterval_] = useState<CandleInterval>(() => {
+    try {
+      const v = localStorage.getItem("caravel.interval");
+      return INTERVALS.some((i) => i.id === v) ? (v as CandleInterval) : "1m";
+    } catch {
+      return "1m";
+    }
+  });
+  // Fills that arrived on the stream, highlighted for a moment.
+  const [fresh, setFresh] = useState<Set<string>>(() => new Set());
   const [picked, setPicked] = useState<{ px: string; n: number } | null>(null);
   const [side, setSide] = useState<Side>(Side.Buy);
   const marketId = market?.market_id;
   const ids = laneIds(status);
 
-  // Price history for the chart, from the oracle price the lane holds.
   useEffect(() => {
-    if (!market) return;
-    const v = perUnit(market.oracle_price, market);
-    if (v > 0) setPoints((p) => [...p.slice(-900), { t: Date.now(), v }]);
-  }, [market?.oracle_price, market]);
-  useEffect(() => {
-    setPoints([]);
     setBook(null);
     setFills(null);
   }, [marketId]);
@@ -63,7 +65,17 @@ export function Trade({ symbol }: { symbol: string }) {
     void lane.trades(marketId, 60).then(setFills).catch(() => setFills([]));
     return stream({ markets: [marketId], account: address }, (m) => {
       if (m.type === "book" && m.market_id === marketId) setBook(m as unknown as Book);
-      if (m.type === "fill" && m.market_id === marketId) setFills((f) => [m as unknown as Fill, ...(f ?? [])].slice(0, 60));
+      if (m.type === "fill" && m.market_id === marketId) {
+        const f = m as unknown as Fill;
+        const k = fillKey(f);
+        setFills((list) => [f, ...(list ?? [])].slice(0, 60));
+        setFresh((s) => new Set(s).add(k));
+        setTimeout(() => setFresh((s) => {
+          const n = new Set(s);
+          n.delete(k);
+          return n;
+        }), 900);
+      }
       if (m.type === "account") setAccount(m as unknown as Account);
     });
   }, [marketId, address, setAccount]);
@@ -107,12 +119,33 @@ export function Trade({ symbol }: { symbol: string }) {
         <MarketBar market={market} markets={markets} book={book} />
         <section className="pane chart-pane" aria-label="Chart">
           <div className="chart-head">
-            <b>Oracle price</b>
-            <span>Signed by the Caravel team's oracle key, from Coinbase market data. Sampled while this page is open.</span>
+            <div className="seg intervals" role="group" aria-label="Candle interval">
+              {INTERVALS.map((i) => (
+                <button
+                  key={i.id}
+                  type="button"
+                  aria-pressed={interval === i.id}
+                  onClick={() => {
+                    setInterval_(i.id);
+                    try {
+                      localStorage.setItem("caravel.interval", i.id);
+                    } catch {
+                      /* a remembered interval is a convenience */
+                    }
+                  }}
+                >
+                  {i.label}
+                </button>
+              ))}
+            </div>
+            <b>Mark</b>
+            <span className="chart-src" title="The oracle price the lane accepted, signed by the Caravel team's oracle key from Coinbase market data. Candles are built by the lane from its own blocks.">
+              Oracle price, signed by the Caravel team's key from Coinbase data
+            </span>
           </div>
-          <PriceChart points={points} digits={digitsFor(perUnit(market.oracle_price, market))} />
+          <PriceChart market={market} price={perUnit(market.oracle_price, market)} priceTimeMs={Number(market.oracle_time_ms)} interval={interval} digits={digitsFor(perUnit(market.oracle_price, market))} />
         </section>
-        <BookPane market={market} book={book} fills={fills} onPick={(px) => setPicked((p) => ({ px, n: (p?.n ?? 0) + 1 }))} />
+        <BookPane market={market} book={book} fills={fills} fresh={fresh} onPick={(px) => setPicked((p) => ({ px, n: (p?.n ?? 0) + 1 }))} />
         <section className="pane ticket-pane" aria-label="Order ticket">
           <Ticket market={market} ids={ids} address={address} sessionKey={key} account={account} book={book} side={side} setSide={setSide} picked={picked} />
           <AccountBox account={account} address={address} ids={ids} hasKey={key !== null} keyExpiry={key?.expiresAtMs ?? null} />
@@ -276,7 +309,7 @@ function MarketPicker({ market, markets }: { market: Market; markets: Market[] }
 
 /* ------------------------------------------------------------ book and trades */
 
-function BookPane({ market, book, fills, onPick }: { market: Market; book: Book | null; fills: Fill[] | null; onPick: (px: string) => void }) {
+function BookPane({ market, book, fills, fresh, onPick }: { market: Market; book: Book | null; fills: Fill[] | null; fresh: Set<string>; onPick: (px: string) => void }) {
   const [tab, setTab] = useState<"book" | "trades">("book");
   return (
     <section className="pane book-pane" aria-label="Order book and trades">
@@ -289,7 +322,7 @@ function BookPane({ market, book, fills, onPick }: { market: Market; book: Book 
           { id: "trades", label: "Trades" },
         ]}
       />
-      {tab === "book" ? <BookView market={market} book={book} onPick={onPick} /> : <TradesView market={market} fills={fills} />}
+      {tab === "book" ? <BookView market={market} book={book} onPick={onPick} /> : <TradesView market={market} fills={fills} fresh={fresh} />}
     </section>
   );
 }
@@ -356,7 +389,9 @@ function BookSkel() {
   );
 }
 
-function TradesView({ market, fills }: { market: Market; fills: Fill[] | null }) {
+const fillKey = (f: Fill) => `${f.height}-${f.maker_order_id}-${f.lots}-${f.price}`;
+
+function TradesView({ market, fills, fresh }: { market: Market; fills: Fill[] | null; fresh: Set<string> }) {
   return (
     <div className="pane-body">
       <div className="book-cols">
@@ -372,7 +407,7 @@ function TradesView({ market, fills }: { market: Market; fills: Fill[] | null })
         fills.map((f, i) => {
           const buy = f.taker_side === "buy";
           return (
-            <div className="trades-row" key={`${f.height}-${i}`}>
+            <div className={`trades-row ${fresh.has(fillKey(f)) ? (buy ? "fresh-up" : "fresh-down") : ""}`} key={`${fillKey(f)}-${i}`}>
               <span className={buy ? "up" : "down"}>
                 <span className="sr-only">{buy ? "Buy" : "Sell"} </span>
                 <span aria-hidden>{buy ? "▲ " : "▼ "}</span>

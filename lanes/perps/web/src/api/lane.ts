@@ -63,6 +63,27 @@ export interface Market extends MarketMeta {
   best_ask: string | null;
 }
 
+/** A market's line in the stream's per-block `tickers` message. */
+export interface Ticker {
+  market_id: number;
+  oracle_price: string;
+  oracle_time_ms: string;
+  best_bid: string | null;
+  best_ask: string | null;
+  open_interest_lots: number;
+}
+
+/** A candle of the oracle price (the mark), stroops per lot; `t` is its start in ms. */
+export interface Candle {
+  t: number;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+}
+
+export type CandleInterval = "1m" | "5m" | "15m" | "1h";
+
 export interface Level {
   price: string;
   lots: number;
@@ -83,6 +104,7 @@ export interface Fill {
   price: string;
   lots: number;
   taker_side: "buy" | "sell";
+  maker_order_id: string;
   maker: string;
   taker: string;
 }
@@ -144,6 +166,7 @@ export const lane = {
   markets: () => get<Market[]>("/v1/markets"),
   book: (id: number, depth = 20) => get<Book>(`/v1/markets/${id}/book?depth=${depth}`),
   trades: (id: number, limit = 50) => get<Fill[]>(`/v1/markets/${id}/trades?limit=${limit}`),
+  candles: (id: number, interval: CandleInterval, limit = 500) => get<Candle[]>(`/v1/markets/${id}/candles?interval=${interval}&limit=${limit}`),
   block: (h: number | string, base?: string) => get<Record<string, unknown>>(`/v1/blocks/${h}`, base),
   checkpoint: (seq: number | string, base?: string) => get<Record<string, unknown>>(`/v1/checkpoints/${seq}`, base),
   withdrawalProofs: (g: string, base?: string) => get<{ withdrawals: Proof[] }>(`/v1/proofs/withdrawals?account=${g}`, base),
@@ -157,8 +180,12 @@ export const lane = {
   },
 };
 
-/** `WS /v1/stream`: reconnects with backoff; returns a stop function. */
-export function stream(sub: { blocks?: boolean; markets?: number[]; account?: string | null }, onMessage: (m: Record<string, unknown> & { type: string }) => void): () => void {
+/** `WS /v1/stream`: reconnects with backoff; returns a stop function. `onLive` hears when it connects and drops. */
+export function stream(
+  sub: { blocks?: boolean; markets?: number[]; tickers?: boolean; account?: string | null },
+  onMessage: (m: Record<string, unknown> & { type: string }) => void,
+  onLive?: (live: boolean) => void,
+): () => void {
   let ws: WebSocket | null = null;
   let stopped = false;
   let delay = 500;
@@ -167,7 +194,8 @@ export function stream(sub: { blocks?: boolean; markets?: number[]; account?: st
     ws = new WebSocket(`${config.sequencerUrl.replace(/^http/, "ws")}/v1/stream`);
     ws.onopen = () => {
       delay = 500;
-      ws?.send(JSON.stringify({ blocks: sub.blocks ?? false, markets: sub.markets ?? [], account: sub.account ?? undefined }));
+      ws?.send(JSON.stringify({ blocks: sub.blocks ?? false, markets: sub.markets ?? [], tickers: sub.tickers ?? false, account: sub.account ?? undefined }));
+      onLive?.(true);
     };
     ws.onmessage = (e) => {
       try {
@@ -177,6 +205,7 @@ export function stream(sub: { blocks?: boolean; markets?: number[]; account?: st
       }
     };
     ws.onclose = () => {
+      onLive?.(false);
       if (stopped) return;
       setTimeout(open, delay);
       delay = Math.min(delay * 2, 10_000);
