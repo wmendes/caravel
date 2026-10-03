@@ -1,7 +1,7 @@
 /** App-wide state: the lane status, markets, the connected wallet and its session key. */
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 
-import { lane, type Market, type Status } from "./api/lane";
+import { lane, type Account, type Market, type Status } from "./api/lane";
 import { stellar, type LastCheckpoint } from "./api/stellar";
 import * as wallet from "./api/wallet";
 import * as session from "./session";
@@ -16,6 +16,9 @@ interface AppState {
   connecting: boolean;
   walletError: string | null;
   key: session.SessionKey | null;
+  /** The connected account on the lane: undefined while loading, null before its first deposit. */
+  account: Account | null | undefined;
+  setAccount: (a: Account | null) => void;
   connect: () => Promise<void>;
   disconnect: () => void;
   setKey: (k: session.SessionKey | null) => void;
@@ -54,6 +57,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [connecting, setConnecting] = useState(false);
   const [walletError, setWalletError] = useState<string | null>(null);
   const [key, setKey] = useState<session.SessionKey | null>(null);
+  const [account, setAccount] = useState<Account | null | undefined>(undefined);
 
   usePoll(async () => {
     try {
@@ -80,6 +84,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     void wallet.current().then((a) => a && setAddress(a)).catch(() => {});
   }, []);
 
+  useEffect(() => setAccount(undefined), [address]);
+  usePoll(async () => {
+    if (!address) return;
+    try {
+      setAccount(await lane.account(address));
+    } catch {
+      /* shown by the status banner */
+    }
+  }, 5000, [address]);
+
   useEffect(() => {
     setKey(null);
     if (address) void session.load(address).then(setKey);
@@ -102,7 +116,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     void wallet.disconnect();
   }, []);
 
-  return <Ctx.Provider value={{ status, statusError, markets, onChain, frozen, address, connecting, walletError, key, connect, disconnect, setKey }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ status, statusError, markets, onChain, frozen, address, connecting, walletError, key, account, setAccount, connect, disconnect, setKey }}>{children}</Ctx.Provider>;
 }
 
 export function useApp(): AppState {

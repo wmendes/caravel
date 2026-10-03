@@ -11,6 +11,12 @@ Never copy GPL files (for example SoroDOOM's PureDOOM files). Stellar facts are 
 
 None yet.
 
+## Bundled assets
+
+| Asset | Source | License | Where |
+|---|---|---|---|
+| Inter v20 variable font (wght 400 to 700), latin and latin-ext subsets, woff2 | Google Fonts (rsms/inter), fetched 2026-10-03 | SIL Open Font License 1.1, text kept in `public/fonts/OFL.txt` | `lanes/perps/web/public/fonts/` (DEC-101) |
+
 ## Designs re-implemented (no code copied)
 
 | Design | Source | License | Where |
