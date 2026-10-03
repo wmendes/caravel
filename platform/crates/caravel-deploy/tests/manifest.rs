@@ -962,3 +962,62 @@ fn public_urls_and_validators_run_elsewhere() {
     ));
     assert!(e.contains("an http(s) URL"), "{e}");
 }
+
+/// Namespaces (C-24): several lanes on one ssh host.
+#[test]
+fn namespaces() {
+    let ns = ENV.replace(
+        "public_url = \"https://lane.example\"\n",
+        "public_url = \"https://lane.example\"\nnamespace = \"pay\"\n",
+    );
+    let m = Manifest::parse(&file(&ns), "testnet").unwrap();
+    let h = &m.env.host;
+    // Its own root, units and Caddy snippet, unless the root is given.
+    assert_eq!(h.root, "/opt/caravel-pay");
+    assert_eq!(h.unit_prefix(), "caravel-pay-");
+    assert_eq!(h.caddy_file(), "caddy/caravel.d/pay.caddy");
+    let own = ns.replace(
+        "namespace = \"pay\"\n",
+        "namespace = \"pay\"\nroot = \"/srv/pay\"\n",
+    );
+    assert_eq!(
+        Manifest::parse(&file(&own), "testnet")
+            .unwrap()
+            .env
+            .host
+            .root,
+        "/srv/pay"
+    );
+    // Without one, the names of a host with one lane.
+    let m = Manifest::parse(&file(ENV), "testnet").unwrap();
+    assert_eq!(
+        (
+            m.env.host.root.as_str(),
+            m.env.host.unit_prefix(),
+            m.env.host.caddy_file()
+        ),
+        (
+            "/opt/caravel",
+            "caravel-".to_string(),
+            "caddy/Caddyfile".to_string()
+        )
+    );
+    for bad in ["Pay", "pay_1", "-pay", ""] {
+        let e = err(&ns.replace("namespace = \"pay\"", &format!("namespace = \"{bad}\"")));
+        assert!(
+            e.contains("lowercase letters, digits and '-'"),
+            "{bad}: {e}"
+        );
+    }
+    let local = ENV
+        .replace("network = \"testnet\"", "network = \"local\"")
+        .replace("token = \"circle-usdc\"", "token = { local = \"USDC\" }")
+        .replace(
+            "provider = \"ssh\"\naddress = \"ops@lane.example\"\npublic_url = \"https://lane.example\"\n",
+            "provider = \"local\"\nnamespace = \"pay\"\n",
+        )
+        .replace("[env.testnet", "[env.local")
+        .replace("[[env.testnet", "[[env.local");
+    let e = format!("{:#}", Manifest::parse(&file(&local), "local").unwrap_err());
+    assert!(e.contains("keeps each lane apart already"), "{e}");
+}

@@ -291,12 +291,17 @@ fn host_files(m: &Manifest, r: &Resolved, host: &str, root: &str) -> BTreeMap<St
         .collect();
     let net = m.env.network.name();
     let bin = format!("{root}/bin/{}", crate::release::node_binary(&r.template));
+    // A namespace's units and Caddy snippet (C-24); without one, the names
+    // of a host with one lane.
+    let spec = e.host_spec(host);
+    let pre = spec.unit_prefix();
+    let caddy = spec.caddy_file();
     let mut out = BTreeMap::new();
     if !primary {
         // Only validators here: their unit, and their public API.
         if !mine.is_empty() {
             out.insert(
-                "systemd/caravel-validator@.service".into(),
+                format!("systemd/{pre}validator@.service"),
                 unit(
                     &format!("Caravel validator %i ({net})"),
                     "",
@@ -341,12 +346,12 @@ fn host_files(m: &Manifest, r: &Resolved, host: &str, root: &str) -> BTreeMap<St
                 );
             }
             c += "}\n";
-            out.insert("caddy/Caddyfile".into(), c);
+            out.insert(caddy, c);
         }
         return out;
     }
     out.insert(
-        "systemd/caravel-sequencer.service".into(),
+        format!("systemd/{pre}sequencer.service"),
         unit(
             &format!("Caravel sequencer ({net})"),
             "",
@@ -357,10 +362,10 @@ fn host_files(m: &Manifest, r: &Resolved, host: &str, root: &str) -> BTreeMap<St
         ),
     );
     out.insert(
-        "systemd/caravel-validator@.service".into(),
+        format!("systemd/{pre}validator@.service"),
         unit(
             &format!("Caravel validator %i ({net})"),
-            " caravel-sequencer.service",
+            &format!(" {pre}sequencer.service"),
             false,
             None,
             &format!("{bin} validator --config {root}/config/validator-%i.toml"),
@@ -368,10 +373,10 @@ fn host_files(m: &Manifest, r: &Resolved, host: &str, root: &str) -> BTreeMap<St
         ),
     );
     out.insert(
-        "systemd/caravel-relayer.service".into(),
+        format!("systemd/{pre}relayer.service"),
         unit(
             &format!("Caravel relayer ({net})"),
-            " caravel-sequencer.service",
+            &format!(" {pre}sequencer.service"),
             true,
             Some(&format!("{root}/relayer")),
             &format!(
@@ -404,7 +409,7 @@ fn host_files(m: &Manifest, r: &Resolved, host: &str, root: &str) -> BTreeMap<St
             c += &format!("\thandle {{\n\t\troot * {root}/web\n\t\ttry_files {{path}} /index.html\n\t\tfile_server\n\t}}\n");
         }
         c += "}\n";
-        out.insert("caddy/Caddyfile".into(), c);
+        out.insert(caddy, c);
     }
     out
 }

@@ -259,9 +259,14 @@ fn glob(pattern: &str, text: &str) -> bool {
 fn nodes_of(path: &str, all: &[String]) -> Vec<String> {
     match path {
         "lane.toml" => all.to_vec(),
-        "systemd/caravel-sequencer.service" => vec!["sequencer".into()],
-        "systemd/caravel-relayer.service" => vec!["relayer".into()],
-        "systemd/caravel-validator@.service" => all
+        // `caravel-[<ns>-]<role>`, with or without a namespace (C-24).
+        p if p.starts_with("systemd/caravel-") && p.ends_with("-sequencer.service") => {
+            vec!["sequencer".into()]
+        }
+        p if p.starts_with("systemd/caravel-") && p.ends_with("-relayer.service") => {
+            vec!["relayer".into()]
+        }
+        p if p.starts_with("systemd/caravel-") && p.ends_with("-validator@.service") => all
             .iter()
             .filter(|n| n.starts_with("validator-"))
             .cloned()
@@ -889,6 +894,12 @@ pub fn diff(d: &Desired, chain: &Chain, host: &Host, opts: &Options) -> Result<P
             (Kind::Host, addr) => {
                 let (on, _) = label(addr);
                 let (want, host) = (want(&on), have(&on));
+                if let Some(by) = &host.taken {
+                    o.problems.push(Problem::HostTaken {
+                        on: on.clone(),
+                        by: by.clone(),
+                    });
+                }
                 if !host.missing.is_empty() {
                     o.problems.push(Problem::HostNotReady {
                         on: on.clone(),
@@ -974,6 +985,15 @@ pub fn diff(d: &Desired, chain: &Chain, host: &Host, opts: &Options) -> Result<P
                     || report.and_then(|r| r.release.as_deref()).is_some_and(|c| {
                         !c.starts_with(want.release.as_str()) && !want.release.starts_with(c)
                     });
+                // Its port held by something that isn't it (C-24).
+                if let Some(&port) = host.listening.get(name) {
+                    if !state.running && report.is_none_or(|r| r.lane_id != d.lane_id) {
+                        o.problems.push(Problem::PortInUse {
+                            node: name.into(),
+                            port,
+                        });
+                    }
+                }
                 if !state.running {
                     o.steps.push(Step::Start { node: name.into() });
                 } else if restart || stale || replace.contains(&i) {
@@ -1267,6 +1287,8 @@ mod tests {
             nodes,
             has_data: r.yes(),
             others: BTreeMap::new(),
+            taken: None,
+            listening: BTreeMap::new(),
         };
         (d, chain, host)
     }

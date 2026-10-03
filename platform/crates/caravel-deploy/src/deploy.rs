@@ -456,7 +456,9 @@ pub fn validator_url(m: &Manifest, i: usize) -> Option<String> {
 pub fn host_provider(m: &Manifest, template: &str, state_root: &Path) -> Result<HostProvider> {
     Ok(match m.env.host.provider {
         Provider::Local => HostProvider::Local(Local::new(m, template, state_root)?),
-        Provider::Ssh => HostProvider::Ssh(crate::ssh::Ssh::new(m, template, state_root)?),
+        Provider::Ssh => {
+            HostProvider::Ssh(Box::new(crate::ssh::Ssh::new(m, template, state_root)?))
+        }
     })
 }
 
@@ -556,7 +558,9 @@ pub async fn prepare(
     }
     let host_provider = match m.env.host.provider {
         Provider::Local => HostProvider::Local(Local::new(&m, &template, state_root)?),
-        Provider::Ssh => HostProvider::Ssh(crate::ssh::Ssh::new(&m, &template, state_root)?),
+        Provider::Ssh => {
+            HostProvider::Ssh(Box::new(crate::ssh::Ssh::new(&m, &template, state_root)?))
+        }
     };
     let mut others: Vec<OtherRun> = m
         .env

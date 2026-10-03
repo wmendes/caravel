@@ -226,6 +226,10 @@ pub struct Host {
     /// What the deployment's other hosts have, by name (C-22; only on the
     /// sequencer's host's `Host`).
     pub others: BTreeMap<String, Host>,
+    /// Another lane holds the host's root or unit names (C-24): which.
+    pub taken: Option<String>,
+    /// Nodes whose port something listens on, by node (C-24).
+    pub listening: BTreeMap<String, u16>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -384,6 +388,16 @@ pub enum Problem {
         release: String,
         host: String,
     },
+    /// Another lane runs at this root or under these unit names (C-24).
+    HostTaken {
+        on: Option<String>,
+        by: String,
+    },
+    /// Something else listens on a node's port (C-24).
+    PortInUse {
+        node: String,
+        port: u16,
+    },
     NodeMismatch {
         node: String,
         field: &'static str,
@@ -499,11 +513,15 @@ pub fn problem_addr(p: &Problem) -> String {
         | Problem::SettlementMissing { .. } => "contract.settlement".into(),
         Problem::TokenMissing { .. } => "token.settlement".into(),
         Problem::SignersReused { .. } => "signers.settlement".into(),
-        Problem::HostNotReady { on: Some(h), .. } | Problem::WrongPlatform { on: Some(h), .. } => {
-            format!("host.{h}")
+        Problem::HostNotReady { on: Some(h), .. }
+        | Problem::WrongPlatform { on: Some(h), .. }
+        | Problem::HostTaken { on: Some(h), .. } => format!("host.{h}"),
+        Problem::HostNotReady { .. }
+        | Problem::WrongPlatform { .. }
+        | Problem::HostTaken { .. } => "host".into(),
+        Problem::NodeMismatch { node, .. } | Problem::PortInUse { node, .. } => {
+            format!("node.{node}")
         }
-        Problem::HostNotReady { .. } | Problem::WrongPlatform { .. } => "host".into(),
-        Problem::NodeMismatch { node, .. } => format!("node.{node}"),
         Problem::AccountMissing { who } | Problem::CannotMint { who, .. } => {
             res_addr("account", who)
         }
@@ -548,9 +566,14 @@ pub(crate) fn c_short(k: &Key) -> String {
 fn nodes_of(path: &str, all: &[String]) -> Vec<String> {
     match path {
         "lane.toml" => all.to_vec(),
-        "systemd/caravel-sequencer.service" => vec!["sequencer".into()],
-        "systemd/caravel-relayer.service" => vec!["relayer".into()],
-        "systemd/caravel-validator@.service" => all
+        // `caravel-[<ns>-]<role>`, with or without a namespace (C-24).
+        p if p.starts_with("systemd/caravel-") && p.ends_with("-sequencer.service") => {
+            vec!["sequencer".into()]
+        }
+        p if p.starts_with("systemd/caravel-") && p.ends_with("-relayer.service") => {
+            vec!["relayer".into()]
+        }
+        p if p.starts_with("systemd/caravel-") && p.ends_with("-validator@.service") => all
             .iter()
             .filter(|n| n.starts_with("validator-"))
             .cloned()
@@ -1076,6 +1099,13 @@ pub fn problem_line(p: &Problem) -> String {
         Problem::WrongPlatform { on, release, host } => format!(
             "! the release's node binary is built for {release}, and {} is {host}: install the CI release (--release-dir) or build on the host's platform",
             on.as_deref().map_or("the host".into(), |h| format!("host {h}"))
+        ),
+        Problem::HostTaken { on, by } => format!(
+            "! {} is taken: {by}. Give this deployment a namespace (or another root)",
+            on.as_deref().map_or("the host".into(), |h| format!("host {h}"))
+        ),
+        Problem::PortInUse { node, port } => format!(
+            "! port {port} of {node} is taken by something else (another lane or program): choose other ports"
         ),
         Problem::NodeMismatch { node, field } => format!(
             "! {node} reports another {field} than its files give"

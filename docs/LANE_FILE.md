@@ -10,6 +10,7 @@ Decisions behind it: DEC-066 to DEC-068 (deployments), DEC-078 to DEC-082 (the l
 - [Finding the file and the deployment](#finding-the-file-and-the-deployment)
 - [A deployment](#a-deployment)
 - [Several hosts](#several-hosts)
+- [Several lanes on one host](#several-lanes-on-one-host)
 - [Declared accounts](#declared-accounts)
 - [Declared tokens](#declared-tokens)
 - [Declared contracts](#declared-contracts)
@@ -91,7 +92,7 @@ provider = "local"                 # or "ssh"
 - `validator_polling = { sequencer_ms, stellar_secs }`.
 - `sequencer = { port, cors_origins, production }`.
 - `relayer = { account, feed_keys, feeds, intervals_ms }`. `feeds` are the template's feed modules; `feed_keys` maps an env var to an identity whose secret a feed reads.
-- `host = { provider, address, transport, project, zone, public_url, root }` (or `hosts`, [below](#several-hosts)):
+- `host = { provider, address, transport, project, zone, public_url, root, private_address, namespace }` (or `hosts`, [below](#several-hosts)):
   - `address` is `user@host` for ssh, or the VM name with `transport = "gcloud-iap"`;
   - `public_url` is where the lane's API is served, and the user commands use it.
 
@@ -157,6 +158,30 @@ private_address = "10.0.0.3"
 - **Addresses:** the sequencer's host keeps the one-host addresses (`release`, `file.<path>`). Another host's resources are `host.<h>.release`, `host.<h>.file.<path>` and `host.<h>.data`.
 - **Moving a node:** change its `host` and apply. The plan starts it on its new host, then stops it where it ran (`node.validator-3@a`), and its key leaves that host. Take a host out of the file only after moving its nodes off, because a host that isn't in the file isn't read.
 - **One host:** `host = { … }` is still one host. Nothing about it changes.
+
+## Several lanes on one host
+
+Give each lane that shares an ssh host a `namespace`:
+
+```toml
+[env.testnet.host]
+provider = "ssh"
+address = "ops@lanes.example"
+public_url = "https://pay.lanes.example"
+namespace = "pay"                  # units caravel-pay-*, root /opt/caravel-pay
+```
+
+- **What it sets apart:**
+  - Its units are `caravel-pay-sequencer`, `caravel-pay-relayer` and `caravel-pay-validator@<n>`.
+  - Its root is `/opt/caravel-pay` unless you give `root`.
+  - Its Caddy site goes in `/etc/caddy/caravel.d/pay.caddy`. The host's `/etc/caddy/Caddyfile` must contain `import /etc/caddy/caravel.d/*.caddy`, or the plan says the host lacks it.
+- **Each lane needs its own ports and its own `public_url`.**
+- **Without a namespace,** a lane has the host to itself: units `caravel-*`, the whole Caddyfile, and `/opt/caravel`.
+- **Checked on every plan:**
+  - If the root holds another lane, or the unit names run another root, the plan says the host is taken (`HostTaken`).
+  - If something else answers on a node's port, the plan says the port is taken (`PortInUse`).
+  - Either one refuses apply.
+- **`local` hosts** need no namespace, because each lane already has its own `.caravel/<lane>/<env>`. They still check ports.
 
 ## Declared accounts
 
