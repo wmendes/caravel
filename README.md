@@ -78,6 +78,12 @@ This brings up a Payments lane on your machine, against a local Stellar network,
 export PATH="$HOME/.caravel/bin:$PATH"
 ```
 
+Once a release is published, the same script can install it prebuilt instead, on x86_64 or arm64 Linux and arm64 macOS. It needs no Rust, and it brings the pinned Stellar CLI if yours isn't 28.1.0. Docker and Node.js 22 are still needed to run a lane. There is no published release yet.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/wmendes/caravel/main/scripts/install.sh | bash
+```
+
 **Run a lane and use it:**
 
 <!-- quickstart: scripts/check-quickstart.sh runs this block as written -->

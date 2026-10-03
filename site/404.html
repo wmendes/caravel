@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Not found · Caravel</title>
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#081E22">
+<link rel="icon" href="/favicon.ico" sizes="32x32">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<style>
+@font-face { font-family: "Schibsted Grotesk"; font-style: normal; font-weight: 400 700; font-display: swap; src: url("/fonts/schibsted-grotesk-latin.woff2") format("woff2"); }
+:root { --ground: #081E22; --ink: #F3EEE4; --muted: #A8BAB8; --lane: #FF8C7C; --on-lane: #081E22; --harbor: #26958F; color-scheme: dark; }
+@media (prefers-color-scheme: light) { :root { --ground: #F3EEE4; --ink: #0B2226; --muted: #4F5E5F; --lane: #B23328; --on-lane: #FFFFFF; --harbor: #0B4A50; color-scheme: light; } }
+* { box-sizing: border-box; margin: 0; }
+body { min-height: 100vh; display: grid; place-content: center; gap: 20px; padding: 24px; background: var(--ground); color: var(--ink); font-family: "Schibsted Grotesk", ui-sans-serif, system-ui, sans-serif; }
+.mark { display: grid; gap: 6px; width: 120px; }
+.mark i { display: block; height: 14px; border-radius: 3px; background: var(--lane); }
+.mark i:nth-child(1) { width: 25%; } .mark i:nth-child(2) { width: 50%; opacity: .35; } .mark i:nth-child(3) { width: 75%; } .mark i:nth-child(4) { width: 100%; opacity: .35; }
+h1 { font-size: clamp(2rem, 6vw, 3.5rem); line-height: 1.05; letter-spacing: -.03em; max-width: 16ch; }
+p { color: var(--muted); font-size: 1.125rem; max-width: 40ch; }
+a { justify-self: start; background: var(--lane); color: var(--on-lane); font-weight: 700; text-decoration: none; padding: 12px 20px; border-radius: 10px; }
+a:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
+</style>
+</head>
+<body>
+<div class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+<h1>This block never made it into a checkpoint.</h1>
+<p>The page you asked for isn't here. The lane is still running.</p>
+<a href="/">Back to Caravel</a>
+</body>
+</html>
