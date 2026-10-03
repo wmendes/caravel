@@ -1,6 +1,7 @@
 import { Component, type ReactNode } from "react";
 
 import { Layout } from "./components/Layout";
+import { Toasts } from "./components/ui";
 import { About } from "./pages/About";
 import { Escape } from "./pages/Escape";
 import { Explorer } from "./pages/Explorer";
@@ -37,10 +38,19 @@ class PageBoundary extends Component<{ children: ReactNode }, { error: string | 
   render() {
     if (this.state.error) {
       return (
-        <div className="prose">
-          <h1>This page failed to load</h1>
-          <p className="error">{this.state.error}</p>
-          <p className="muted">Reload the page. If it keeps happening, the lane API may be out of date or unreachable.</p>
+        <div className="page">
+          <div className="section">
+            <div className="section-body">
+              <h2>This page failed to load</h2>
+              <p className="msg err">{this.state.error}</p>
+              <p className="hint">Reload the page. If it keeps happening, the lane API may be out of date or unreachable.</p>
+              <div>
+                <button className="btn" onClick={() => window.location.reload()}>
+                  Reload
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       );
     }
@@ -52,7 +62,9 @@ export function App() {
   return (
     <AppProvider>
       <Router>
-        <Routes />
+        <Toasts>
+          <Routes />
+        </Toasts>
       </Router>
     </AppProvider>
   );
