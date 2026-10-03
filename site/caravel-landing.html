@@ -462,6 +462,7 @@ footer p { font-size: .875rem; color: var(--muted); }
       </svg>
     </a>
     <nav class="nav" aria-label="Sections">
+      <a href="#who">Who it's for</a>
       <a href="#file">Lane file</a>
       <a href="#plan">Plan</a>
       <a href="#how">How it works</a>
@@ -518,6 +519,21 @@ footer p { font-size: .875rem; color: var(--muted); }
           <button class="replay" id="replay" type="button" hidden>Replay</button>
         </figcaption>
       </figure>
+    </div>
+  </section>
+
+  <section class="band" id="who" aria-labelledby="who-h">
+    <div class="wrap">
+      <div class="head">
+        <p class="eyebrow">Who it's for</p>
+        <h2 id="who-h">For apps that can't wait for the next ledger.</h2>
+        <p class="lede">Stellar closes a ledger about every 5 seconds, and every app plays by the same rules. That's fine for most apps. Some need many fast actions, or rules of their own, and still want the money on Stellar. A lane gives them that: you pick the block time, the fees, who can join and who validates, and deposits and withdrawals stay on Stellar.</p>
+      </div>
+      <div class="lanes">
+        <article class="lanecard first"><span class="tag">Trading</span><h3>An order book</h3><p>A team building perps on Stellar found 5 second blocks too slow for an order book. Caravel Perps is that app on a lane: 1 s blocks on testnet, trades confirmed in well under a second, USDC settled on Stellar.</p></article>
+        <article class="lanecard"><span class="tag">Payments</span><h3>Paying at the till</h3><p>Another team wanted to fund a card purchase just in time, from a wallet the user holds. A card network won't wait for the next ledger. On a lane with short blocks the payment is confirmed in under a second, and it settles on Stellar at the next checkpoint. Nobody has built this one on Caravel yet.</p></article>
+        <article class="lanecard"><span class="tag">Your rules</span><h3>One line each</h3><p>Block time, fees, an allowlist, the token you settle in, your validators: each is a line in the lane file. If Stellar's ledger time and rules already fit your app, build on Stellar directly.</p></article>
+      </div>
     </div>
   </section>
 
@@ -653,9 +669,10 @@ address = <span class="s">"caravel-1"</span></pre>
       <ol class="road" aria-label="Roadmap">
         <li><span class="when lane-t">Now</span><b>Lanes from one file</b><span class="d">plan, apply, status, destroy</span></li>
         <li><span class="when lane-t">Now</span><b>Signed checkpoints</b><span class="d">threshold signatures, exit path live</span></li>
-        <li><span class="when harbor-t">Next</span><b>Validity proofs</b><span class="d">a ZK proof replaces the signature check</span></li>
-        <li><span class="when harbor-t">Then</span><b>Bonded validators</b><span class="d">anyone can validate, with a bond</span></li>
+        <li><span class="when harbor-t">Planned</span><b>Validity proofs</b><span class="d">a ZK proof replaces the signature check</span></li>
+        <li><span class="when harbor-t">Planned</span><b>Bonded validators</b><span class="d">anyone can validate, with a bond</span></li>
       </ol>
+      <p class="srcs">Validity proofs and bonded validators are plans. Neither is built yet, and today the validators are trusted between checkpoints.</p>
     </div>
   </section>
 
