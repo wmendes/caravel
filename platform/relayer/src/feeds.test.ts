@@ -6,7 +6,8 @@ import { describe, expect, it } from "vitest";
 
 import { loadConfig } from "./config.js";
 import { FakeSequencer } from "./fakes.js";
-import { loadFeedModule, type FeedHost } from "./feeds.js";
+import { loadFeedModule, withDeadline, type FeedHost } from "./feeds.js";
+import { RPC_TIMEOUT_MS, RpcContract } from "./stellar.js";
 
 const dir = mkdtempSync(join(tmpdir(), "caravel-feeds-"));
 
@@ -23,6 +24,13 @@ writeFileSync(
    }`,
 );
 writeFileSync(join(dir, "not-a-feed.mjs"), "export const x = 1;");
+// A module whose tick never settles, as an RPC call without a timeout does.
+writeFileSync(
+  join(dir, "stuck.mjs"),
+  `export async function createFeed() {
+     return { name: "stuck", describe: () => ({}), tick: () => new Promise(() => {}) };
+   }`,
+);
 
 const host = (seq: FakeSequencer): FeedHost => ({
   laneId: new Uint8Array(32),
@@ -65,5 +73,38 @@ describe("feed modules (DEC-053)", () => {
     const cfg = await loadConfig(ok);
     expect(cfg.dir).toBe(dir);
     expect(cfg.file.feeds?.[0]?.module).toBe("./echo.mjs");
+  });
+
+  it("abandons a tick that never settles, so the loop goes on", async () => {
+    const seq = new FakeSequencer();
+    const feed = await (await loadFeedModule({ module: "./stuck.mjs" }, dir)).createFeed(host(seq), {});
+    await expect(withDeadline(feed.tick(), 50, "stuck tick")).rejects.toThrow("stuck tick: no answer in 50 ms");
+    await expect(withDeadline(Promise.resolve(7), 50, "quick")).resolves.toBe(7);
+    await expect(withDeadline(Promise.reject(new Error("boom")), 50, "failing")).rejects.toThrow("boom");
+  });
+
+  it("refuses a feed deadline that is not a positive integer", async () => {
+    process.env.CARAVEL_INTERNAL_TOKEN = "t".repeat(32);
+    const bad = join(dir, "bad-deadline.json");
+    writeFileSync(
+      bad,
+      JSON.stringify({
+        rpcUrl: "http://127.0.0.1:8000/rpc",
+        networkPassphrase: "Standalone Network ; February 2017",
+        settlementContract: "CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR",
+        sequencerUrl: "http://127.0.0.1:8080",
+        metricsFile: "m.jsonl",
+        loops: { inbox: true, checkpoints: false },
+        feeds: [{ module: "./echo.mjs", deadlineMs: 0 }],
+      }),
+    );
+    await expect(loadConfig(bad)).rejects.toThrow(/deadlineMs/);
+  });
+});
+
+describe("Stellar RPC client", () => {
+  it("bounds every call with a timeout (stellar-sdk 17.2.0 waits forever by default)", () => {
+    const c = new RpcContract("http://127.0.0.1:8000/rpc", "CADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP5KR", "Standalone Network ; February 2017");
+    expect(c.server.httpClient.defaults.timeout).toBe(RPC_TIMEOUT_MS);
   });
 });

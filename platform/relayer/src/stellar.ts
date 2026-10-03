@@ -10,6 +10,8 @@ import type { PendingCheckpoint } from "./sequencer.js";
 
 /** A source account for read-only simulations; it need not exist. */
 const NULL_ACCOUNT = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+/** Each Stellar RPC call gives up after this long; the loop retries. */
+export const RPC_TIMEOUT_MS = 30_000;
 
 export interface InboxRecord {
   kind: number;
@@ -87,6 +89,9 @@ export class RpcContract {
     readonly networkPassphrase: string,
   ) {
     this.server = new rpc.Server(rpcUrl, { allowHttp: rpcUrl.startsWith("http://") });
+    // stellar-sdk 17.2.0 ignores the `timeout` option of rpc.Server and waits
+    // forever by default; its HTTP client's defaults are applied to every call.
+    this.server.httpClient.defaults.timeout = RPC_TIMEOUT_MS;
     this.contract = new Contract(contractId);
   }
 

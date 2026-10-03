@@ -52,7 +52,10 @@ export async function loadConfig(path: string): Promise<RelayerConfig> {
   if ("oracle" in m0.loops || m0.oracle !== undefined) {
     throw new Error("loops.oracle and oracle moved to a feed module: feeds: [{module: \"<perps relayer-feeds>/dist/index.js\", options: {...}}] (DEC-053)");
   }
-  for (const f of file.feeds ?? []) if (typeof f.module !== "string") throw new Error("every feeds[] entry needs a module");
+  for (const f of file.feeds ?? []) {
+    if (typeof f.module !== "string") throw new Error("every feeds[] entry needs a module");
+    if (f.deadlineMs !== undefined && !(Number.isInteger(f.deadlineMs) && f.deadlineMs > 0)) throw new Error("feeds[].deadlineMs must be a positive integer");
+  }
   return {
     file,
     dir: dirname(path),

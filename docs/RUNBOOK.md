@@ -328,6 +328,7 @@ If the relayer runs dry, checkpoints stop and the 6-hour escape timeout starts c
 | Symptom | Where to look | Action |
 |---|---|---|
 | `checkpoints.accepted` stops growing | `journalctl -u caravel-relayer` | XLM balance (§8), RPC errors. The relayer reconciles with Stellar on restart. |
+| Oracle prices stop updating (`oracle_time_ms` on `/v1/markets` grows old) while blocks go on | `journalctl -u caravel-relayer \| grep oracle`; `sudo tcpdump -i lo -A "tcp dst port 8080" \| grep /internal/oracle` shows whether the relayer still posts | `oracle tick: no answer` warnings mean a source hangs (DEC-102). Before DEC-102 a hung tick stopped the feed silently: `sudo systemctl restart caravel-relayer`. |
 | `checkpoints.signed` stops growing | sequencer log (`validator refused to sign`), each validator's `/v1/status` | `NOT_CAUGHT_UP` resolves itself; `SUSPICIOUS_BLOCK` needs §2.5; `HALTED` or `HEADER_MISMATCH` means a validator disagrees with the sequencer: stop and investigate before anything else. |
 | `halted` on the sequencer | sequencer log | A block failed on the Wasm path. Keep the store; `check-store` shows where. |
 | The VM is stopped | GCP console, billing | The billing cap fired (§3.3). |

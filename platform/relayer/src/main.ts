@@ -9,7 +9,7 @@ import { syncInbox, InboxMismatch } from "./inbox.js";
 import { submitNext, CheckpointDivergence } from "./checkpoints.js";
 import { fromHex } from "./codec.js";
 import { loadConfig } from "./config.js";
-import { loadFeedModule, type FeedHost } from "./feeds.js";
+import { FEED_DEADLINE_MS, loadFeedModule, withDeadline, type FeedHost } from "./feeds.js";
 import { JsonlMetrics } from "./metrics.js";
 import { HttpSequencer } from "./sequencer.js";
 import { RpcSettlement } from "./stellar.js";
@@ -108,7 +108,7 @@ async function main(): Promise<void> {
           feed.name,
           spec.intervalMs ?? 2_000,
           async () => {
-            const r = await feed.tick();
+            const r = await withDeadline(feed.tick(), spec.deadlineMs ?? FEED_DEADLINE_MS, `${feed.name} tick`);
             for (const e of r.errors) log("warn", `${feed.name}: ${e}`);
           },
           () => false,
