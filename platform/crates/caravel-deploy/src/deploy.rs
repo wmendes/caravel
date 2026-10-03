@@ -224,6 +224,14 @@ pub fn validator_url(m: &Manifest, i: usize) -> Option<String> {
     }
 }
 
+/// The host a deployment runs on, without reading it.
+pub fn host_provider(m: &Manifest, template: &str, state_root: &Path) -> Result<HostProvider> {
+    Ok(match m.env.host.provider {
+        Provider::Local => HostProvider::Local(Local::new(m, template, state_root)?),
+        Provider::Ssh => HostProvider::Ssh(crate::ssh::Ssh::new(m, template, state_root)?),
+    })
+}
+
 /// Resolves the deployment and reads what Stellar and the host have.
 /// `for_apply` starts the local network if it isn't up; `plan` never does.
 /// A local host keeps its processes under `<state_root>/.caravel/`.

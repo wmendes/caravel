@@ -454,6 +454,24 @@ impl Ssh {
         serde_json::from_str(&out).ok()
     }
 
+    /// `journalctl` for a node's unit: the last `lines`, then, with `follow`,
+    /// what it writes, until interrupted.
+    pub fn logs(&self, node: &str, lines: usize, follow: bool) -> Result<()> {
+        let status = self
+            .remote(&format!(
+                "sudo journalctl -u {} -n {lines} --no-pager{}",
+                q(&unit_of(node)),
+                if follow { " -f" } else { "" }
+            ))
+            .stdin(Stdio::null())
+            .status()
+            .context("running ssh")?;
+        if !status.success() {
+            bail!("journalctl on the host failed ({status})");
+        }
+        Ok(())
+    }
+
     pub fn log_tail(&self, node: &str) -> String {
         self.exec(
             &format!("sudo journalctl -u {} -n 8 --no-pager", q(&unit_of(node))),

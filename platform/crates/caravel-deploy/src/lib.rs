@@ -23,6 +23,7 @@ pub mod chain;
 pub mod cli;
 pub mod deploy;
 pub mod host;
+pub mod lifecycle;
 pub mod local;
 pub mod manifest;
 pub mod ops;

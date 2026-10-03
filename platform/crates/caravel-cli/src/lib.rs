@@ -35,6 +35,8 @@ pub mod exit {
     /// `plan --exit-code`, `status --exit-code`: the deployment differs from
     /// the lane file.
     pub const CHANGES: u8 = 3;
+    /// `wait`: the time ran out.
+    pub const TIMEOUT: u8 = 4;
 }
 
 #[derive(Parser, Debug)]
@@ -158,6 +160,62 @@ pub enum Cmd {
         #[arg(long)]
         genesis: bool,
     },
+    /// Stop nodes (all of them when none is named) and leave the lane as it
+    /// is: no checkpoint is posted while the sequencer is down, and after the
+    /// contract's escape timeout anyone may freeze the lane.
+    Stop {
+        /// sequencer, relayer, validator-<n> (or <n>).
+        nodes: Vec<String>,
+        /// Don't ask, even off a local network.
+        #[arg(short = 'y', long)]
+        yes: bool,
+    },
+    /// Start nodes that aren't running (all when none is named). Refuses if
+    /// the deployment differs from the lane file in anything else: that's
+    /// apply's.
+    Start { nodes: Vec<String> },
+    /// Stop and start nodes (all when none is named).
+    Restart { nodes: Vec<String> },
+    /// A node's log: the last lines, then with --follow what it writes.
+    Logs {
+        /// sequencer (the default), relayer, validator-<n> (or <n>).
+        node: Option<String>,
+        /// Keep printing what it writes (-f is the lane file, as everywhere).
+        #[arg(long)]
+        follow: bool,
+        #[arg(short = 'n', long, default_value_t = 50)]
+        lines: usize,
+    },
+    /// Replay the lane from Stellar alone (spec §16), with the deployment's
+    /// contract, network and engine; optionally an account's proofs.
+    Replay {
+        /// An identity or G… account: print its escape proof.
+        #[arg(long, value_name = "WHO")]
+        prove_escape: Option<String>,
+        /// An identity or G… account: print its unclaimed withdrawal proofs.
+        #[arg(long, value_name = "WHO")]
+        prove_withdrawals: Option<String>,
+    },
+    /// Wait until something holds (exit 4 if the time runs out).
+    Wait {
+        #[command(subcommand)]
+        what: WaitCmd,
+        /// Seconds.
+        #[arg(long, default_value_t = 120, global = true)]
+        timeout: u64,
+        /// The lane's API, if the host has no public_url.
+        #[arg(long, global = true)]
+        api_url: Option<String>,
+    },
+    /// GET a path of the lane's API (or a validator's) and print the JSON.
+    Api {
+        /// e.g. /v1/status, /v1/accounts/G…
+        path: String,
+        #[arg(long)]
+        validator: Option<String>,
+        #[arg(long)]
+        api_url: Option<String>,
+    },
     /// The lane file's deployments.
     Env {
         #[command(subcommand)]
@@ -205,6 +263,31 @@ pub enum Cmd {
     /// Check that this machine can run the deployment: the Stellar CLI,
     /// Node.js, the template, the release and the identities.
     Doctor,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum WaitCmd {
+    /// A checkpoint accepted on Stellar: the next one, or --seq.
+    Checkpoint {
+        #[arg(long)]
+        seq: Option<u64>,
+        /// Signed by the validators is enough.
+        #[arg(long)]
+        signed: bool,
+        /// Under this signer epoch.
+        #[arg(long)]
+        epoch: Option<u64>,
+    },
+    /// A value in the lane's API: `caravel wait api /v1/markets /0/oracle_price=65000000`.
+    Api {
+        path: String,
+        /// A JSON pointer, and optionally `=value`.
+        until: String,
+    },
+    /// Every node running and answering.
+    Healthy,
+    /// The settlement contract frozen.
+    Frozen,
 }
 
 #[derive(Subcommand, Debug)]
@@ -553,6 +636,215 @@ fn dispatch(cli: Cli) -> Result<u8> {
             })
         }
         Cmd::Validate { lane } => validate(g, lane.as_deref()),
+        Cmd::Stop { nodes, yes } => {
+            let ctx = context(g, None)?;
+            runtime()?.block_on(async {
+                let p = ctx.prepare(false).await?;
+                let names = p.nodes(&nodes)?;
+                let stops_sequencer = names.iter().any(|n| n == "sequencer");
+                if stops_sequencer {
+                    let at = p.freeze_possible_at();
+                    eprintln!(
+                        "Stopping the sequencer stops checkpoints. {}",
+                        match at {
+                            Some(t) => format!("Unless it starts again, anyone may freeze the lane from {t} (in {} s).", t.saturating_sub(now())),
+                            None => "Anyone may freeze the lane after the contract's escape timeout without one.".into(),
+                        }
+                    );
+                    if p.m.env.network != Network::Local && !yes {
+                        if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+                            bail!("stopping a testnet sequencer: pass --yes");
+                        }
+                        eprint!("Stop {}? [y/N] ", names.join(", "));
+                        let mut line = String::new();
+                        std::io::stdin().read_line(&mut line)?;
+                        if !matches!(line.trim(), "y" | "Y" | "yes") {
+                            println!("Nothing stopped.");
+                            return Ok(exit::OK);
+                        }
+                    }
+                }
+                p.stop_nodes_named(&names)?;
+                if g.json {
+                    print_json(&json!({ "stopped": names }))?;
+                } else {
+                    println!("Stopped {}. `caravel start` brings them back.", names.join(", "));
+                }
+                Ok(exit::OK)
+            })
+        }
+        Cmd::Start { nodes } => {
+            let ctx = context(g, None)?;
+            runtime()?.block_on(async {
+                let p = ctx.prepare(true).await?;
+                let names = if nodes.is_empty() {
+                    Vec::new()
+                } else {
+                    p.nodes(&nodes)?
+                };
+                let plan = p.start_plan(&names)?;
+                let started: Vec<String> = plan
+                    .steps
+                    .iter()
+                    .map(caravel_deploy::plan::step_line)
+                    .collect();
+                if plan.steps.is_empty() {
+                    if g.json {
+                        print_json(&json!({ "started": [] }))?;
+                    } else {
+                        println!("Nothing to start: the nodes are running.");
+                    }
+                    return Ok(exit::OK);
+                }
+                p.apply(&plan).await?;
+                if g.json {
+                    print_json(&json!({ "started": started }))?;
+                } else {
+                    println!("Started. The lane matches the lane file.");
+                }
+                Ok(exit::OK)
+            })
+        }
+        Cmd::Restart { nodes } => {
+            let ctx = context(g, None)?;
+            runtime()?.block_on(async {
+                let p = ctx.prepare(true).await?;
+                let mut names = p.nodes(&nodes)?;
+                // Start order: validators, the sequencer, the relayer.
+                names.reverse();
+                let mut plan = p.plan();
+                if !plan.problems.is_empty() {
+                    bail!("the plan has problems: run `caravel plan`");
+                }
+                plan.steps = names
+                    .iter()
+                    .map(|n| caravel_deploy::plan::Step::Restart { node: n.clone() })
+                    .collect();
+                p.apply(&plan).await?;
+                if g.json {
+                    print_json(&json!({ "restarted": names }))?;
+                } else {
+                    println!("Restarted {}.", names.join(", "));
+                }
+                Ok(exit::OK)
+            })
+        }
+        Cmd::Logs {
+            node,
+            follow,
+            lines,
+        } => {
+            let ctx = context(g, None)?;
+            let m = ctx.manifest()?;
+            let mut all = vec!["sequencer".to_string(), "relayer".to_string()];
+            all.extend(
+                m.env
+                    .validators
+                    .iter()
+                    .map(|v| caravel_deploy::render::validator_node(&v.name)),
+            );
+            let n =
+                caravel_deploy::lifecycle::node_name(node.as_deref().unwrap_or("sequencer"), &all)?;
+            let host =
+                caravel_deploy::deploy::host_provider(&m, &ctx.template_name()?, &ctx.state_root)?;
+            host.logs(&n, lines, follow)?;
+            Ok(exit::OK)
+        }
+        Cmd::Replay {
+            prove_escape,
+            prove_withdrawals,
+        } => replay(g, prove_escape.as_deref(), prove_withdrawals.as_deref()),
+        Cmd::Wait {
+            what,
+            timeout,
+            api_url,
+        } => {
+            use caravel_deploy::lifecycle::Wait;
+            let w = match what {
+                WaitCmd::Checkpoint { seq, signed, epoch } => {
+                    Wait::Checkpoint { seq, signed, epoch }
+                }
+                WaitCmd::Api { path, until } => {
+                    let (pointer, value) = match until.split_once('=') {
+                        Some((p, v)) => (p.to_string(), Some(v.to_string())),
+                        None => (until.clone(), None),
+                    };
+                    Wait::Api {
+                        path,
+                        pointer,
+                        value,
+                    }
+                }
+                WaitCmd::Healthy => Wait::Healthy,
+                WaitCmd::Frozen => Wait::Frozen,
+            };
+            let ctx = context(g, None)?;
+            runtime()?.block_on(async {
+                let p = ctx.prepare(false).await?;
+                let api = match api_url {
+                    Some(u) => u,
+                    None => p.api_base(None)?,
+                };
+                let start = std::time::Instant::now();
+                let ok = p
+                    .wait(
+                        &w,
+                        std::time::Duration::from_secs(timeout),
+                        std::time::Duration::from_secs(1),
+                        &api,
+                    )
+                    .await?;
+                let secs = start.elapsed().as_secs();
+                if g.json {
+                    print_json(&json!({ "ok": ok, "seconds": secs }))?;
+                } else if ok {
+                    eprintln!("done in {secs} s");
+                } else {
+                    eprintln!("still waiting after {timeout} s");
+                }
+                Ok(if ok { exit::OK } else { exit::TIMEOUT })
+            })
+        }
+        Cmd::Api {
+            path,
+            validator,
+            api_url,
+        } => {
+            let ctx = context(g, None)?;
+            runtime()?.block_on(async {
+                let base = match api_url {
+                    Some(u) => u,
+                    None => {
+                        let m = ctx.manifest()?;
+                        match validator.as_deref() {
+                            None => caravel_deploy::deploy::api_url(&m).ok_or_else(|| {
+                                anyhow!("the host has no public_url: pass --api-url")
+                            })?,
+                            Some(v) => {
+                                let i = m
+                                    .env
+                                    .validators
+                                    .iter()
+                                    .position(|x| {
+                                        x.name == v || format!("validator-{}", x.name) == v
+                                    })
+                                    .ok_or_else(|| anyhow!("no validator {v:?}"))?;
+                                caravel_deploy::deploy::validator_url(&m, i).ok_or_else(|| {
+                                    anyhow!("the host has no public_url: pass --api-url")
+                                })?
+                            }
+                        }
+                    }
+                };
+                let path = if path.starts_with('/') {
+                    path
+                } else {
+                    format!("/{path}")
+                };
+                print_json(&caravel_deploy::lifecycle::get(&base, &path).await?)?;
+                Ok(exit::OK)
+            })
+        }
         Cmd::Render { lane, genesis } => {
             let ctx = context(g, lane.as_deref())?;
             let m = ctx.manifest()?;
@@ -1186,6 +1478,71 @@ fn release_check(ctx: &Ctx, t: Option<&Plugin>) -> Result<String> {
         );
     }
     Ok(format!("{} (engine {}…)", r.commit, &hex(&want)[..16]))
+}
+
+fn now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// An identity or a G… account, as a G… account.
+fn account_of(who: &str) -> Result<String> {
+    if who.len() == 56 && who.starts_with('G') {
+        return Ok(who.to_string());
+    }
+    Ok(caravel_runtime::views::g_address(&Stellar::public_key(
+        who,
+    )?))
+}
+
+/// `replay`: the template's replay with the deployment's contract, network,
+/// genesis and engine filled in.
+fn replay(g: &Global, escape: Option<&str>, withdrawals: Option<&str>) -> Result<u8> {
+    let ctx = context(g, None)?;
+    let m = ctx.manifest()?;
+    let keys = Keys::from_keystore(&m)?;
+    let a = addresses(&m, &keys)?;
+    let template = ctx.template()?;
+    let release = caravel_deploy::release::Release::locate(
+        ctx.release.release_dir.as_deref(),
+        &template.info.template,
+    )?;
+    let engine = release.wasm_path(&template.info.engine_file);
+    // The genesis document the nodes hash, next to the deployment's state.
+    let dir = ctx
+        .state_root
+        .join(".caravel")
+        .join(&m.lane.lane.name)
+        .join(&m.env_name);
+    std::fs::create_dir_all(&dir)?;
+    let genesis = dir.join("genesis.toml");
+    std::fs::write(&genesis, toml::to_string(&m.lane.raw)?)?;
+    let mut cmd = std::process::Command::new(&template.path);
+    cmd.arg("replay")
+        .args(["--rpc", m.rpc_url()])
+        .args(["--network-passphrase", m.env.network.passphrase()])
+        .args(["--settlement", &c_addr(&a.settlement)])
+        .arg("--genesis-config")
+        .arg(&genesis)
+        .arg("--engine-wasm")
+        .arg(&engine);
+    if let Some(w) = escape {
+        cmd.args(["--prove-escape", &account_of(w)?]);
+    }
+    if let Some(w) = withdrawals {
+        cmd.args(["--prove-withdrawals", &account_of(w)?]);
+    }
+    eprintln!("{}", ctx.describe());
+    let status = cmd
+        .status()
+        .with_context(|| format!("running {}", template.path.display()))?;
+    Ok(if status.success() {
+        exit::OK
+    } else {
+        exit::ERROR
+    })
 }
 
 #[cfg(test)]
