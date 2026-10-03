@@ -44,7 +44,26 @@ export interface FeedSpec {
   /** The module file, relative to the config file or absolute. */
   module: string;
   intervalMs?: number;
+  /** A tick that takes longer is abandoned and reported, and the loop goes on (default 30 s). */
+  deadlineMs?: number;
   options?: unknown;
+}
+
+export const FEED_DEADLINE_MS = 30_000;
+
+/**
+ * `p`, or a rejection once `ms` pass. A feed tick that never settles would
+ * otherwise stop its loop for good without a word: on 2026-10-03 the testnet
+ * oracle stopped for 19 hours behind an RPC call without a timeout. The
+ * abandoned tick is not cancelled; feed updates carry their own publish
+ * time, so a late one is harmless.
+ */
+export function withDeadline<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what}: no answer in ${ms} ms`)), ms);
+  });
+  return Promise.race([p, late]).finally(() => clearTimeout(timer));
 }
 
 /** Loads a feed module; `baseDir` is the config file's directory. */
