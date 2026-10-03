@@ -216,6 +216,30 @@ pub enum Cmd {
         #[arg(long)]
         api_url: Option<String>,
     },
+    /// A user's Stellar account for the lane: an identity on the network with
+    /// a trustline to the settlement token, and some of it.
+    Account {
+        #[command(subcommand)]
+        cmd: AccountCmd,
+    },
+    /// An account's settlement token on Stellar, and its lane account.
+    Balance {
+        /// An identity or a G… account.
+        who: String,
+    },
+    /// Deposit into the lane; returns once the lane has credited it.
+    Deposit {
+        /// The identity that pays (it signs).
+        who: String,
+        /// In token units, e.g. 50 or 12.5.
+        amount: String,
+        /// Return once the deposit is on Stellar, before the lane credits it.
+        #[arg(long)]
+        no_wait: bool,
+        /// Seconds to wait for the credit.
+        #[arg(long, default_value_t = 120)]
+        timeout: u64,
+    },
     /// The lane file's deployments.
     Env {
         #[command(subcommand)]
@@ -288,6 +312,28 @@ pub enum WaitCmd {
     Healthy,
     /// The settlement contract frozen.
     Frozen,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum AccountCmd {
+    /// Create an identity (if the keystore lacks it) and fund it.
+    Create {
+        name: String,
+        /// This much of the settlement token too, in token units.
+        #[arg(long, alias = "fund")]
+        amount: Option<String>,
+        /// At most this much XLM to buy it with (Circle's testnet USDC).
+        #[arg(long, default_value = "9000")]
+        max_xlm: String,
+    },
+    /// Fund an existing identity: XLM by friendbot, a trustline, and tokens.
+    Fund {
+        name: String,
+        #[arg(long)]
+        amount: Option<String>,
+        #[arg(long, default_value = "9000")]
+        max_xlm: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -749,6 +795,110 @@ fn dispatch(cli: Cli) -> Result<u8> {
                 caravel_deploy::deploy::host_provider(&m, &ctx.template_name()?, &ctx.state_root)?;
             host.logs(&n, lines, follow)?;
             Ok(exit::OK)
+        }
+        Cmd::Account { cmd } => {
+            let (name, amount, max_xlm, create) = match cmd {
+                AccountCmd::Create {
+                    name,
+                    amount,
+                    max_xlm,
+                } => (name, amount, max_xlm, true),
+                AccountCmd::Fund {
+                    name,
+                    amount,
+                    max_xlm,
+                } => (name, amount, max_xlm, false),
+            };
+            let ctx = context(g, None)?;
+            let flows = caravel_deploy::flows::Flows::new(ctx.manifest()?)?;
+            let created = create && !Stellar::has_identity(&name);
+            if created {
+                Stellar::generate_identity(&name)?;
+            } else if !Stellar::has_identity(&name) {
+                bail!("no identity {name:?}: `caravel account create {name}`");
+            }
+            let d = flows.decimals()?;
+            let amount = amount
+                .map(|a| caravel_deploy::flows::parse_units(&a, d))
+                .transpose()?;
+            let max_xlm = caravel_deploy::flows::parse_units(&max_xlm, 7)?;
+            runtime()?.block_on(async {
+                let mut r = flows.fund(&name, amount, max_xlm).await?;
+                r["created"] = json!(created);
+                if g.json {
+                    print_json(&r)?;
+                } else {
+                    println!(
+                        "{name} ({}){}",
+                        r["account"].as_str().unwrap_or_default(),
+                        if created { ", a new identity" } else { "" }
+                    );
+                    for step in r["did"].as_array().into_iter().flatten() {
+                        println!("  {}", step.as_str().unwrap_or_default());
+                    }
+                    if let Some(t) = r["token"].as_str() {
+                        println!("  holds {t} of the settlement token");
+                    }
+                }
+                Ok(exit::OK)
+            })
+        }
+        Cmd::Balance { who } => {
+            let ctx = context(g, None)?;
+            let flows = caravel_deploy::flows::Flows::new(ctx.manifest()?)?;
+            let key = Stellar::public_key(&who).or_else(|_| {
+                stellar_strkey(&who)
+                    .ok_or_else(|| anyhow!("{who:?} is neither an identity nor a G… account"))
+            })?;
+            runtime()?.block_on(async {
+                let b = flows.balance(&key).await?;
+                if g.json {
+                    print_json(&b)?;
+                } else {
+                    println!("{who} ({})", b["account"].as_str().unwrap_or_default());
+                    println!(
+                        "  on Stellar  {}",
+                        b["stellar"].as_str().unwrap_or("(no trustline)")
+                    );
+                    match &b["lane"] {
+                        Value::Null => {
+                            println!("  on the lane (no lane account yet: deposit first)")
+                        }
+                        lane => println!("  on the lane {lane}"),
+                    }
+                }
+                Ok(exit::OK)
+            })
+        }
+        Cmd::Deposit {
+            who,
+            amount,
+            no_wait,
+            timeout,
+        } => {
+            let ctx = context(g, None)?;
+            let flows = caravel_deploy::flows::Flows::new(ctx.manifest()?)?;
+            let amount = caravel_deploy::flows::parse_units(&amount, flows.decimals()?)?;
+            runtime()?.block_on(async {
+                let wait = (!no_wait).then(|| std::time::Duration::from_secs(timeout));
+                let r = flows.deposit(&who, amount, wait).await?;
+                if g.json {
+                    print_json(&r)?;
+                } else if r["credited"] == true {
+                    println!(
+                        "Deposited {} for {who}; the lane credited it (inbox message {}).",
+                        r["amount"].as_str().unwrap_or_default(),
+                        r["inbox_index"]
+                    );
+                } else {
+                    println!(
+                        "Deposited {} for {who} (inbox message {}); the lane credits it at its next block.",
+                        r["amount"].as_str().unwrap_or_default(),
+                        r["inbox_index"]
+                    );
+                }
+                Ok(exit::OK)
+            })
         }
         Cmd::Replay {
             prove_escape,
@@ -1543,6 +1693,11 @@ fn replay(g: &Global, escape: Option<&str>, withdrawals: Option<&str>) -> Result
     } else {
         exit::ERROR
     })
+}
+
+/// A G… account's key.
+fn stellar_strkey(g: &str) -> Option<[u8; 32]> {
+    caravel_node::lane_toml::parse_account(g).ok()
 }
 
 #[cfg(test)]

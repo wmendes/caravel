@@ -29,6 +29,11 @@ pub fn testnet_usdc() -> &'static str {
     get("testnet.usdc_sac")
 }
 
+/// The issuer of Circle's testnet USDC (`USDC:<issuer>`).
+pub fn testnet_usdc_issuer() -> &'static str {
+    get("testnet.usdc_issuer")
+}
+
 /// The settlement build new lanes deploy (DEC-033, DEC-063).
 pub fn settlement_wasm() -> &'static str {
     get("artifacts.settlement_wasm_sha256")
