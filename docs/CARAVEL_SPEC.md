@@ -2207,7 +2207,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-09 | The manifest on resolved values; `caravel render`; the e2e without heredoc or `sed` (DEC-081) | C-08 | review |
 | C-10 | Attributes and outputs; `caravel output`; references in relayer feeds (DEC-082) — **Gate G2** | C-09 | review |
 | C-11 | Lifecycle: `stop`, `start`, `restart`, `logs`, `replay` from the lane file, `wait`, `api` (DEC-083) | C-10 | review |
-| C-12 | Users' Stellar flows: `account create/fund`, `balance`, `deposit` (waits for the credit) | C-11 | todo |
+| C-12 | Users' Stellar flows: `account create/fund`, `balance`, `deposit` (waits for the credit) (DEC-084) | C-11 | review |
 | C-13 | Lane transactions: `tx`, `withdraw`, `claim`, `force-withdraw`, `escape` | C-12 | todo |
 | C-14 | The e2e on the CLI only; README, landing quickstart, RUNBOOK, `docs/LANE_FILE.md` — **Gate G3** | C-13 | todo |
 | C-15 | The resource graph, with identical plans (goldens byte for byte) | C-14 | todo |
@@ -2740,6 +2740,22 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 - **`caravel replay [--prove-escape WHO] [--prove-withdrawals WHO]`** runs the template's replay with the deployment's RPC, passphrase, settlement address, release engine and genesis document. The genesis is written to `.caravel/<lane>/<env>/genesis.toml`. `WHO` is an identity or a G… account.
 - **`caravel wait checkpoint [--seq N] [--signed] [--epoch E] | api PATH POINTER[=VALUE] | healthy | frozen`** takes `--timeout` (exit 4 when it runs out) and `--api-url`. `checkpoint` alone waits for the next one. The conditions are pure functions over the API's JSON, polled every second.
 - **`caravel api PATH [--validator N]`** does a GET on the lane's API, or on a validator's | The quickstart and e2e polled with `until … curl | jq; sleep` and killed processes by PID file | A remote host without a public URL needs an ssh-tunnelled API |
+| DEC-084 | **M0.6 (C-12).** A lane's users on Stellar, from the CLI (`caravel_deploy::flows`).
+- **`caravel account create NAME [--amount A]`** creates the identity if the keystore lacks it. **`caravel account fund NAME [--amount A]`** funds an existing one. Each:
+  1. funds XLM by friendbot when the account isn't on the network (and waits for it);
+  2. adds a trustline to the settlement token's asset;
+  3. with `--amount`, gets the token:
+     - the admin mints it when the admin issues it (a local token, or an `{ asset }` the admin issues);
+     - Circle's testnet USDC is bought with XLM on the DEX (`path-payment-strict-receive`, `--max-xlm`, default 9,000), issuer pinned in `versions.json` `testnet.usdc_issuer`;
+     - anything else is an error: get it from its issuer.
+- **`caravel balance WHO`:** the settlement token on Stellar (a read, nothing sent) and the lane account from the API.
+- **`caravel deposit WHO AMOUNT [--no-wait] [--timeout S]`:**
+  - It checks the lane's minimum deposit and the account's token balance first.
+  - It sends `deposit` and reads the inbox index it took.
+  - Unless `--no-wait`, it returns once the sequencer has processed that message (`/v1/status` `inbox.processed > index`), with the lane account.
+  - The lane account is the owner's key in raw hex, with no helper script.
+- **Amounts and errors:** amounts are token units (`12.5`), with integer arithmetic only; the decimals are 7 for a Stellar asset, otherwise the token's `decimals()`. Settlement contract errors (`Error(Contract, #N)`) are explained (`#11`: below the lane's minimum deposit).
+- **Verified:** the Stellar CLI 28.1.0 `tx new change-trust`, `tx new path-payment-strict-receive` (`--send-max`, `--dest-amount`) and `contract invoke --send=no` (`docs/SOURCES.md`) | The quickstart's users needed `stellar tx new`, `contract invoke` and `node -e` to get a token in and see it on the lane | Tokens with their own minter, or an anchor (SEP-24) in front of deposits |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

@@ -301,6 +301,117 @@ impl Cli {
         .map(|_| ())
     }
 
+    /// A trustline from `identity` to `CODE:issuer` (creating or keeping it).
+    pub fn change_trust(&self, identity: &str, code: &str, issuer: &Key) -> Result<()> {
+        run(&self.with_net(vec![
+            s("tx"),
+            s("new"),
+            s("change-trust"),
+            s("--source-account"),
+            s(identity),
+            s("--line"),
+            format!("{code}:{}", g(issuer)),
+        ]))
+        .map(|_| ())
+    }
+
+    /// `mint` on a Stellar Asset Contract, by its issuer.
+    pub fn mint(&self, issuer_identity: &str, token: &Key, to: &Key, amount: i128) -> Result<()> {
+        run(&self.with_net(vec![
+            s("contract"),
+            s("invoke"),
+            s("--id"),
+            strkey(token),
+            s("--source-account"),
+            s(issuer_identity),
+            s("--send=yes"),
+            s("--"),
+            s("mint"),
+            s("--to"),
+            g(to),
+            s("--amount"),
+            amount.to_string(),
+        ]))
+        .map(|_| ())
+    }
+
+    /// Buys exactly `amount` of `CODE:issuer` with XLM on the DEX, spending
+    /// at most `max_xlm` stroops.
+    pub fn buy_with_xlm(
+        &self,
+        identity: &str,
+        to: &Key,
+        code: &str,
+        issuer: &Key,
+        amount: i128,
+        max_xlm: i128,
+    ) -> Result<()> {
+        run(&self.with_net(vec![
+            s("tx"),
+            s("new"),
+            s("path-payment-strict-receive"),
+            s("--source-account"),
+            s(identity),
+            s("--send-asset"),
+            s("native"),
+            s("--send-max"),
+            max_xlm.to_string(),
+            s("--destination"),
+            g(to),
+            s("--dest-asset"),
+            format!("{code}:{}", g(issuer)),
+            s("--dest-amount"),
+            amount.to_string(),
+        ]))
+        .map(|_| ())
+    }
+
+    /// `deposit` into the settlement contract; the inbox index it took.
+    pub fn deposit(&self, identity: &str, contract: &Key, from: &Key, amount: i128) -> Result<u64> {
+        let out = run(&self.with_net(vec![
+            s("contract"),
+            s("invoke"),
+            s("--id"),
+            strkey(contract),
+            s("--source-account"),
+            s(identity),
+            s("--send=yes"),
+            s("--"),
+            s("deposit"),
+            s("--from"),
+            g(from),
+            s("--amount"),
+            amount.to_string(),
+            s("--lane_account"),
+            hex(from),
+        ]))?;
+        out.trim()
+            .trim_matches('"')
+            .parse()
+            .map_err(|_| anyhow!("deposit returned {out:?}, not an inbox index"))
+    }
+
+    /// A SEP-41 token balance (a read, nothing sent).
+    pub fn token_balance(&self, source: &str, token: &Key, who: &Key) -> Result<i128> {
+        let out = run(&self.with_net(vec![
+            s("contract"),
+            s("invoke"),
+            s("--id"),
+            strkey(token),
+            s("--source-account"),
+            s(source),
+            s("--send=no"),
+            s("--"),
+            s("balance"),
+            s("--id"),
+            g(who),
+        ]))?;
+        out.trim()
+            .trim_matches('"')
+            .parse()
+            .map_err(|_| anyhow!("balance returned {out:?}"))
+    }
+
     /// `escape_claim` for one leaf of the last checkpoint, paid to the lane
     /// account's owner; anyone may send it once the lane is frozen.
     pub fn escape_claim(
