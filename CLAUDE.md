@@ -64,6 +64,9 @@ npm --prefix lanes/perps/web ci && npm --prefix lanes/perps/web test && npm --pr
 WASM_DIR=<CI contracts-wasm artifact> ./scripts/deploy-testnet.sh   # T-012: deploy contracts + witness (refuses to redeploy)
 ./target/release/caravel apply lanes/perps/config/lane.caravel-perps.testnet.toml --env testnet --release-dir <CI release artifact>   # lane #1's VM (DEC-070); plan --diff first
 (cd site && vercel deploy --prod)       # landing page only, never from the repo root (DEC-019)
+npm --prefix docs-site ci && npm --prefix docs-site test   # the docs site (DEC-100): typecheck and build, which fails on any broken link
+npm --prefix docs-site start            # the docs with live reload; `npm --prefix docs-site run serve` serves the build
+node scripts/gen-cli-docs.mjs && ./scripts/check-cli-docs.sh && ./scripts/check-docs.sh   # the CLI reference from `caravel help`, and the docs' copy rules
 ```
 
 Git: one branch and PR per task (`t-0xx-short-name`, `p-0x-short-name` for M0.5, `c-0x-short-name` for M0.6, `h-0x-short-name` for M0.7). Inside a phase, PRs stack on the previous task's branch, and the human reviews at the phase gates (M0: T-003, T-006, T-011, T-016; M0.5: P-07, P-10, P-14, P-18; M0.6: C-05, C-10, C-14, C-17, C-21, C-25; M0.7: H-01, H-04, H-06, H-08, H-11).
@@ -87,3 +90,4 @@ M0.5 splits the repo into the platform (Caravel) and its lanes (Caravel Perps fi
 - `lanes/payments/` (the Payments template, on the app SDK, DEC-064): `app/` (caravel-payments, no_std), `contracts/payments-engine`, `node/` (caravel-payments-node: `PaymentsApp`, the `[payments]` lane file, `tx`, scenarios, parity, API and vector tests), `config/` (the local lane file), `test-vectors/`.
 - `scripts/`: shared build, check, deploy and e2e scripts; `infra/gcp/`: the billing cap.
 - `site/`: the landing page (Vercel project `caravel`, https://caravel-tau.vercel.app).
+- `docs-site/`: the docs (Docusaurus, its own Vercel project, DEC-100). Users' docs live here: the lane-file reference in `docs/reference/lane-file/`, the CLI reference generated from `caravel help` (never edit it by hand). `docs/` in the repo root stays the internal record (spec, sources, results, lane #1's runbook).

@@ -159,7 +159,7 @@ settlement = "${contract.settlement.address}"
 - **Applied as a step:** a validator swap becomes a signer rotation, and a `[node]` setting becomes a restart.
 - **Refused:** anything the settlement contract fixed at deploy (the lane's rules, the engine, the admin, the token, the settlement params). For those, destroy the lane or give it a new name.
 
-There is no state file. The lane file and the chain are the whole truth, and `plan` reads both. The full reference is [`docs/LANE_FILE.md`](docs/LANE_FILE.md).
+There is no state file. The lane file and the chain are the whole truth, and `plan` reads both. The full reference is [on the docs site](https://caravel-docs.vercel.app/reference/lane-file).
 
 ## Settlement tokens
 
@@ -171,7 +171,7 @@ A lane settles in the token its `[env]` names:
 | `{ asset = "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5" }` | Any Stellar asset, through its Stellar Asset Contract. `apply` deploys that contract when the network has none |
 | `{ contract = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA" }` | Any SEP-41 token contract |
 | `{ local = "USDC" }` | A test asset issued by the admin, on a local network |
-| `"usd"` | A token the deployment declares (`[env.<name>.tokens.usd]`, [`docs/LANE_FILE.md`](docs/LANE_FILE.md#declared-tokens)) |
+| `"usd"` | A token the deployment declares (`[env.<name>.tokens.usd]`, [the lane file reference](https://caravel-docs.vercel.app/reference/lane-file/accounts-and-tokens#declared-tokens)) |
 
 The two examples above are the same token, Circle's testnet USDC, written both ways.
 
@@ -215,7 +215,7 @@ The two examples above are the same token, Circle's testnet USDC, written both w
 ## Documentation
 
 - [`docs/CARAVEL_SPEC.md`](docs/CARAVEL_SPEC.md): the specification, the source of truth, with every design decision in §22.
-- [`docs/LANE_FILE.md`](docs/LANE_FILE.md): the lane file language.
+- [The docs](https://caravel-docs.vercel.app): getting started, concepts, guides, the lane file and the CLI reference (source in [`docs-site/`](docs-site/)).
 - [`docs/RUNBOOK.md`](docs/RUNBOOK.md): operating a lane.
 - [`docs/RESULTS.md`](docs/RESULTS.md): measured results on testnet.
 - [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md): engine benchmarks at full caps.

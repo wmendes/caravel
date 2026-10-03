@@ -4,7 +4,7 @@ How to run, deploy and operate Caravel M0, the testnet demo. The spec is `docs/C
 
 **Who runs what in M0.** The Caravel team runs the sequencer, all three validators and the relayer, on one GCP VM (DEC-046). The settlement contract admin has testnet-only powers: upgrading the contract and rotating validators without delay (spec §4.3). Anyone can follow the lane with their own validator (§2 below), rebuild it from Stellar data with `caravel replay` (§6), and use the escape hatch if the lane stops (§5).
 
-Everything here goes through `caravel`, the one CLI (install it with `./scripts/install.sh`, README). It finds the lane file in the current directory or takes `-f`, picks the deployment with `--env`, and takes `--json` everywhere. The lane file language is in `docs/LANE_FILE.md`.
+Everything here goes through `caravel`, the one CLI (install it with `./scripts/install.sh`, README). It finds the lane file in the current directory or takes `-f`, picks the deployment with `--env`, and takes `--json` everywhere. The lane file language, and general guides to deploying, rotating, replaying and winding down any lane, are on the docs site (https://caravel-docs.vercel.app). This runbook keeps what is specific to lane #1 and its VM.
 
 Every command runs from the repository root unless it says otherwise.
 
@@ -122,7 +122,7 @@ The node refuses a mainnet passphrase. Take `engine_wasm_sha256` and the contrac
 RUST_LOG=info ./target/release/caravel-perps-node validator --config lanes/perps/config/my-validator.toml
 ```
 
-To sign for a lane, its operator adds you to the lane file (`url` and your public key; see LANE_FILE.md, "A validator someone else runs") and rotates the signer set. You then add the sequencer's public key to your config, so that `/v1/sign` answers only requests it signed (DEC-095):
+To sign for a lane, its operator adds you to the lane file (`url` and your public key; see the docs' [hosts reference](https://caravel-docs.vercel.app/reference/lane-file/hosts)) and rotates the signer set. You then add the sequencer's public key to your config, so that `/v1/sign` answers only requests it signed (DEC-095):
 
 ```toml
 sequencer_key = "G…"                                  # the operator's `caravel output`, or ${node.sequencer.key}

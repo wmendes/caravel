@@ -39,6 +39,8 @@ jobs:
       # repo. The pattern avoids spelling the word, so it doesn't match itself.
       - name: Copy rule
         run: "! git grep -I -n -i -E 'terra[f]orm'"
+      # The docs site's copy: honest claims, no em dashes (H-12).
+      - run: ./scripts/check-docs.sh
 
   rust:
     runs-on: ubuntu-latest
@@ -93,6 +95,9 @@ jobs:
         run: |
           cargo test --locked -p caravel-perps-node --test parity -- --ignored
           cargo test --locked -p caravel-payments-node --test parity -- --ignored
+      # The docs site's CLI reference is generated from `caravel help` (H-12).
+      - name: The CLI reference matches the CLI
+        run: cargo build --locked -p caravel-cli && CARAVEL_BIN=target/debug/caravel ./scripts/check-cli-docs.sh
       - name: Consensus crates build without std
         run: |
           cargo build --locked --manifest-path lanes/perps/engine/Cargo.toml -p caravel-types -p caravel-merkle -p caravel-perps --target wasm32v1-none
@@ -103,7 +108,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        app: [platform/relayer, lanes/perps/relayer-feeds, lanes/perps/web]
+        app: [platform/relayer, lanes/perps/relayer-feeds, lanes/perps/web, docs-site]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
