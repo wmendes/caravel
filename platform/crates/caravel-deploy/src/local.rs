@@ -399,6 +399,40 @@ impl Local {
             .ok()
     }
 
+    /// Prints a node's last `lines` log lines; with `follow`, then what it
+    /// writes, until interrupted.
+    pub fn logs(&self, node: &str, lines: usize, follow: bool) -> Result<()> {
+        use std::io::{Read, Seek, SeekFrom, Write};
+        let path = self.root.join("logs").join(format!("{node}.log"));
+        let text = std::fs::read_to_string(&path)
+            .with_context(|| format!("no log for {node} at {}", path.display()))?;
+        let all: Vec<&str> = text.lines().collect();
+        for l in &all[all.len().saturating_sub(lines)..] {
+            println!("{l}");
+        }
+        if !follow {
+            return Ok(());
+        }
+        let mut f = std::fs::File::open(&path)?;
+        let mut at = f.seek(SeekFrom::End(0))?;
+        let mut out = std::io::stdout();
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            let len = std::fs::metadata(&path)?.len();
+            if len < at {
+                at = 0; // the node started again with a new log
+            }
+            if len > at {
+                f.seek(SeekFrom::Start(at))?;
+                let mut buf = Vec::new();
+                f.read_to_end(&mut buf)?;
+                at += buf.len() as u64;
+                out.write_all(&buf)?;
+                out.flush()?;
+            }
+        }
+    }
+
     pub fn log_tail(&self, node: &str) -> String {
         std::fs::read_to_string(self.root.join("logs").join(format!("{node}.log")))
             .map(|t| {

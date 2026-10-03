@@ -109,6 +109,14 @@ impl HostProvider {
         }
     }
 
+    /// A node's log: the last `lines`, then with `follow` what it writes.
+    pub fn logs(&self, node: &str, lines: usize, follow: bool) -> Result<()> {
+        match self {
+            Self::Local(l) => l.logs(node, lines, follow),
+            Self::Ssh(s) => s.logs(node, lines, follow),
+        }
+    }
+
     pub fn log_tail(&self, node: &str) -> String {
         match self {
             Self::Local(l) => l.log_tail(node),

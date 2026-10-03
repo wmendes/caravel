@@ -2206,7 +2206,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-08 | Vars, locals, `for_each`, per-env `[env.<name>.node]` (DEC-080) | C-07 | review |
 | C-09 | The manifest on resolved values; `caravel render`; the e2e without heredoc or `sed` (DEC-081) | C-08 | review |
 | C-10 | Attributes and outputs; `caravel output`; references in relayer feeds (DEC-082) — **Gate G2** | C-09 | review |
-| C-11 | Lifecycle: `stop`, `start`, `restart`, `logs`, `replay` from the lane file, `wait`, `api` | C-10 | todo |
+| C-11 | Lifecycle: `stop`, `start`, `restart`, `logs`, `replay` from the lane file, `wait`, `api` (DEC-083) | C-10 | review |
 | C-12 | Users' Stellar flows: `account create/fund`, `balance`, `deposit` (waits for the credit) | C-11 | todo |
 | C-13 | Lane transactions: `tx`, `withdraw`, `claim`, `force-withdraw`, `escape` | C-12 | todo |
 | C-14 | The e2e on the CLI only; README, landing quickstart, RUNBOOK, `docs/LANE_FILE.md` — **Gate G3** | C-13 | todo |
@@ -2731,6 +2731,15 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - `status --json` has `outputs`.
   - An output that needs something unknown says what.
 - **The e2e** reads the settlement and the token through `caravel output`. Its deployment declares `sequencer` and `settlement_contract` outputs, and it checks both, plus `status --json`'s `outputs` | Other tools (a web app's config, scripts) need a lane's addresses without parsing `status`, and feeds need contract ids without hand-copying them | Declared contracts and tokens (C-19, C-20) add their own attributes |
+| DEC-083 | **M0.6 (C-11).** Running a lane day to day, without scripts.
+- **`caravel stop [NODE…]`** stops nodes and leaves the lane as it is: the relayer first, then the sequencer, then validators. It says when a freeze becomes possible while the sequencer is down. Off a local network it asks, unless `--yes`.
+- **`caravel start [NODE…]`** runs only the plan's start and restart steps for those nodes. It refuses when the deployment differs in anything else (that is `apply`'s job). A stopped node shows in `plan` and `status` as drift.
+- **`caravel restart [NODE…]`.**
+- **Node names:** `sequencer`, `relayer`, and `validator-<n>` or plain `<n>`, with a did-you-mean.
+- **`caravel logs [NODE] [--follow] [-n N]`:** the local log file, polled for `--follow` and following a restart (`-f` stays the lane file), or `journalctl -u <unit>` over ssh. It reads no chain.
+- **`caravel replay [--prove-escape WHO] [--prove-withdrawals WHO]`** runs the template's replay with the deployment's RPC, passphrase, settlement address, release engine and genesis document. The genesis is written to `.caravel/<lane>/<env>/genesis.toml`. `WHO` is an identity or a G… account.
+- **`caravel wait checkpoint [--seq N] [--signed] [--epoch E] | api PATH POINTER[=VALUE] | healthy | frozen`** takes `--timeout` (exit 4 when it runs out) and `--api-url`. `checkpoint` alone waits for the next one. The conditions are pure functions over the API's JSON, polled every second.
+- **`caravel api PATH [--validator N]`** does a GET on the lane's API, or on a validator's | The quickstart and e2e polled with `until … curl | jq; sleep` and killed processes by PID file | A remote host without a public URL needs an ssh-tunnelled API |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 
