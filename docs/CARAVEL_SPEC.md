@@ -2221,7 +2221,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-22 | Several hosts per deployment and node placement (DEC-094) | C-21 | review |
 | C-23 | Networking across hosts: signed `/v1/sign` requests, private or public addresses, validators run elsewhere (DEC-095) | C-22 | review |
 | C-24 | Lane namespaces: several lanes on one host (DEC-096) | C-23 | review |
-| C-25 | The web app as a resource, configured from outputs — **Gate G6** | C-24 | todo |
+| C-25 | The web app as a resource, configured from outputs — **Gate G6** (DEC-097) | C-24 | review |
 
 ---
 
@@ -3004,6 +3004,19 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - unit and golden tests: namespaced names, roots and refusals; lane #1's lane file in a namespace renders `caravel-perps-*` units and a `caravel.d` snippet; `HostTaken`, `PortInUse` (golden `plan-port-in-use`), a namespaced unit restarting its node, and the header parser;
   - live: a local lane whose validator port another program held planned `PortInUse`;
   - read-only against lane #1's VM: lane #1 still plans "No changes.", and a copy of its file with another root and no namespace planned `HostTaken` ("the units caravel-* run the lane at /opt/caravel") | Lanes had to have a host each, and a second lane on the same host would have overwritten the first one's units and Caddyfile | Lane #1's Caddyfile importing `caravel.d`, so a namespaced lane can join its VM (a change to lane #1's files, so a VM release for the human) |
+| DEC-097 | **M0.6 (C-25), Gate G6.** The web app's config as a resource: `[env.<name>.web]` with `host` (default: the sequencer's) and `config`, a table of anything the app reads.
+- **Values:** `config` may use values known only once keys and addresses are (`web.config` joins `relayer.feeds` and contracts' `args` in `attrs::DEFERRED_OK`), and `Manifest::finish` fills them in.
+- **Where it goes:**
+  - it is rendered to `<root>/config/web.json` on the web host, a plain file resource (`file.web.json`) that restarts no node;
+  - that host's Caddy serves it at `/config.json` (`root * <root>/config`, `rewrite * /web.json`), before the app's catch-all, so nothing else in `config/` is reachable;
+  - on a host other than the sequencer's, the site also serves the web app.
+- **Refused:** a web host that isn't declared, or an ssh one without a `public_url`.
+- **The perps web app** fetches `/config.json` once at boot (`no-store`), before the modules that read the config load (`App` is imported after it). It lays known keys of the right type over its defaults, resolving URLs against the page. A missing file, an HTML fallback or a fetch error keeps the defaults: `VITE_*`, else the testnet lane.
+- **Lane #1:** it declares no `[web]`, so its files and plan are unchanged. Giving its VM a `web.json` is a VM release, for the human.
+- **Checked:**
+  - unit tests: deferred values filled in and host refusals; lane #1's file with a web config renders `web.json`, with the route ahead of the app's catch-all; a `web.json` change restarts nothing; the web app's `applyConfig`/`loadConfig` (known keys only, URLs resolved, defaults kept without a file);
+  - `caddy adapt` (Caddy 2, Docker) accepts lane #1's Caddyfile with the route;
+  - on a local lane: `web.json` holds the sequencer's and validators' URLs, the settlement address and the passphrase, then "No changes." | The web app's deployment was baked in at build time (`VITE_*`), so one build couldn't serve another lane | Serving `web.json` from a local lane's dev server |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 
