@@ -89,6 +89,30 @@ impl Global {
     }
 }
 
+/// `--target` and `--replace`, for `plan` and `apply` (C-16).
+#[derive(clap::Args, Debug, Default, Clone)]
+pub struct Scope {
+    /// Plan only for this resource and what it depends on: an address from
+    /// the plan or `caravel graph` (node.validator-2, file.sequencer.toml); `*`
+    /// matches any characters (node.*). Repeat for more.
+    #[arg(long, value_name = "ADDR")]
+    pub target: Vec<String>,
+    /// Replace this node, file or the release even if it matches: a node
+    /// restarts, a file is written again, the release is installed again.
+    /// Repeat for more.
+    #[arg(long, value_name = "ADDR")]
+    pub replace: Vec<String>,
+}
+
+impl Scope {
+    fn options(&self) -> caravel_deploy::plan::Options {
+        caravel_deploy::plan::Options {
+            target: self.target.clone(),
+            replace: self.replace.clone(),
+        }
+    }
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
     /// Show what `apply` would change on Stellar and on the host. Changes
@@ -102,6 +126,8 @@ pub enum Cmd {
         /// Exit 3 when there are changes, and 1 when something blocks them.
         #[arg(long)]
         exit_code: bool,
+        #[command(flatten)]
+        scope: Scope,
     },
     /// Make Stellar and the host match the deployment. Shows the plan and
     /// asks first, unless --yes. Running it again changes nothing.
@@ -111,6 +137,15 @@ pub enum Cmd {
         /// Apply without asking (also CARAVEL_YES=1).
         #[arg(short = 'y', long)]
         yes: bool,
+        #[command(flatten)]
+        scope: Scope,
+    },
+    /// The deployment's resources and what each depends on, as Graphviz DOT
+    /// (`caravel graph | dot -Tsvg > lane.svg`), or as JSON. Dashed edges
+    /// restart their target when their source changes.
+    Graph {
+        /// The lane file (the same as -f).
+        lane: Option<PathBuf>,
     },
     /// A deployment's health: height, the last accepted checkpoint, when a
     /// freeze would be possible, the relayer's XLM, TTL horizons, and whether
@@ -572,6 +607,7 @@ fn dispatch(cli: Cli) -> Result<u8> {
             lane,
             diff,
             exit_code,
+            scope,
         } => {
             let ctx = context(g, lane.as_deref())?;
             let m = ctx.manifest()?;
@@ -600,7 +636,7 @@ fn dispatch(cli: Cli) -> Result<u8> {
             }
             runtime()?.block_on(async {
                 let p = ctx.prepare(false).await?;
-                let plan = p.plan();
+                let plan = p.plan_with(&scope.options())?;
                 if g.json {
                     let mut v = plan.to_json(&p.desired);
                     if diff {
@@ -622,7 +658,7 @@ fn dispatch(cli: Cli) -> Result<u8> {
                 )
             })
         }
-        Cmd::Apply { lane, yes } => {
+        Cmd::Apply { lane, yes, scope } => {
             let yes = yes || assume_yes();
             let ctx = context(g, lane.as_deref())?;
             let m = ctx.manifest()?;
@@ -642,7 +678,7 @@ fn dispatch(cli: Cli) -> Result<u8> {
             }
             runtime()?.block_on(async {
                 let p = ctx.prepare(true).await?;
-                let plan = p.plan();
+                let plan = p.plan_with(&scope.options())?;
                 if g.json {
                     if !yes {
                         bail!("apply --json runs without a prompt: pass --yes");
@@ -672,8 +708,12 @@ fn dispatch(cli: Cli) -> Result<u8> {
                 }
                 p.apply(&plan).await?;
                 // Read everything back: a finished apply leaves nothing to do.
+                // (The same targets; a replacement is done once.)
                 let again = ctx.prepare(true).await?;
-                let left = again.plan();
+                let left = again.plan_with(&caravel_deploy::plan::Options {
+                    target: scope.target.clone(),
+                    replace: vec![],
+                })?;
                 if g.json {
                     print_json(&json!({
                         "ok": left.is_empty(),
@@ -747,6 +787,27 @@ fn dispatch(cli: Cli) -> Result<u8> {
             })
         }
         Cmd::Validate { lane } => validate(g, lane.as_deref()),
+        Cmd::Graph { lane } => {
+            let ctx = context(g, lane.as_deref())?;
+            runtime()?.block_on(async {
+                let p = ctx.prepare(false).await?;
+                let graph = p.graph();
+                if g.json {
+                    let kind = |k: caravel_deploy::graph::Kind| format!("{k:?}").to_lowercase();
+                    print_json(&json!({
+                        "resources": graph.resources.iter().map(|r| json!({ "address": r.addr, "kind": kind(r.kind) })).collect::<Vec<_>>(),
+                        "edges": graph.edges.iter().map(|e| json!({
+                            "from": graph.resources[e.from].addr,
+                            "to": graph.resources[e.to].addr,
+                            "kind": format!("{:?}", e.kind).to_lowercase(),
+                        })).collect::<Vec<_>>(),
+                    }))?;
+                } else {
+                    print!("{}", graph.dot());
+                }
+                Ok(exit::OK)
+            })
+        }
         Cmd::Stop { nodes, yes } => {
             let yes = yes || assume_yes();
             let ctx = context(g, None)?;

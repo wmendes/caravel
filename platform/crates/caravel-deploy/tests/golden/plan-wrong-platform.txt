@@ -3,12 +3,12 @@ Lane demo-pay-0 · env local · network local
   settlement CC3UKZIZZ2LOLG6ZXQ3UNAEAP5JSCTWSSU4X33RU3VIAJMYUDZCSC6D4 (derived from the admin and the lane), admin GCQK…AGP5, token CADF…T54G
   signers: 2 of 3 at epoch 1
 
-~ release   an-older-one → 0a1b2c3d
-~ restart   validator-1
-~ restart   validator-2
-~ restart   validator-3
-~ restart   sequencer
-~ restart   relayer
+~ release   an-older-one → 0a1b2c3d  release
+~ restart   validator-1              node.validator-1
+~ restart   validator-2              node.validator-2
+~ restart   validator-3              node.validator-3
+~ restart   sequencer                node.sequencer
+~ restart   relayer                  node.relayer
 
 ! the release's node binary is built for Darwin arm64, and the host is Linux x86_64: install the CI release (--release-dir) or build on the host's platform
 

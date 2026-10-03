@@ -17,6 +17,7 @@ Decisions behind it: DEC-066 to DEC-068 (deployments), DEC-078 to DEC-082 (the l
 - [Attributes: values known after reading Stellar](#attributes-values-known-after-reading-stellar)
 - [Outputs](#outputs)
 - [Checking what a file means](#checking-what-a-file-means)
+- [Resources, targets and replacements](#resources-targets-and-replacements)
 - [A worked example](#a-worked-example)
 
 ## Two halves: genesis and deployments
@@ -259,9 +260,32 @@ explorer = "https://stellar.expert/explorer/testnet/contract/${contract.settleme
 | `caravel validate` | Reads the file and every deployment offline, and reports every problem with `file:line:col` |
 | `caravel render` | The deployment as `plan` reads it: includes, inheritance, vars and expressions resolved |
 | `caravel render --genesis` | The exact document the template hashes and the hosts get as `lane.toml` |
-| `caravel plan` | What `apply` would change, on Stellar and on the host. `--exit-code` exits 3 when there are changes |
+| `caravel plan` | What `apply` would change, on Stellar and on the host, each step with its resource's address. `--exit-code` exits 3 when there are changes; `--json` is `caravel-plan/1` |
+| `caravel graph` | The deployment's resources and what each depends on, as Graphviz DOT (or `--json`) |
 
 Errors point into the file: the line and caret, where an inherited value came from (`from [env.base]`), and a did-you-mean for names, fields, functions, deployments and vars.
+
+## Resources, targets and replacements
+
+`plan` compares a graph of resources, each with an address:
+
+| Address | What |
+|---|---|
+| `account.admin`, `account.relayer` | The accounts the deployment pays from |
+| `token.settlement`, `wasm.settlement`, `contract.settlement` | The settlement token, the contract's Wasm, the contract |
+| `signers.settlement` | The signer set the contract checks |
+| `host`, `host.data`, `release` | The host's readiness, the lane's stores, the release it runs |
+| `file.<path>` | A generated file (`file.sequencer.toml`, `file.validator-2.toml`) |
+| `node.<name>` | A node (`node.sequencer`, `node.validator-2`, `node.relayer`) |
+
+Edges say what comes first (the contract before the nodes, the validators before a signer rotation, the rotation before the sequencer) and what restarts what (a file restarts the nodes that read it). `caravel graph | dot -Tsvg > lane.svg` draws it.
+
+| Option | Effect |
+|---|---|
+| `--target ADDR` | Plan and apply only that resource and what it depends on. `*` matches any characters: `--target 'node.validator-*'` |
+| `--replace ADDR` | Replace a node, a file or the release even when it matches. A node restarts; a file is written again and its nodes restart; the release is installed again and every node restarts. The settlement contract, accounts, the token and the signer set can't be replaced, and the error says why |
+
+Both are repeatable and work with `plan` and `apply`. After a targeted apply, the check that follows is targeted too: the rest of the deployment may still differ.
 
 ## A worked example
 

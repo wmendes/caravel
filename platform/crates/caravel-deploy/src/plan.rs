@@ -241,17 +241,66 @@ pub enum Problem {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Plan {
     pub steps: Vec<Step>,
     pub problems: Vec<Problem>,
     /// The signer epoch after apply; the sequencer's config carries it.
     pub target_epoch: u64,
+    /// `--target`: the resources planned for, with what they depend on.
+    pub targets: Vec<String>,
+    /// `--replace`: the resources replaced even if they match.
+    pub replaced: Vec<String>,
 }
 
 impl Plan {
     pub fn is_empty(&self) -> bool {
         self.steps.is_empty() && self.problems.is_empty()
+    }
+}
+
+/// What `plan` and `apply` were asked to narrow or force (C-16).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Options {
+    /// Addresses (`*` matches any characters): plan only for these and what
+    /// they depend on.
+    pub target: Vec<String>,
+    /// Addresses (`*` matches any characters) of nodes, files or the release
+    /// to replace even
+    /// when they match: a node restarts, a file is written, the release is
+    /// installed again (restarting every node).
+    pub replace: Vec<String>,
+}
+
+/// The resource a step changes (its address in the graph, [`crate::graph`]).
+pub fn step_addr(s: &Step) -> String {
+    match s {
+        Step::Fund { who, .. } => format!("account.{who}"),
+        Step::DeployToken { .. } => "token.settlement".into(),
+        Step::UploadWasm { .. } => "wasm.settlement".into(),
+        Step::DeploySettlement { .. } => "contract.settlement".into(),
+        Step::RotateSigners { .. } => "signers.settlement".into(),
+        Step::WipeHostData => "host.data".into(),
+        Step::InstallRelease { .. } => "release".into(),
+        Step::WriteFile { path } => format!("file.{path}"),
+        Step::Start { node } | Step::Restart { node } | Step::Stop { node } => {
+            format!("node.{node}")
+        }
+    }
+}
+
+/// The resource a problem is about.
+pub fn problem_addr(p: &Problem) -> String {
+    match p {
+        Problem::Immutable { .. }
+        | Problem::CodeDrift { .. }
+        | Problem::UnknownCode { .. }
+        | Problem::Frozen
+        | Problem::SettlementMissing { .. } => "contract.settlement".into(),
+        Problem::TokenMissing { .. } => "token.settlement".into(),
+        Problem::SignersReused { .. } => "signers.settlement".into(),
+        Problem::HostNotReady { .. } | Problem::WrongPlatform { .. } => "host".into(),
+        Problem::NodeMismatch { node, .. } => format!("node.{node}"),
     }
 }
 
@@ -309,7 +358,14 @@ fn nodes_of(path: &str, all: &[String]) -> Vec<String> {
 /// The plan for `d` against what the chain and the host have, from the
 /// deployment's resource graph ([`crate::graph`]).
 pub fn diff(d: &Desired, chain: &Chain, host: &Host) -> Plan {
-    crate::graph::diff(d, chain, host)
+    crate::graph::diff(d, chain, host, &Options::default())
+        .expect("a plan with no options always builds")
+}
+
+/// [`diff`], narrowed by `--target` or forced by `--replace`: `Err` says
+/// what an address doesn't name, or why a resource can't be replaced.
+pub fn diff_with(d: &Desired, chain: &Chain, host: &Host, opts: &Options) -> Result<Plan, String> {
+    crate::graph::diff(d, chain, host, opts)
 }
 
 /// The fixed-order diff the graph replaced (C-15), kept as the reference the
@@ -532,6 +588,7 @@ pub(crate) fn legacy_diff(d: &Desired, chain: &Chain, host: &Host) -> Plan {
         target_epoch: target_epoch(d, chain),
         steps,
         problems,
+        ..Plan::default()
     }
 }
 
@@ -547,15 +604,21 @@ impl Plan {
                 let mut words = line.split_whitespace();
                 let change = words.next().unwrap_or_default().to_string();
                 let action = words.next().unwrap_or_default().to_string();
-                serde_json::json!({ "change": change, "action": action, "line": line })
+                serde_json::json!({ "address": step_addr(s), "change": change, "action": action, "line": line })
             })
             .collect();
         let problems: Vec<_> = self
             .problems
             .iter()
-            .map(|p| problem_line(p).trim_start_matches("! ").to_string())
+            .map(|p| {
+                serde_json::json!({
+                    "address": problem_addr(p),
+                    "message": problem_line(p).trim_start_matches("! "),
+                })
+            })
             .collect();
         serde_json::json!({
+            "format": "caravel-plan/1",
             "lane": d.lane_name,
             "env": d.env,
             "network": d.network.name(),
@@ -565,6 +628,8 @@ impl Plan {
             "settlement_pinned": d.settlement_pinned,
             "token": strkey(&d.token),
             "target_epoch": self.target_epoch,
+            "targets": self.targets,
+            "replaced": self.replaced,
             "steps": steps,
             "problems": problems,
         })
@@ -609,15 +674,34 @@ impl Plan {
         if !d.vars.is_empty() {
             let _ = writeln!(o, "  vars: {}", d.vars);
         }
+        if !self.targets.is_empty() {
+            let _ = writeln!(
+                o,
+                "  target: {} (and what it depends on)",
+                self.targets.join(", ")
+            );
+        }
+        if !self.replaced.is_empty() {
+            let _ = writeln!(o, "  replace: {}", self.replaced.join(", "));
+        }
         if self.steps.is_empty() && self.problems.is_empty() {
             o.push_str("\nNo changes.\n");
             return o;
         }
         if !self.steps.is_empty() {
             o.push('\n');
-            for s in &self.steps {
-                o.push_str(&step_line(s));
-                o.push('\n');
+            // Each step with its resource's address, in a column (a long
+            // line just takes two spaces).
+            let lines: Vec<String> = self.steps.iter().map(step_line).collect();
+            let width = lines
+                .iter()
+                .map(|l| l.chars().count())
+                .max()
+                .unwrap_or(0)
+                .min(ADDR_COLUMN);
+            for (line, s) in lines.iter().zip(&self.steps) {
+                let pad = width.saturating_sub(line.chars().count());
+                let _ = writeln!(o, "{line}{}  {}", " ".repeat(pad), step_addr(s));
             }
         }
         if !self.problems.is_empty() {
@@ -641,6 +725,9 @@ impl Plan {
         o
     }
 }
+
+/// Where a plan's address column starts, at most.
+const ADDR_COLUMN: usize = 42;
 
 /// One step, as `plan` prints it.
 pub fn step_line(s: &Step) -> String {

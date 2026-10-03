@@ -3,11 +3,11 @@ Lane demo-pay-0 · env local · network local
   settlement CC3UKZIZZ2LOLG6ZXQ3UNAEAP5JSCTWSSU4X33RU3VIAJMYUDZCSC6D4 (derived from the admin and the lane), admin GCQK…AGP5, token CADF…T54G
   signers: 2 of 3 at epoch 2
 
-~ write     sequencer.toml
-~ write     validator-4.toml
-+ start     validator-4
-~ rotate    signers, epoch 1 → 2 (admin_rotate_signers: a testnet-only admin power)
-~ restart   sequencer
-- stop      validator-3
+~ write     sequencer.toml                  file.sequencer.toml
+~ write     validator-4.toml                file.validator-4.toml
++ start     validator-4                     node.validator-4
+~ rotate    signers, epoch 1 → 2 (admin_rotate_signers: a testnet-only admin power)  signers.settlement
+~ restart   sequencer                       node.sequencer
+- stop      validator-3                     node.validator-3
 
 6 step(s), 0 problem(s).

@@ -393,6 +393,16 @@ impl Prepared {
         plan::diff(&self.desired, &self.chain, &self.host)
     }
 
+    /// The plan narrowed by `--target` or forced by `--replace`.
+    pub fn plan_with(&self, opts: &plan::Options) -> Result<Plan> {
+        plan::diff_with(&self.desired, &self.chain, &self.host, opts).map_err(|e| anyhow!(e))
+    }
+
+    /// The deployment's resources and their edges (`caravel graph`).
+    pub fn graph(&self) -> crate::graph::Graph {
+        crate::graph::build(&self.desired, &self.host)
+    }
+
     fn identity_of(&self, who: &str) -> &str {
         match who {
             "admin" => &self.m.env.admin,

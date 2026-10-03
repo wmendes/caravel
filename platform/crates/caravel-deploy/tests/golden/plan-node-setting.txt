@@ -3,11 +3,11 @@ Lane demo-pay-0 · env local · network local
   settlement CC3UKZIZZ2LOLG6ZXQ3UNAEAP5JSCTWSSU4X33RU3VIAJMYUDZCSC6D4 (derived from the admin and the lane), admin GCQK…AGP5, token CADF…T54G
   signers: 2 of 3 at epoch 1
 
-~ write     lane.toml
-~ restart   validator-1
-~ restart   validator-2
-~ restart   validator-3
-~ restart   sequencer
-~ restart   relayer
+~ write     lane.toml    file.lane.toml
+~ restart   validator-1  node.validator-1
+~ restart   validator-2  node.validator-2
+~ restart   validator-3  node.validator-3
+~ restart   sequencer    node.sequencer
+~ restart   relayer      node.relayer
 
 6 step(s), 0 problem(s).
