@@ -1622,7 +1622,7 @@ After a `CHECKPOINT_END` block:
    - the solvency condition (INV-P7 makes it hold, but assert it);
    - header length and identity fields.
    Never ask validators to sign a header that would be rejected on Stellar, because validators never sign a second header for the same seq.
-4. POST `{header, batch}` to every validator's `/v1/sign`. Collect signatures until the threshold weight is reached, with a 10s timeout and retries.
+4. POST `{header, batch}` to every validator's `/v1/sign`. Collect signatures until the threshold weight is reached, with a 10s timeout and retries. With `[sequencer] key`, each request is signed by the sequencer (DEC-095).
 5. Append `{seq, header, batch, sigs, epoch}` to a **FIFO submission queue** in SQLite and expose the head to the relayer (§14.4). The relayer submits strictly in seq order.
 
 The lane keeps producing blocks and sealing checkpoints while earlier ones wait. Back-pressure:
@@ -1717,6 +1717,7 @@ Rules:
   - the header equals the header the validator computed for that `seq`, byte for byte;
   - `seq > last_signed_seq` (gaps are allowed, e.g. after a restart), or `seq == last_signed_seq` with an identical header hash (idempotent re-sign).
   Returns `{signer_key, signature}`.
+  A validator configured with the sequencer's key (`sequencer_key`) first refuses, with 401 `UNSIGNED`, a request the sequencer didn't sign within the last 60 s (DEC-095).
 - **Never sign two different headers for the same `seq`.** Persist every signed `(seq, header_hash)` before returning. This is what makes M1 equivocation slashing safe for honest validators.
 - Stores a state snapshot at every checkpoint it computes, keeping at least the last 3 plus the one last accepted on Stellar (polled from `last_checkpoint()`).
 - Serves from its own store, as redundant DA and an **independent proof source for the escape hatch**:
@@ -2218,7 +2219,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-20 | Contracts: any Wasm, constructor arguments, derived addresses, `prevent_destroy` (DEC-092) | C-19 | review |
 | C-21 | Local modules with inputs and outputs — **Gate G5** (DEC-093) | C-20 | review |
 | C-22 | Several hosts per deployment and node placement (DEC-094) | C-21 | review |
-| C-23 | Networking across hosts (private addresses) | C-22 | todo |
+| C-23 | Networking across hosts: signed `/v1/sign` requests, private or public addresses, validators run elsewhere (DEC-095) | C-22 | review |
 | C-24 | Lane namespaces: several lanes on one host | C-23 | todo |
 | C-25 | The web app as a resource, configured from outputs — **Gate G6** | C-24 | todo |
 
@@ -2960,6 +2961,30 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 - **Checked:**
   - unit tests: parsing, placement, `reach`/`listen_on`, and every refusal; lane #1's lane file split across two hosts renders the right files for each; a plan golden for two hosts and for a moved validator; host-qualified steps, problems and targets;
   - on a local lane with two `local` hosts (validator 3 on `b`): apply, "No changes.", checkpoints accepted, validator 3 moved to `a` and back (start, then stop on the old host, its key following it), and destroy, which froze the lane and stopped and wiped both hosts | One host was a single point of failure, and every validator's key sat next to the sequencer's | Validators operated by others (C-23), traffic over `public_url` without a private network (C-23), the relayer on its own host |
+| DEC-095 | **M0.6 (C-23), per OQ-009.** Networking across hosts, and validators run by others. Every call to a validator's `/v1/sign` is authenticated; the network isn't the boundary.
+- **Signed requests:** `[env.X.sequencer] key` names the sequencer's own identity. Its secret goes only to the sequencer's host (`keys/sequencer.key`, `key_file` in `sequencer.toml`). Each validator's config names the public key (`sequencer_key`).
+  - The sequencer signs every `/v1/sign` request: ed25519 over `"caravel/v1/sign" ‖ time (Unix seconds, u64 BE) ‖ sha256(body)`, sent as the `X-Caravel-Time` and `X-Caravel-Signature` (hex) headers (`caravel_node::sign_request`).
+  - A validator with a `sequencer_key` answers 401 `UNSIGNED` to a request that is unsigned, signed by another key, or more than 60 s from its clock, before it reads the body.
+  - A replay within the window can only ask for the same signature again, which validators already give idempotently (§15).
+  - No token, no CA, and no state file. Not consensus, and no frozen format changes. Configs without the key behave as before, so lane #1's files are byte for byte unchanged.
+- **Required once a validator is afar:** a deployment whose validators are all on the sequencer's host may leave `key` out. One with a validator on another host, or run elsewhere, is refused without it.
+- **The private network is optional:** with `private_address`, another host's nodes are reached there, and those nodes listen there. Otherwise they go through the host's `public_url` (`<url>` for the sequencer, `<url>/validators/<name>` for a validator), and the nodes stay on loopback behind Caddy.
+  - That host's Caddyfile passes a validator's `/v1/sign` only when the sequencer reaches it that way. `/internal/*` stays on localhost: the relayer shares the sequencer's host.
+  - The manifest refuses a placement that neither address can reach, both ways.
+- **Validators run elsewhere:** `[[validators]] name, key, url` (no `host` or `port`).
+  - `key` names an identity added from the operator's public key (`stellar keys add <name> --public-key G…`). `apply` never creates it, and says so.
+  - It is in the signer set and the sequencer's `[signers]` at its `url`, with no node, files, keys or unit.
+  - `status` and `output` list it, and proofs are fetched from it like the others. `node.sequencer.key` gives the key its operator puts in `sequencer_key`.
+- **C-22 fixes found on the way:**
+  - A validator on the sequencer's host followed `127.0.0.1` while the sequencer listened on its private address. Every URL now comes from one function, `EnvSpec::url_of`.
+  - `validator_url` named the sequencer's host for validators on other hosts.
+- **Checked:**
+  - `sign_request` unit tests;
+  - the validator API test with signed requests end to end. Checkpoints are signed and accepted, and unsigned, wrong-key and stale requests get 401;
+  - manifest tests for URLs, the public fallback, the key requirement and validators run elsewhere;
+  - lane #1 split over two hosts, with and without private addresses: the sequencer key in the configs, and `/v1/sign` open on b's proxy only through its public URL;
+  - lane #1's pins are unchanged;
+  - on a local lane with two `local` hosts, a sequencer key and a validator run by hand outside the deployment, with the threshold at 4 of 4: checkpoints accepted (so the outside validator answered the signed requests), unsigned requests to it and to validator 3 refused with 401, "No changes.", and destroy | A validator on another machine, or run by someone else, must not be asked to sign by anyone who can reach it | mTLS, or keys rotated without a restart; a relayer on its own host (it would need `/internal/*` across hosts) |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

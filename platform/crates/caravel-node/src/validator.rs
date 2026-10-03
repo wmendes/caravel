@@ -11,7 +11,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use axum::extract::{Path as UrlPath, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
-use axum::{Json, Router};
+use axum::Router;
 use caravel_core::block::BlockRecordV1;
 use caravel_runtime::checkpoint::{network_id, settlement_addr_hash, sha256, HeaderIds};
 use caravel_runtime::sequencer::{hex, Executor};
@@ -59,6 +59,10 @@ struct ValidatorSection {
     stellar_poll_secs: u64,
     #[serde(default)]
     cors_origins: Vec<String>,
+    /// The sequencer's `G...` key: `/v1/sign` requests must be signed by it
+    /// (DEC-095).
+    #[serde(default)]
+    sequencer_key: Option<String>,
 }
 
 fn default_poll_ms() -> u64 {
@@ -84,6 +88,8 @@ pub struct ValidatorConfig {
     pub poll_ms: u64,
     pub stellar_poll_secs: u64,
     pub cors_origins: Vec<String>,
+    /// Only requests this key signed may ask for a signature (DEC-095).
+    pub sequencer_key: Option<[u8; 32]>,
 }
 
 /// Reads an `S...` secret key file.
@@ -128,6 +134,11 @@ impl ValidatorConfig {
             poll_ms: v.poll_ms,
             stellar_poll_secs: v.stellar_poll_secs.max(1),
             cors_origins: v.cors_origins,
+            sequencer_key: v
+                .sequencer_key
+                .as_deref()
+                .map(crate::lane_toml::parse_account)
+                .transpose()?,
         })
     }
 }
@@ -137,6 +148,7 @@ pub struct ValidatorNode<A: NodeApp> {
     pub app: A,
     pub follower: Mutex<Follower<A>>,
     sequencer_url: String,
+    sequencer_key: Option<[u8; 32]>,
     lane_name: String,
     identity: api::Identity,
 }
@@ -195,6 +207,7 @@ pub async fn start<A: NodeApp>(
         app,
         follower: Mutex::new(follower),
         sequencer_url: cfg.sequencer_url.clone(),
+        sequencer_key: cfg.sequencer_key,
         lane_name: cfg.lane.lane.name.clone(),
         identity: api::Identity {
             lane_id: cfg.lane.lane_id(),
@@ -424,7 +437,31 @@ struct SignJson {
     batch: String,
 }
 
-async fn sign<A: NodeApp>(State(app): AppState<A>, Json(j): Json<SignJson>) -> ApiResult {
+async fn sign<A: NodeApp>(
+    State(app): AppState<A>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> ApiResult {
+    if let Some(key) = &app.sequencer_key {
+        let h = |n| headers.get(n).and_then(|v| v.to_str().ok());
+        let now = now_ms() / 1000;
+        if let Err(why) = crate::sign_request::verify(
+            key,
+            h(crate::sign_request::TIME_HEADER),
+            h(crate::sign_request::SIGNATURE_HEADER),
+            &body,
+            now,
+        ) {
+            tracing::warn!("refused a /v1/sign request: {why}");
+            return Err(ApiError::new(
+                StatusCode::UNAUTHORIZED,
+                "UNSIGNED",
+                why.to_string(),
+            ));
+        }
+    }
+    let j: SignJson = serde_json::from_slice(&body)
+        .map_err(|e| ApiError::bad_request("BAD_JSON", e.to_string()))?;
     let header = api::unhex(&j.header, "header")?;
     let batch = api::unhex(&j.batch, "batch")?;
     let a = app.clone();

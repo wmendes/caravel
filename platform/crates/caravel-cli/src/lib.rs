@@ -968,9 +968,8 @@ fn dispatch(cli: Cli) -> Result<u8> {
             let mut all = vec!["sequencer".to_string(), "relayer".to_string()];
             all.extend(
                 m.env
-                    .validators
-                    .iter()
-                    .map(|v| caravel_deploy::render::validator_node(&v.name)),
+                    .run_validators()
+                    .map(|(_, v)| caravel_deploy::render::validator_node(&v.name)),
             );
             let n =
                 caravel_deploy::lifecycle::node_name(node.as_deref().unwrap_or("sequencer"), &all)?;

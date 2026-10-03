@@ -331,7 +331,7 @@ impl Prepared {
         let deadline = now() + 300;
         loop {
             let mut last_err = None;
-            for v in &self.m.env.validators {
+            for (_, v) in self.m.env.run_validators() {
                 let node = validator_node(&v.name);
                 match self.provider_of(&node).export_proofs(&node, exit) {
                     Ok(_) => return Ok(()),
@@ -426,7 +426,7 @@ impl Prepared {
         self.host_provider.stop("sequencer")?;
         if validators {
             eprintln!("→ stop the validators");
-            for v in &self.m.env.validators {
+            for (_, v) in self.m.env.run_validators() {
                 let node = validator_node(&v.name);
                 self.provider_of(&node).stop(&node)?;
             }

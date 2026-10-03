@@ -114,6 +114,7 @@ A deployment can spread its nodes over several hosts. Declare each one under `ho
 ```toml
 [env.testnet.sequencer]
 host = "a"                         # the sequencer's host also runs the relayer
+key = "acme-sequencer"             # signs its requests to the validators
 
 [[env.testnet.validators]]
 name = "3"
@@ -137,11 +138,22 @@ private_address = "10.0.0.3"
   - The sequencer's host runs the sequencer, the relayer and the validators placed there.
   - Every other host gets `lane.toml` and its validators' configs and unit. With a `public_url`, it also gets a Caddyfile serving their public API.
   - A validator's key goes only to its own host.
+- **Signed requests:** once a validator runs on another host or elsewhere, `[sequencer] key` is required. It names an identity whose key signs every request the sequencer sends to a validator's `/v1/sign`. Validators answer only those requests, and refuse any request signed more than 60 s ago. The key is written only to the sequencer's host.
 - **Reaching across hosts:**
-  - A node that another host calls listens on its host's `private_address`. Everything else stays on 127.0.0.1.
-  - A validator on another host must reach the sequencer, and the sequencer must reach it. If an address is missing, `caravel validate` says which one.
+  - With a `private_address`, another host's nodes are reached there, and the nodes they call listen there.
+  - Without one, they go through the host's `public_url`: `<url>` for the sequencer, `<url>/validators/<name>` for a validator. That host's proxy then passes the validator's `/v1/sign`, which answers only signed requests. Everything else stays on 127.0.0.1.
+  - A validator on another host must reach the sequencer, and the sequencer must reach it. If neither address works, `caravel validate` says what is missing.
   - Two `local` hosts are the same machine, so they need no address. Their state is under `.caravel/<lane>/<env>` and `.caravel/<lane>/<env>@<host>`.
-  - Until C-23 signs the sequencer's calls to `/v1/sign`, only the private network protects them. Keep cross-host deployments to networks you control.
+- **A validator someone else runs:** give it a `url` instead of a host. `key` names an identity added from its operator's public key:
+
+  ```toml
+  [[env.testnet.validators]]
+  name = "partner"
+  key = "partner-v"                  # stellar keys add partner-v --public-key G…
+  url = "https://validator.partner.example"
+  ```
+
+  It joins the signer set and the sequencer asks it to sign; nothing is deployed for it. Its operator runs `caravel-<template>-node validator` with `sequencer_key` set to the sequencer's public key (`${node.sequencer.key}`, for an output). See the RUNBOOK.
 - **Addresses:** the sequencer's host keeps the one-host addresses (`release`, `file.<path>`). Another host's resources are `host.<h>.release`, `host.<h>.file.<path>` and `host.<h>.data`.
 - **Moving a node:** change its `host` and apply. The plan starts it on its new host, then stops it where it ran (`node.validator-3@a`), and its key leaves that host. Take a host out of the file only after moving its nodes off, because a host that isn't in the file isn't read.
 - **One host:** `host = { … }` is still one host. Nothing about it changes.
@@ -395,7 +407,7 @@ Some values exist only once the keys, the chain and the release are read. Expres
 | `token.<name>` | `address`, `asset`, `code`, `issuer` (declared tokens) |
 | `contract.settlement` | `address`, `pinned` |
 | `contract.<name>` | `address`, `deployer` (declared contracts) |
-| `node.sequencer` | `url`, `port` |
+| `node.sequencer` | `url`, `port`, `key` (the request key validators check, or null) |
 | `node.validator-<name>` | `name`, `key`, `url`, `port`, `weight` |
 | `validators` | The list of validator nodes |
 | `signers.settlement` | `threshold`, `count` |

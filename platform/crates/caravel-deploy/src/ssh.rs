@@ -195,7 +195,7 @@ impl Ssh {
         let r = &self.root;
         let mut nodes = vec!["sequencer".to_string(), "relayer".to_string()];
         let mut ports = vec![("sequencer".to_string(), m.env.sequencer.port)];
-        for (i, v) in m.env.validators.iter().enumerate() {
+        for (i, v) in m.env.run_validators() {
             nodes.push(validator_node(&v.name));
             ports.push((validator_node(&v.name), validator_port(m, i)));
         }

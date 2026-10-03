@@ -124,7 +124,7 @@ impl Local {
     /// Every node's port: the sequencer's and each validator's.
     fn ports(m: &Manifest) -> BTreeMap<String, u16> {
         let mut p = BTreeMap::from([("sequencer".to_string(), m.env.sequencer.port)]);
-        for (i, v) in m.env.validators.iter().enumerate() {
+        for (i, v) in m.env.run_validators() {
             p.insert(validator_node(&v.name), validator_port(m, i));
         }
         p

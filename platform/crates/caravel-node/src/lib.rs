@@ -13,6 +13,7 @@ pub mod plugin;
 pub mod replay;
 pub mod scval;
 pub mod sequencer;
+pub mod sign_request;
 pub mod stellar_rpc;
 pub mod validator;
 pub mod witness;

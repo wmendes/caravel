@@ -110,9 +110,19 @@ pub struct ValidatorSpec {
     /// The host it runs on (`[hosts.<name>]`); the sequencer's when not given.
     #[serde(default)]
     pub host: Option<String>,
+    /// Run by someone else at this URL (C-23): in the signer set and asked
+    /// to sign, never deployed. `key` then names an identity added from its
+    /// public key (`stellar keys add <name> --public-key G…`).
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 impl ValidatorSpec {
+    /// Run elsewhere, by someone else (C-23).
+    pub fn external(&self) -> bool {
+        self.url.is_some()
+    }
+
     /// Its port, given the sequencer's.
     pub fn port(&self, sequencer: u16) -> Option<u16> {
         self.port.or_else(|| {
@@ -139,6 +149,10 @@ pub struct SequencerSpec {
     /// The host it (and the relayer) runs on, with several hosts.
     #[serde(default)]
     pub host: Option<String>,
+    /// The identity that signs each `/v1/sign` request (C-23, DEC-095):
+    /// needed once a validator runs on another host or elsewhere.
+    #[serde(default)]
+    pub key: Option<String>,
 }
 
 fn default_port() -> u16 {
@@ -152,6 +166,7 @@ impl Default for SequencerSpec {
             cors_origins: Vec::new(),
             production: false,
             host: None,
+            key: None,
         }
     }
 }
@@ -909,24 +924,76 @@ impl EnvSpec {
         }
     }
 
-    /// The address the nodes on `to` are reached at from `from`'s nodes:
-    /// loopback on one host (or between two hosts that are both this
-    /// machine), else `to`'s private address.
-    pub fn reach(&self, from: &str, to: &str) -> Option<String> {
-        let (f, t) = (self.host_spec(from), self.host_spec(to));
-        if from == to || (f.provider == Provider::Local && t.provider == Provider::Local) {
-            return Some("127.0.0.1".into());
+    /// The validators this deployment runs (not the ones run elsewhere).
+    pub fn run_validators(&self) -> impl Iterator<Item = (usize, &ValidatorSpec)> {
+        self.validators
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| !v.external())
+    }
+
+    /// `node`'s port: the sequencer's, or a validator's.
+    fn port_of(&self, node: &str) -> Option<u16> {
+        if node == "sequencer" {
+            return Some(self.sequencer.port);
         }
-        t.private_address.clone()
+        let name = node.strip_prefix("validator-")?;
+        self.validators
+            .iter()
+            .find(|v| v.name == name)?
+            .port(self.sequencer.port)
+    }
+
+    /// Where `node` is reached from the nodes on host `from` (C-22, C-23):
+    /// on its own host where it listens, between two `local` hosts at
+    /// loopback, from another host at its host's private address, else
+    /// through its host's public URL; a validator run elsewhere at its
+    /// `url`. `None`: it can't be reached from there.
+    pub fn url_of(&self, from: &str, node: &str) -> Option<String> {
+        if let Some(url) = node
+            .strip_prefix("validator-")
+            .and_then(|n| self.validators.iter().find(|v| v.name == n))
+            .and_then(|v| v.url.as_deref())
+        {
+            return Some(url.trim_end_matches('/').to_string());
+        }
+        let port = self.port_of(node)?;
+        let to = self.host_of(node);
+        let (f, t) = (self.host_spec(from), self.host_spec(&to));
+        if from == to {
+            return Some(format!("http://{}:{port}", self.listen_on(&to, node)));
+        }
+        if f.provider == Provider::Local && t.provider == Provider::Local {
+            return Some(format!("http://127.0.0.1:{port}"));
+        }
+        if let Some(a) = &t.private_address {
+            return Some(format!("http://{a}:{port}"));
+        }
+        let public = t.public_url.as_deref()?.trim_end_matches('/');
+        Some(match node.strip_prefix("validator-") {
+            Some(name) => format!("{public}/validators/{name}"),
+            None => public.to_string(),
+        })
+    }
+
+    /// The sequencer reaches validator `node` through its host's public URL,
+    /// so that host's proxy passes its `/v1/sign` (signed, C-23).
+    pub fn sign_via_public(&self, node: &str) -> bool {
+        let primary = self.primary_host();
+        let to = self.host_of(node);
+        to != primary
+            && self
+                .url_of(&primary, node)
+                .zip(self.host_spec(&to).public_url.as_deref())
+                .is_some_and(|(u, p)| u.starts_with(p.trim_end_matches('/')))
     }
 
     /// The address a node on `host` listens on: its private address when
     /// another host reaches it there, else loopback.
     pub fn listen_on(&self, host: &str, node: &str) -> String {
         let reached_from_elsewhere = if node == "sequencer" {
-            self.validators
-                .iter()
-                .any(|v| self.host_of(&format!("validator-{}", v.name)) != host)
+            self.run_validators()
+                .any(|(_, v)| self.host_of(&format!("validator-{}", v.name)) != host)
         } else {
             self.primary_host() != host
         };
@@ -1158,7 +1225,7 @@ impl EnvSpec {
             ));
         }
         let mut ports = std::collections::BTreeSet::from([self.sequencer.port]);
-        for v in &self.validators {
+        for (_, v) in self.run_validators() {
             match v.port(self.sequencer.port) {
                 None => p.push(format!(
                     "validator {:?}: set its port (a validator named n defaults to the sequencer's port + n)",
@@ -1195,19 +1262,57 @@ impl EnvSpec {
                     ));
                     continue;
                 }
-                let primary = self.primary_host();
-                for (from, to, what) in [
-                    (h.as_str(), primary.as_str(), "the sequencer"),
-                    (primary.as_str(), h.as_str(), "its signing endpoint"),
-                ] {
-                    if self.reach(from, to).is_none() {
-                        p.push(format!(
-                            "validator {:?} on host {h:?} needs {what} on host {to:?} reached from {from:?}: give [hosts.{to}] a private_address",
-                            v.name
-                        ));
-                    }
+            }
+        }
+        // Across hosts, both ways (C-22, C-23): the validator follows the
+        // sequencer, and the sequencer asks it to sign.
+        let primary = self.primary_host();
+        for (_, v) in self.run_validators() {
+            let node = format!("validator-{}", v.name);
+            let h = self.host_of(&node);
+            if h == primary || !known.contains(&h) {
+                continue;
+            }
+            for (from, to, what, target) in [
+                (h.as_str(), primary.as_str(), "the sequencer", "sequencer"),
+                (primary.as_str(), h.as_str(), "its /v1/sign", node.as_str()),
+            ] {
+                if self.url_of(from, target).is_none() {
+                    p.push(format!(
+                        "validator {:?} on host {h:?} needs {what} on host {to:?} reached from {from:?}: give [hosts.{to}] a private_address or a public_url",
+                        v.name
+                    ));
                 }
             }
+        }
+        // A validator run elsewhere: where, and nothing to deploy.
+        for v in &self.validators {
+            let Some(url) = &v.url else { continue };
+            if !(url.starts_with("https://") || url.starts_with("http://")) {
+                p.push(format!(
+                    "validator {:?}: url = {url:?}: an http(s) URL",
+                    v.name
+                ));
+            }
+            if v.host.is_some() || v.port.is_some() {
+                p.push(format!(
+                    "validator {:?}: run elsewhere (url), so no host or port",
+                    v.name
+                ));
+            }
+        }
+        // Signed requests (OQ-009): once a validator is on another host or
+        // run elsewhere, it answers only requests the sequencer signed.
+        let afar = self
+            .validators
+            .iter()
+            .any(|v| v.external() || self.host_of(&format!("validator-{}", v.name)) != primary);
+        match &self.sequencer.key {
+            Some(k) => p.extend(key_problem("sequencer.key", k)),
+            None if afar => p.push(
+                "validators on other hosts or run elsewhere answer only requests the sequencer signed: give [sequencer] key = \"<identity>\"".into(),
+            ),
+            None => {}
         }
         for name in self.hosts.keys() {
             // Its addresses are `host.<name>…`.

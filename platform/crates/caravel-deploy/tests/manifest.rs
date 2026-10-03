@@ -558,6 +558,7 @@ fn feeds_and_outputs_from_addresses() {
 settlement = \"${{contract.settlement.address}}\"
 api = {{ value = \"${{node.sequencer.url}}\", description = \"the lane's API\" }}
 admin = \"${{account.admin.public_key}}\"
+sequencer_key = \"${{node.sequencer.key}}\"
 lane_id = \"${{lane.id}}\"
 {}
 [[env.testnet.relayer.feeds]]
@@ -580,6 +581,7 @@ options = {{ settlement = \"${{contract.settlement.address}}\", lane = \"${{lane
         relayer: [0xA1; 32],
         validators: vec![[1; 32], [2; 32], [3; 32]],
         accounts: Default::default(),
+        sequencer: Some([5; 32]),
     };
     let a = addresses(&m, &keys.admin).unwrap();
     let attrs = attributes(&m, &keys, &a, None, None);
@@ -598,6 +600,16 @@ options = {{ settlement = \"${{contract.settlement.address}}\", lane = \"${{lane
     };
     assert_eq!(get("settlement"), Value::Str(settlement.to_string()));
     assert_eq!(get("api"), Value::Str("https://lane.example".into()));
+    // What a validator run elsewhere checks requests against (DEC-095).
+    assert_eq!(
+        get("sequencer_key"),
+        Value::Str(
+            stellar_strkey::ed25519::PublicKey([5; 32])
+                .to_string()
+                .as_str()
+                .into()
+        )
+    );
     assert_eq!(
         get("admin"),
         Value::Str(
@@ -784,7 +796,7 @@ fn declared_contracts_are_checked() {
 fn several_hosts() {
     let hosts = ENV.replace(
         "[env.testnet.host]\nprovider = \"ssh\"\naddress = \"ops@lane.example\"\npublic_url = \"https://lane.example\"\n",
-        "[env.testnet.sequencer]\nhost = \"a\"\n\n[env.testnet.hosts.a]\nprovider = \"ssh\"\naddress = \"ops@a.example\"\npublic_url = \"https://lane.example\"\nprivate_address = \"10.0.0.2\"\n\n[env.testnet.hosts.b]\nprovider = \"ssh\"\naddress = \"ops@b.example\"\nprivate_address = \"10.0.0.3\"\n",
+        "[env.testnet.sequencer]\nkey = \"demo-seq\"\nhost = \"a\"\n\n[env.testnet.hosts.a]\nprovider = \"ssh\"\naddress = \"ops@a.example\"\npublic_url = \"https://lane.example\"\nprivate_address = \"10.0.0.2\"\n\n[env.testnet.hosts.b]\nprovider = \"ssh\"\naddress = \"ops@b.example\"\nprivate_address = \"10.0.0.3\"\n",
     );
     let placed = hosts.replace(
         "name = \"3\"\nkey = \"demo-v3\"",
@@ -801,10 +813,24 @@ fn several_hosts() {
     assert_eq!(e.host_of("validator-1"), "a");
     assert_eq!(e.host_of("validator-3"), "b");
     // Across hosts, a node is reached at its host's private address and
-    // listens there; on one host, at loopback.
-    assert_eq!(e.reach("b", "a").as_deref(), Some("10.0.0.2"));
-    assert_eq!(e.reach("a", "b").as_deref(), Some("10.0.0.3"));
-    assert_eq!(e.reach("a", "a").as_deref(), Some("127.0.0.1"));
+    // listens there, also for its own host's nodes; else at loopback.
+    let url = |from: &str, node: &str| e.url_of(from, node);
+    assert_eq!(
+        url("b", "sequencer").as_deref(),
+        Some("http://10.0.0.2:8080")
+    );
+    assert_eq!(
+        url("a", "validator-3").as_deref(),
+        Some("http://10.0.0.3:8083")
+    );
+    assert_eq!(
+        url("a", "sequencer").as_deref(),
+        Some("http://10.0.0.2:8080")
+    );
+    assert_eq!(
+        url("a", "validator-1").as_deref(),
+        Some("http://127.0.0.1:8081")
+    );
     assert_eq!(e.listen_on("a", "sequencer"), "10.0.0.2");
     assert_eq!(e.listen_on("b", "validator-3"), "10.0.0.3");
     assert_eq!(e.listen_on("a", "validator-1"), "127.0.0.1");
@@ -828,7 +854,10 @@ fn several_hosts() {
         .replace("private_address = \"10.0.0.3\"\n", "")
         .replace("public_url = \"https://lane.example\"\n", "");
     let m = Manifest::parse(&file(&local), "testnet").unwrap();
-    assert_eq!(m.env.reach("b", "a").as_deref(), Some("127.0.0.1"));
+    assert_eq!(
+        m.env.url_of("b", "sequencer").as_deref(),
+        Some("http://127.0.0.1:8080")
+    );
     assert_eq!(m.env.listen_on("b", "validator-3"), "127.0.0.1");
 
     // A host one validator's peer can't reach, one undeclared, one named
@@ -836,7 +865,7 @@ fn several_hosts() {
     let e = err(&placed.replace("private_address = \"10.0.0.3\"\n", ""));
     assert!(
         e.contains("validator \"3\" on host \"b\"")
-            && e.contains("give [hosts.b] a private_address"),
+            && e.contains("give [hosts.b] a private_address or a public_url"),
         "{e}"
     );
     let e = err(&placed.replace("host = \"b\"", "host = \"c\""));
@@ -863,8 +892,73 @@ fn several_hosts() {
         "{hosts}\n[env.testnet.host]\nprovider = \"local\"\n"
     ));
     assert!(e.contains("not both"), "{e}");
-    let e = err(&hosts.replace("[env.testnet.sequencer]\nhost = \"a\"\n", ""));
+    let e = err(&hosts.replace("host = \"a\"\n", ""));
     assert!(e.contains("say which runs the sequencer"), "{e}");
     let e = err(&hosts.replace("host = \"a\"", "host = \"z\""));
     assert!(e.contains("no [hosts.z]"), "{e}");
+}
+
+/// Across hosts without a private network, and validators run elsewhere
+/// (C-23): reached through public URLs, and only for requests the
+/// sequencer signed.
+#[test]
+fn public_urls_and_validators_run_elsewhere() {
+    let hosts = ENV.replace(
+        "[env.testnet.host]\nprovider = \"ssh\"\naddress = \"ops@lane.example\"\npublic_url = \"https://lane.example\"\n",
+        "[env.testnet.sequencer]\nkey = \"demo-seq\"\nhost = \"a\"\n\n[env.testnet.hosts.a]\nprovider = \"ssh\"\naddress = \"ops@a.example\"\npublic_url = \"https://lane.example\"\n\n[env.testnet.hosts.b]\nprovider = \"ssh\"\naddress = \"ops@b.example\"\npublic_url = \"https://b.example/\"\n",
+    )
+    .replace(
+        "name = \"3\"\nkey = \"demo-v3\"",
+        "name = \"3\"\nkey = \"demo-v3\"\nhost = \"b\"",
+    );
+    let m = Manifest::parse(&file(&hosts), "testnet").unwrap();
+    let e = &m.env;
+    assert_eq!(
+        e.url_of("b", "sequencer").as_deref(),
+        Some("https://lane.example")
+    );
+    assert_eq!(
+        e.url_of("a", "validator-3").as_deref(),
+        Some("https://b.example/validators/3")
+    );
+    // The proxy on b passes validator 3's /v1/sign; nothing listens off
+    // loopback.
+    assert!(e.sign_via_public("validator-3"));
+    assert!(!e.sign_via_public("validator-1"));
+    assert_eq!(e.listen_on("b", "validator-3"), "127.0.0.1");
+    assert_eq!(e.listen_on("a", "sequencer"), "127.0.0.1");
+    // Without the sequencer's key, a validator elsewhere is refused.
+    let e = err(&hosts.replace("key = \"demo-seq\"\n", ""));
+    assert!(e.contains("give [sequencer] key = \"<identity>\""), "{e}");
+    let g = stellar_strkey::ed25519::PublicKey([1; 32]).to_string();
+    let e = err(&hosts.replace("key = \"demo-seq\"", &format!("key = \"{}\"", g.as_str())));
+    assert!(e.contains("sequencer.key"), "{e}");
+
+    // A validator someone else runs: in the set, never deployed.
+    let partner = "\n[[env.testnet.validators]]\nname = \"partner\"\nkey = \"partner-v\"\nurl = \"https://v.partner.example/\"\n";
+    let with_key = ENV.replace(
+        "[env.testnet.relayer]",
+        "[env.testnet.sequencer]\nkey = \"demo-seq\"\n\n[env.testnet.relayer]",
+    );
+    let m = Manifest::parse(&file(&format!("{with_key}{partner}")), "testnet").unwrap();
+    assert_eq!(m.env.validators.len(), 4);
+    let run: Vec<_> = m
+        .env
+        .run_validators()
+        .map(|(_, v)| v.name.clone())
+        .collect();
+    assert_eq!(run, ["1", "2", "3"]);
+    assert_eq!(
+        m.env.url_of("default", "validator-partner").as_deref(),
+        Some("https://v.partner.example")
+    );
+    let e = err(&format!("{ENV}{partner}"));
+    assert!(e.contains("give [sequencer] key"), "{e}");
+    let e = err(&format!("{with_key}{partner}host = \"b\"\n"));
+    assert!(e.contains("run elsewhere (url), so no host or port"), "{e}");
+    let e = err(&format!(
+        "{with_key}{}",
+        partner.replace("https://v.partner.example/", "v.partner.example")
+    ));
+    assert!(e.contains("an http(s) URL"), "{e}");
 }

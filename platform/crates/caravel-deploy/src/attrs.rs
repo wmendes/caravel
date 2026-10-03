@@ -8,7 +8,7 @@
 //! | `account.admin`, `account.relayer` | `identity`, `public_key` |
 //! | `token.settlement` | `address`, `asset` (`CODE:G…` or null) |
 //! | `contract.settlement` | `address`, `pinned` |
-//! | `node.sequencer` | `url` (where users reach it, or null), `port` |
+//! | `node.sequencer` | `url` (where users reach it, or null), `port`, `key` (its request key, or null) |
 //! | `node.validator-<name>` | `name`, `key`, `url`, `port`, `weight` |
 //! | `validators` | the same, as a list in file order |
 //! | `signers.settlement` | `threshold`, `count` |
@@ -131,7 +131,14 @@ pub fn attributes(
                     "url",
                     validator_url(m, i).map(Value::Str).unwrap_or(Value::Null),
                 ),
-                ("port", Value::Int(i64::from(validator_port(m, i)))),
+                (
+                    "port",
+                    if v.external() {
+                        Value::Null
+                    } else {
+                        Value::Int(i64::from(validator_port(m, i)))
+                    },
+                ),
                 ("weight", Value::Int(i64::from(v.weight))),
             ])
         })
@@ -141,6 +148,11 @@ pub fn attributes(
         map([
             ("url", api_url(m).map(Value::Str).unwrap_or(Value::Null)),
             ("port", Value::Int(i64::from(m.env.sequencer.port))),
+            // What a validator run elsewhere checks requests against.
+            (
+                "key",
+                keys.sequencer.map(|k| s(g(&k))).unwrap_or(Value::Null),
+            ),
         ]),
     )]);
     for (v, val) in m.env.validators.iter().zip(&validators) {
