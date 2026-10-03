@@ -11,6 +11,7 @@ Decisions behind it: DEC-066 to DEC-068 (deployments), DEC-078 to DEC-082 (the l
 - [A deployment](#a-deployment)
 - [Declared accounts](#declared-accounts)
 - [Declared tokens](#declared-tokens)
+- [Declared contracts](#declared-contracts)
 - [Composition: include and extends](#composition-include-and-extends)
 - [Vars](#vars)
 - [Locals](#locals)
@@ -149,6 +150,31 @@ token = "usd"                      # settle in a declared token
 - **Minting:** a declared account that issues a token mints the top-ups of the accounts that hold it. A token issued by a `G…` address can't be minted from the file.
 - **Expressions** read `token.<name>.address`, `.asset`, `.code` and `.issuer`.
 
+## Declared contracts
+
+Any Soroban contract the deployment needs (an oracle, a registry, a vault of its own), deployed once at an address derived from its deployer and a salt:
+
+```toml
+[env.local.contracts.oracle]
+wasm = "wasm/oracle.wasm"          # relative to the lane file, or the sha256 of Wasm already uploaded
+deployer = "admin"                 # or a declared account (default: the admin)
+salt = "v1"                        # part of its address: change it for a new contract
+depends_on = ["token.usd"]
+lifecycle = { prevent_destroy = true }
+
+[env.local.contracts.oracle.args]  # its constructor's arguments, by name
+admin = "${account.admin.public_key}"
+asset = "${token.settlement.address}"
+decimals = 7
+feeds = ["BTC", "ETH"]             # lists and tables go as JSON
+```
+
+- **One address per name and salt.** The address is `contract_id(deployer, sha256("caravel/contract" ‖ lane id ‖ name ‖ 0 ‖ salt))`, which `plan` knows before anything is sent. `apply` uploads the Wasm when the network lacks it, then deploys. A deployed contract running other Wasm is a problem, not an upgrade.
+- **Arguments are set once.** Stellar keeps no record of a constructor's arguments, so they are used when the contract is deployed and never checked again. `plan` notes this for a deployed contract that has some. For other arguments, deploy a new contract with a new `salt`. `--replace contract.<name>` is refused for the same reason.
+- **Order:** a contract follows its deployer, every resource whose address one of its arguments names (an account, a token, another contract), and its `depends_on`.
+- **Expressions** read `contract.<name>.address` and `.deployer`, in arguments, relayer feeds (`reflectorContract = "${contract.oracle.address}"`) and outputs.
+- **`lifecycle.prevent_destroy`** on a contract or on the deployment makes `caravel destroy` refuse.
+
 ## Composition: include and extends
 
 **`include`** loads deployment tables from other files, relative to the including one. TOML requires it before the first table header:
@@ -279,13 +305,14 @@ Some values exist only once the keys, the chain and the release are read. Expres
 | `token.settlement` | `address`, `asset` |
 | `token.<name>` | `address`, `asset`, `code`, `issuer` (declared tokens) |
 | `contract.settlement` | `address`, `pinned` |
+| `contract.<name>` | `address`, `deployer` (declared contracts) |
 | `node.sequencer` | `url`, `port` |
 | `node.validator-<name>` | `name`, `key`, `url`, `port`, `weight` |
 | `validators` | The list of validator nodes |
 | `signers.settlement` | `threshold`, `count` |
 | `release.commit` | The release the hosts run |
 
-These are read in a second pass, after `lane.name`, `lane.template`, `lane.id` and `lane.engine_wasm_hash`, which are known from the start. Inside a deployment they may only be used under `relayer.feeds` (a feed that needs a contract id, say). Anywhere else an error points at the line and says why. Outputs can use them all.
+These are read in a second pass, after `lane.name`, `lane.template`, `lane.id` and `lane.engine_wasm_hash`, which are known from the start. Inside a deployment they may only be used under `relayer.feeds` (a feed that needs a contract id, say) and in a contract's `args`. Anywhere else an error points at the line and says why. Outputs can use them all.
 
 ## Outputs
 
@@ -322,7 +349,7 @@ Errors point into the file: the line and caret, where an inherited value came fr
 |---|---|
 | `account.admin`, `account.relayer`, `account.<name>` | The accounts the deployment pays from, and the ones it declares |
 | `token.settlement`, `token.<name>` | The settlement token, and the tokens the deployment declares |
-| `wasm.settlement`, `contract.settlement` | The contract's Wasm, the contract |
+| `wasm.settlement`, `contract.settlement`, `contract.<name>` | The settlement contract and its Wasm, and the contracts the deployment declares |
 | `signers.settlement` | The signer set the contract checks |
 | `host`, `host.data`, `release` | The host's readiness, the lane's stores, the release it runs |
 | `file.<path>` | A generated file (`file.sequencer.toml`, `file.validator-2.toml`) |

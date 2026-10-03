@@ -273,6 +273,54 @@ pub fn desired(
             depends_on: spec.depends_on.clone(),
         });
     }
+    // Declared contracts: the Wasm's hash (from its file, or as given), and
+    // the address from the deployer and a salt that is the lane's.
+    let lane_dir = m
+        .doc
+        .as_ref()
+        .and_then(|doc| doc.sources.0.first())
+        .and_then(|src| src.path.parent().map(std::path::Path::to_path_buf))
+        .unwrap_or_default();
+    let mut contracts = Vec::new();
+    for (name, c) in &m.env.contracts {
+        let (wasm, wasm_file) = match c.wasm_hash() {
+            Some(h) => (h, None),
+            None => {
+                let path = lane_dir.join(&c.wasm);
+                let bytes = std::fs::read(&path).with_context(|| {
+                    format!("contracts.{name}.wasm: reading {}", path.display())
+                })?;
+                (caravel_runtime::checkpoint::sha256(&bytes), Some(path))
+            }
+        };
+        let (deployer, deployer_key) = match c.deployer() {
+            "admin" => (m.env.admin.clone(), keys.admin),
+            d => (
+                m.env
+                    .accounts
+                    .get(d)
+                    .map_or(d, |a| a.identity_of(d))
+                    .to_string(),
+                *keys
+                    .accounts
+                    .get(d)
+                    .ok_or_else(|| anyhow!("no key for account {d}"))?,
+            ),
+        };
+        let salt =
+            crate::address::contract_salt(&genesis.lane_id, name, c.salt.as_deref().unwrap_or(""));
+        contracts.push(crate::plan::DeclaredContract {
+            name: name.clone(),
+            wasm,
+            wasm_file,
+            deployer,
+            deployer_key,
+            salt,
+            address: contract_id(passphrase, &deployer_key, &salt),
+            args: c.arg_strings(),
+            depends_on: c.depends_on.clone(),
+        });
+    }
     // A declared token that is the settlement token is `token.settlement`.
     let tokens: Vec<crate::plan::DeclaredToken> = declared_tokens
         .into_values()
@@ -320,6 +368,7 @@ pub fn desired(
         vars: m.vars.clone(),
         accounts,
         tokens,
+        contracts,
     })
 }
 
@@ -454,6 +503,12 @@ pub async fn prepare(
     // What the lane file left for now: values that need keys and addresses.
     let attrs = crate::attrs::attributes(&m, &keys, &addrs, Some(&genesis), Some(&release.commit));
     m.finish(&attrs)?;
+    // Contracts' arguments, now with the values they were waiting for.
+    for c in &mut desired.contracts {
+        if let Some(spec) = m.env.contracts.get(&c.name) {
+            c.args = spec.arg_strings();
+        }
+    }
 
     if for_apply {
         stellar::ensure_local_network(&m)?;
@@ -649,14 +704,36 @@ impl Prepared {
                 Step::DeployToken { code, issuer, .. } => {
                     self.cli.deploy_asset(admin, code, issuer)?
                 }
-                Step::UploadWasm { hash } => {
-                    let got = self
-                        .cli
-                        .upload(admin, &self.release.wasm_path("settlement.wasm"))?;
+                Step::UploadWasm { name, hash } => {
+                    let path = match d.contracts.iter().find(|c| c.name == *name) {
+                        Some(c) => c
+                            .wasm_file
+                            .clone()
+                            .ok_or_else(|| anyhow!("contract {name} has no Wasm file"))?,
+                        None => self.release.wasm_path("settlement.wasm"),
+                    };
+                    let got = self.cli.upload(admin, &path)?;
                     if got != *hash {
                         bail!(
                             "uploaded Wasm hashes to {}, not the planned one",
                             strkey(&got)
+                        );
+                    }
+                }
+                Step::DeployContract {
+                    contract,
+                    deployer,
+                    wasm,
+                    salt,
+                    args,
+                    ..
+                } => {
+                    let got = self.cli.deploy_contract(deployer, wasm, salt, args)?;
+                    if got != *contract {
+                        bail!(
+                            "the contract was deployed at {}, not at the planned {}",
+                            strkey(&got),
+                            strkey(contract)
                         );
                     }
                 }
@@ -754,7 +831,10 @@ fn step_line(s: &Step) -> String {
             )
         }
         Step::DeployToken { contract, .. } => format!("create token contract {}", strkey(contract)),
-        Step::UploadWasm { .. } => "upload the settlement Wasm".into(),
+        Step::UploadWasm { name, .. } => format!("upload the {name} Wasm"),
+        Step::DeployContract { name, contract, .. } => {
+            format!("deploy {name} {}", strkey(contract))
+        }
         Step::DeploySettlement { contract } => format!("deploy settlement {}", strkey(contract)),
         Step::WipeHostData => "wipe the host's lane data".into(),
         Step::InstallRelease { to, .. } => format!("install release {to}"),

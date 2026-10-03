@@ -238,6 +238,8 @@ fn lane_1_plans_no_changes() {
         accounts: BTreeSet::from([d.admin, d.relayer]),
         trustlines: Default::default(),
         tokens: Default::default(),
+        contracts: Default::default(),
+        wasms: Default::default(),
         token_exists: true,
         settlement_wasm_uploaded: true,
         settlement: Some(OnChain {

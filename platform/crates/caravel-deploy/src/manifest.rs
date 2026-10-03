@@ -282,6 +282,75 @@ pub struct TokenSpec {
     pub issuer: String,
 }
 
+/// `lifecycle` on a deployment or a contract (C-20).
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Lifecycle {
+    /// `caravel destroy` refuses while it is set.
+    #[serde(default)]
+    pub prevent_destroy: bool,
+}
+
+/// A declared contract, `[env.<name>.contracts.<n>]` (M0.6, C-20): any
+/// Wasm, deployed once at an address derived from its deployer and salt.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ContractSpec {
+    /// A `.wasm` file (relative to the lane file), or the sha256 of Wasm
+    /// already uploaded to the network.
+    pub wasm: String,
+    /// Who deploys it: `"admin"` (the default) or a declared account.
+    #[serde(default)]
+    pub deployer: Option<String>,
+    /// Part of its address: change it for a new contract.
+    #[serde(default)]
+    pub salt: Option<String>,
+    /// Its constructor's arguments, by name. Used once, when it is deployed:
+    /// they can't be read back.
+    #[serde(default)]
+    pub args: BTreeMap<String, toml::Value>,
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+    #[serde(default)]
+    pub lifecycle: Lifecycle,
+}
+
+impl ContractSpec {
+    pub fn deployer(&self) -> &str {
+        self.deployer.as_deref().unwrap_or("admin")
+    }
+
+    /// The Wasm's sha256 when `wasm` is one (not a file).
+    pub fn wasm_hash(&self) -> Option<[u8; 32]> {
+        let w = &self.wasm;
+        (w.len() == 64 && w.chars().all(|c| c.is_ascii_hexdigit())).then(|| {
+            let v: Vec<u8> = (0..32)
+                .map(|i| u8::from_str_radix(&w[2 * i..2 * i + 2], 16).expect("hex"))
+                .collect();
+            v.try_into().expect("32 bytes")
+        })
+    }
+
+    /// Its arguments as `stellar contract deploy -- --name value` takes them:
+    /// strings as they are, numbers and booleans as written, lists and maps
+    /// as JSON.
+    pub fn arg_strings(&self) -> Vec<(String, String)> {
+        self.args
+            .iter()
+            .map(|(k, v)| {
+                let v = match v {
+                    toml::Value::String(s) => s.clone(),
+                    toml::Value::Array(_) | toml::Value::Table(_) => {
+                        serde_json::to_string(v).unwrap_or_default()
+                    }
+                    other => other.to_string(),
+                };
+                (k.clone(), v)
+            })
+            .collect()
+    }
+}
+
 /// One `[env.<name>]` table.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -322,6 +391,12 @@ pub struct EnvSpec {
     /// Declared tokens, by name (`token.<name>`).
     #[serde(default)]
     pub tokens: BTreeMap<String, TokenSpec>,
+    /// Declared contracts, by name (`contract.<name>`).
+    #[serde(default)]
+    pub contracts: BTreeMap<String, ContractSpec>,
+    /// `prevent_destroy`: `caravel destroy` refuses this deployment.
+    #[serde(default)]
+    pub lifecycle: Lifecycle,
 }
 
 /// A lane file and one of its deployments.
@@ -433,14 +508,14 @@ impl Manifest {
         let early: Vec<String> = r
             .deferred
             .iter()
-            .filter(|p| !crate::attrs::DEFERRED_OK.iter().any(|ok| p.starts_with(ok)))
+            .filter(|p| !crate::attrs::deferred_ok(p))
             .map(|p| {
                 let at = doc
                     .locate(&format!("env.{env}.{p}"))
                     .map(|l| format!("\n    at {l}"))
                     .unwrap_or_default();
                 format!(
-                    "{p} uses a value known only once the lane's keys and addresses are (account, contract, token, node, …): only relayer feeds and [outputs] can{at}"
+                    "{p} uses a value known only once the lane's keys and addresses are (account, contract, token, node, …): only relayer feeds, contracts' args and [outputs] can{at}"
                 )
             })
             .collect();
@@ -578,6 +653,17 @@ impl Manifest {
             .context("relayer.feeds")?
             .unwrap_or_default();
         self.env.relayer.feeds = feeds;
+        // Contracts' arguments may name addresses (C-20).
+        if let Some(contracts) = r.table.get("contracts").and_then(|c| c.as_table()) {
+            for (name, c) in contracts {
+                if let (Some(spec), Some(args)) = (
+                    self.env.contracts.get_mut(name),
+                    c.get("args").and_then(|a| a.as_table()),
+                ) {
+                    spec.args = args.clone().into_iter().collect();
+                }
+            }
+        }
         self.deferred.clear();
         Ok(())
     }
@@ -814,6 +900,33 @@ impl EnvSpec {
         }
         if self.validators.is_empty() {
             p.push("[[validators]]: a lane needs at least one validator".into());
+        }
+        for (name, c) in &self.contracts {
+            let at = format!("contracts.{name}");
+            if !identity_ok(name) || name == "settlement" {
+                p.push(format!(
+                    "{at}: a contract's name is letters, digits, '-', '_', '.', and not `settlement`"
+                ));
+            }
+            if c.wasm_hash().is_none() && !c.wasm.ends_with(".wasm") {
+                p.push(format!(
+                    "{at}.wasm = {:?}: a .wasm file (relative to the lane file) or the sha256 of uploaded Wasm",
+                    c.wasm
+                ));
+            }
+            let d = c.deployer();
+            if d != "admin" && !self.accounts.contains_key(d) {
+                p.push(format!(
+                    "{at}.deployer = {d:?}: \"admin\" or a declared account's name"
+                ));
+            }
+            for k in c.args.keys() {
+                if !k.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+                    p.push(format!(
+                        "{at}.args.{k}: a constructor argument's name is letters, digits and '_'"
+                    ));
+                }
+            }
         }
         for (name, t) in &self.tokens {
             let at = format!("tokens.{name}");

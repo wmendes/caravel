@@ -274,6 +274,51 @@ impl Cli {
             .0)
     }
 
+    /// Deploys uploaded Wasm with a salt, passing the constructor's
+    /// arguments as `-- --name value` (C-20).
+    pub fn deploy_contract(
+        &self,
+        source: &str,
+        wasm_hash: &Key,
+        salt: &Key,
+        ctor: &[(String, String)],
+    ) -> Result<Key> {
+        let mut args = self.with_net(vec![
+            s("contract"),
+            s("deploy"),
+            s("--wasm-hash"),
+            hex(wasm_hash),
+            s("--salt"),
+            hex(salt),
+            s("--source-account"),
+            s(source),
+        ]);
+        if !ctor.is_empty() {
+            args.push(s("--"));
+            for (k, v) in ctor {
+                args.push(format!("--{k}"));
+                args.push(v.clone());
+            }
+        }
+        // RPC can answer a ledger behind a Wasm upload just sent.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        let out = loop {
+            match run(&args) {
+                Err(e)
+                    if e.to_string().contains("Code not found")
+                        && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                }
+                r => break r?,
+            }
+        };
+        let c = out.lines().last().unwrap_or("");
+        Ok(stellar_strkey::Contract::from_string(c)
+            .map_err(|_| anyhow!("stellar contract deploy printed {c:?}, not a contract address"))?
+            .0)
+    }
+
     /// `admin_rotate_signers(new)`: a testnet-only admin power.
     pub fn rotate_signers(
         &self,

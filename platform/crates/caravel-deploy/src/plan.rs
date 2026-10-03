@@ -33,6 +33,25 @@ pub struct SignerSet {
     pub threshold: u32,
 }
 
+/// A declared contract (`[env.<name>.contracts.<n>]`, C-20), resolved.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeclaredContract {
+    pub name: String,
+    /// The Wasm's sha256.
+    pub wasm: Key,
+    /// Where to upload it from, when the lane file names a file.
+    pub wasm_file: Option<std::path::PathBuf>,
+    /// The identity that deploys it.
+    pub deployer: String,
+    pub deployer_key: Key,
+    pub salt: Key,
+    /// `contract_id(deployer, salt)`.
+    pub address: Key,
+    /// Constructor arguments, `--name value`.
+    pub args: Vec<(String, String)>,
+    pub depends_on: Vec<String>,
+}
+
 /// A declared token (`[env.<name>.tokens.<n>]`, C-19), resolved.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeclaredToken {
@@ -114,6 +133,8 @@ pub struct Desired {
     pub accounts: Vec<DeclaredAccount>,
     /// Declared tokens other than the settlement token, in name order.
     pub tokens: Vec<DeclaredToken>,
+    /// Declared contracts, in name order.
+    pub contracts: Vec<DeclaredContract>,
 }
 
 #[derive(Clone, Debug)]
@@ -139,6 +160,10 @@ pub struct Chain {
     pub token_exists: bool,
     /// Declared tokens' contracts that exist.
     pub tokens: BTreeSet<Key>,
+    /// Declared contracts that exist: address → the Wasm they run.
+    pub contracts: BTreeMap<Key, Key>,
+    /// Declared contracts' Wasm that is uploaded.
+    pub wasms: BTreeSet<Key>,
     pub settlement_wasm_uploaded: bool,
     pub settlement: Option<OnChain>,
 }
@@ -241,8 +266,21 @@ pub enum Step {
         code: String,
         issuer: Key,
     },
+    /// Uploads Wasm: the settlement's (`settlement`) or a declared
+    /// contract's.
     UploadWasm {
+        name: String,
         hash: Key,
+    },
+    /// Deploys a declared contract at its derived address, with its
+    /// constructor's arguments.
+    DeployContract {
+        name: String,
+        contract: Key,
+        deployer: String,
+        wasm: Key,
+        salt: Key,
+        args: Vec<(String, String)>,
     },
     DeploySettlement {
         contract: Key,
@@ -319,6 +357,18 @@ pub enum Problem {
     AccountMissing {
         who: String,
     },
+    /// A declared contract runs other Wasm than the lane file names (a
+    /// contract isn't upgraded by this tool).
+    ContractCodeDrift {
+        name: String,
+        code: Key,
+        want: Key,
+    },
+    /// A declared contract's Wasm is a hash that isn't on the network.
+    WasmMissing {
+        name: String,
+        hash: Key,
+    },
     /// A declared account's balance needs a top-up the lane file can't
     /// mint: the admin doesn't issue the token.
     CannotMint {
@@ -339,6 +389,9 @@ pub struct Plan {
     pub targets: Vec<String>,
     /// `--replace`: the resources replaced even if they match.
     pub replaced: Vec<String>,
+    /// What the plan can't check, said once (a contract's constructor
+    /// arguments, which can't be read back).
+    pub notes: Vec<String>,
 }
 
 impl Plan {
@@ -367,7 +420,10 @@ pub fn step_addr(s: &Step) -> String {
             format!("account.{who}")
         }
         Step::DeployToken { name, .. } => format!("token.{name}"),
-        Step::UploadWasm { .. } => "wasm.settlement".into(),
+        Step::UploadWasm { name, .. } if name == "settlement" => "wasm.settlement".into(),
+        Step::UploadWasm { name, .. } | Step::DeployContract { name, .. } => {
+            format!("contract.{name}")
+        }
         Step::DeploySettlement { .. } => "contract.settlement".into(),
         Step::RotateSigners { .. } => "signers.settlement".into(),
         Step::WipeHostData => "host.data".into(),
@@ -393,6 +449,9 @@ pub fn problem_addr(p: &Problem) -> String {
         Problem::NodeMismatch { node, .. } => format!("node.{node}"),
         Problem::AccountMissing { who } | Problem::CannotMint { who, .. } => {
             format!("account.{who}")
+        }
+        Problem::ContractCodeDrift { name, .. } | Problem::WasmMissing { name, .. } => {
+            format!("contract.{name}")
         }
     }
 }
@@ -497,6 +556,7 @@ pub(crate) fn legacy_diff(d: &Desired, chain: &Chain, host: &Host) -> Plan {
         None => {
             if !chain.settlement_wasm_uploaded {
                 steps.push(Step::UploadWasm {
+                    name: "settlement".into(),
                     hash: d.settlement_wasm,
                 });
             }
@@ -727,6 +787,7 @@ impl Plan {
             "target_epoch": self.target_epoch,
             "targets": self.targets,
             "replaced": self.replaced,
+            "notes": self.notes,
             "steps": steps,
             "problems": problems,
         })
@@ -780,6 +841,9 @@ impl Plan {
         }
         if !self.replaced.is_empty() {
             let _ = writeln!(o, "  replace: {}", self.replaced.join(", "));
+        }
+        for n in &self.notes {
+            let _ = writeln!(o, "  note: {n}");
         }
         if self.steps.is_empty() && self.problems.is_empty() {
             o.push_str("\nNo changes.\n");
@@ -853,7 +917,25 @@ pub fn step_line(s: &Step) -> String {
             c_short(contract),
             g_short(issuer)
         ),
-        Step::UploadWasm { hash } => format!("+ upload    settlement Wasm {}", short(hash)),
+        Step::UploadWasm { name, hash } => format!("+ upload    {name} Wasm {}", short(hash)),
+        Step::DeployContract {
+            name,
+            contract,
+            deployer,
+            args,
+            ..
+        } => format!(
+            "+ deploy    {name} {} (by {deployer}{})",
+            strkey(contract),
+            if args.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    ", with {}",
+                    args.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>().join(", ")
+                )
+            }
+        ),
         Step::DeploySettlement { contract } => {
             format!("+ deploy    settlement {}", strkey(contract))
         }
@@ -917,6 +999,15 @@ pub fn problem_line(p: &Problem) -> String {
         ),
         Problem::NodeMismatch { node, field } => format!(
             "! {node} reports another {field} than its files give"
+        ),
+        Problem::ContractCodeDrift { name, code, want } => format!(
+            "! contract {name} runs {}, not the lane file's {}: a deployed contract isn't upgraded here; give it a new salt for a new one",
+            short(code),
+            short(want)
+        ),
+        Problem::WasmMissing { name, hash } => format!(
+            "! contract {name}'s Wasm {} isn't on the network: name its .wasm file instead, so apply uploads it",
+            short(hash)
         ),
         Problem::AccountMissing { who } => format!(
             "! account {who} isn't on the network, and its fund = false: fund it, or let friendbot (fund = true)"
