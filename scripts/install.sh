@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Builds Caravel from this checkout and installs it (M0.6, DEC-076):
+# Installs Caravel: built from this checkout (M0.6, DEC-076), or from a
+# prebuilt release archive (M0.7, H-02):
 #
 #   $PREFIX/bin/caravel, $PREFIX/bin/caravel-<template>-node
 #   $PREFIX/bin/stellar-caravel -> caravel        (a Stellar CLI plugin)
@@ -8,6 +9,7 @@
 #
 #   ./scripts/install.sh [--prefix DIR] [--templates "perps payments"] [--with-web]
 #                        [--wasm-dir DIR] [--skip-build]
+#   ./scripts/install.sh --archive caravel-<version>-<target>.tar.gz [--prefix DIR]
 #
 # PREFIX defaults to $CARAVEL_HOME, else ~/.caravel. --wasm-dir takes the
 # contracts from the CI contracts-wasm artifact, the builds of record
@@ -22,6 +24,7 @@ TEMPLATES=""
 WITH_WEB=0
 WASM_DIR=""
 SKIP_BUILD=0
+ARCHIVE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --prefix) PREFIX="$2"; shift 2 ;;
@@ -29,17 +32,62 @@ while [[ $# -gt 0 ]]; do
     --with-web) WITH_WEB=1; shift ;;
     --wasm-dir) WASM_DIR="$2"; shift 2 ;;
     --skip-build) SKIP_BUILD=1; shift ;;
-    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --archive) ARCHIVE="$2"; shift 2 ;;
+    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "install: unknown option $1 (see --help)" >&2; exit 2 ;;
   esac
 done
+log() { printf '\n== %s\n' "$*"; }
+fail() { echo "install: $*" >&2; exit 1; }
+if command -v sha256sum > /dev/null; then SHA256=(sha256sum); else SHA256=(shasum -a 256); fi
+
+# Moves a release directory into PREFIX and links its binaries.
+install_release() {
+  local dir="$1" name
+  name="$(cut -c1-12 < "$dir/COMMIT")"
+  log "install into $PREFIX"
+  mkdir -p "$PREFIX/bin" "$PREFIX/share/caravel"
+  rm -rf "$PREFIX/share/caravel/$name"
+  mv "$dir" "$PREFIX/share/caravel/$name"
+  ln -sfn "$name" "$PREFIX/share/caravel/current"
+  for b in "$PREFIX/share/caravel/$name"/bin/*; do
+    install -m 755 "$b" "$PREFIX/bin/"
+  done
+  ln -sfn caravel "$PREFIX/bin/stellar-caravel"
+  "$PREFIX/bin/caravel" version
+  case ":$PATH:" in
+    *":$PREFIX/bin:"*) ;;
+    *) printf '\nAdd Caravel to your PATH:\n  export PATH="%s/bin:$PATH"\n' "$PREFIX" ;;
+  esac
+}
+
+# A prebuilt archive: checked against its .sha256 when there is one, then
+# its own SHA256SUMS, then installed. No build tools needed.
+if [[ -n "$ARCHIVE" ]]; then
+  [[ -f "$ARCHIVE" ]] || fail "no archive $ARCHIVE"
+  if [[ -f "$ARCHIVE.sha256" ]]; then
+    want="$(awk '{print $1}' "$ARCHIVE.sha256")"
+    have="$("${SHA256[@]}" "$ARCHIVE" | awk '{print $1}')"
+    [[ "$want" == "$have" ]] || fail "$ARCHIVE does not match its .sha256"
+  fi
+  mkdir -p "$PREFIX/share/caravel"
+  STAGE="$PREFIX/share/caravel/.stage-$$"
+  rm -rf "$STAGE"
+  mkdir -p "$STAGE"
+  trap 'rm -rf "$STAGE"' EXIT
+  tar -xzf "$ARCHIVE" -C "$STAGE"
+  dir="$(find "$STAGE" -mindepth 1 -maxdepth 1 -type d | head -1)"
+  [[ -f "$dir/COMMIT" && -f "$dir/SHA256SUMS" ]] || fail "$ARCHIVE is not a Caravel release"
+  (cd "$dir" && "${SHA256[@]}" -c --quiet SHA256SUMS) || fail "$ARCHIVE: a file does not match SHA256SUMS"
+  command -v node > /dev/null || echo "install: note: Node.js 22 or later is needed to run a lane's relayer" >&2
+  install_release "$dir"
+  exit 0
+fi
+
 cd "$ROOT"
 if [[ -z "$TEMPLATES" ]]; then
   TEMPLATES="$(cd lanes && for d in */; do [[ -d "$d/node" ]] && printf '%s ' "${d%/}"; done)"
 fi
-log() { printf '\n== %s\n' "$*"; }
-fail() { echo "install: $*" >&2; exit 1; }
-
 log "tools"
 command -v cargo > /dev/null || fail "cargo is not installed (https://rustup.rs)"
 command -v node > /dev/null || fail "Node.js 22 or later is not installed"
@@ -99,7 +147,6 @@ args=("$STAGE/release" --templates "$TEMPLATES")
 if [[ -n "$WASM_DIR" ]]; then
   [[ -f "$WASM_DIR/settlement.wasm" ]] || fail "$WASM_DIR has no settlement.wasm (the CI contracts-wasm artifact)"
   cp "$WASM_DIR"/*.wasm "$STAGE/release/contracts/"
-  if command -v sha256sum > /dev/null; then SHA256=(sha256sum); else SHA256=(shasum -a 256); fi
   # The release's directories that exist (a payments-only one has no
   # relayer-feeds): find fails on a missing one, and this runs under pipefail.
   (cd "$STAGE/release" && dirs=() && for d in bin contracts relayer relayer-feeds; do if [[ -d "$d" ]]; then dirs+=("$d"); fi; done \
@@ -108,20 +155,4 @@ if [[ -n "$WASM_DIR" ]]; then
     echo "local-$("${SHA256[@]}" "$STAGE/release/SHA256SUMS" | cut -c1-8)" > "$STAGE/release/COMMIT"
   fi
 fi
-NAME="$(cut -c1-12 < "$STAGE/release/COMMIT")"
-
-log "install into $PREFIX"
-mkdir -p "$PREFIX/bin" "$PREFIX/share/caravel"
-rm -rf "$PREFIX/share/caravel/$NAME"
-mv "$STAGE/release" "$PREFIX/share/caravel/$NAME"
-ln -sfn "$NAME" "$PREFIX/share/caravel/current"
-for b in "$PREFIX/share/caravel/$NAME"/bin/*; do
-  install -m 755 "$b" "$PREFIX/bin/"
-done
-ln -sfn caravel "$PREFIX/bin/stellar-caravel"
-
-"$PREFIX/bin/caravel" version
-case ":$PATH:" in
-  *":$PREFIX/bin:"*) ;;
-  *) printf '\nAdd Caravel to your PATH:\n  export PATH="%s/bin:$PATH"\n' "$PREFIX" ;;
-esac
+install_release "$STAGE/release"
