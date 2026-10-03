@@ -149,11 +149,13 @@ section.band { padding-block: clamp(48px, 6vw, 72px); border-top: 1px solid var(
 .head h2 { font-size: clamp(1.875rem, 4.2vw, 3rem); line-height: 1.06; letter-spacing: -.02em; }
 
 /* Who it's for: one sentence whose subject changes, and the four rules that app would set, each over the line that sets it */
-.who-for h2 { font-size: clamp(2.25rem, 6vw, 4.5rem); line-height: 1.02; letter-spacing: -.03em; max-width: 16ch; }
-.who-for .swap { display: inline-grid; vertical-align: bottom; overflow: hidden; color: var(--lane); }
-.who-for .swap > span { grid-area: 1 / 1; transition: transform .55s var(--out), opacity .55s var(--out); }
-.who-for .swap > span.out { transform: translateY(-100%); opacity: 0; }
-.who-for .swap > span.pre { transform: translateY(100%); opacity: 0; transition: none; }
+.who-for h2 { font-size: clamp(2rem, 7vw, 4.5rem); line-height: 1.04; letter-spacing: -.03em; }
+/* The subject is its own line. Every subject sits in the same cell, so the line keeps the size of the longest and nothing below moves; the clip box is padded so descenders aren't cut. */
+.who-for .swap { display: grid; overflow: hidden; color: var(--lane); padding-block: .04em .2em; margin-block: -.04em -.2em; }
+.who-for .swap > span { grid-area: 1 / 1; opacity: 0; transform: translateY(130%); transition: transform .55s var(--out), opacity .55s var(--out); }
+.who-for .swap > span.on { opacity: 1; transform: none; }
+.who-for .swap > span.out { opacity: 0; transform: translateY(-130%); }
+.who-for .swap > span.snap { transition: none; }
 .apps { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-top: 28px; }
 .app { font: 700 .9375rem var(--font); color: var(--muted); background: none; border: 0; padding: 6px 0; min-height: 40px; cursor: pointer; border-bottom: 2px solid transparent; transition: color .2s ease, border-color .2s ease; }
 .app:hover { color: var(--ink); }
@@ -161,9 +163,11 @@ section.band { padding-block: clamp(48px, 6vw, 72px); border-top: 1px solid var(
 .rules4 { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px; margin-top: 36px; }
 @media (max-width: 960px) { .rules4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 520px) { .rules4 { grid-template-columns: minmax(0, 1fr); gap: 20px; } }
-.rules4 li { border-top: 2px solid var(--rule); padding-top: 14px; display: grid; gap: 6px; transition: opacity .45s var(--out), transform .45s var(--out); }
+.rules4 li { border-top: 2px solid var(--rule); padding-top: 14px; display: grid; gap: 6px; align-content: start; transition: opacity .45s var(--out), transform .45s var(--out); }
 .rules4 li b { font-size: 1.1875rem; line-height: 1.25; }
 .rules4 li code { font-size: .8125rem; color: var(--harbor-ink); overflow-wrap: anywhere; }
+/* Four across, the longest setting takes two lines: keep that room for every app so nothing below moves. */
+@media (min-width: 961px) { .rules4 li code { min-height: 3.1em; } }
 .rules4.fade li { opacity: 0; transform: translateY(6px); }
 .rules4 li:nth-child(2) { transition-delay: .04s; } .rules4 li:nth-child(3) { transition-delay: .08s; } .rules4 li:nth-child(4) { transition-delay: .12s; }
 .who-note { margin-top: 28px; display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: .9375rem; color: var(--muted); }
@@ -320,7 +324,7 @@ footer p { font-size: .875rem; color: var(--muted); }
   <section class="band who-for" id="who" aria-labelledby="who-h">
     <div class="wrap">
       <p class="eyebrow">Who it's for</p>
-      <h2 id="who-h">Run <span class="swap" id="whoSwap"><span>a trading venue</span></span> with its own rules.</h2>
+      <h2 id="who-h">Run <span class="swap" id="whoSwap"><span class="on">a trading venue</span><span aria-hidden="true">a payment network</span><span aria-hidden="true">a game economy</span><span aria-hidden="true">an agent marketplace</span></span> with its own rules.</h2>
       <div class="apps" role="tablist" aria-label="Kinds of app">
         <button class="app" type="button" role="tab" aria-selected="true" aria-controls="whoRules" data-app="0">Trading venue</button>
         <button class="app" type="button" role="tab" aria-selected="false" aria-controls="whoRules" data-app="1" tabindex="-1">Payment network</button>
@@ -555,13 +559,14 @@ const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 (() => {
   const APPS = [
     { name: "a trading venue", kind: "Template: Perps", tail: ", live on testnet", rules: [["Zero maker fees", "maker_fee_bps = 0"], ["Up to 10x leverage", "imf_bps = 1000"], ["Its own price feed", "[perps.oracle] keys = […]"], ["Settles in Circle's USDC", 'token = "circle-usdc"']] },
-    { name: "a payment network", kind: "Template: Payments", tail: "", rules: [["A flat fee per transfer", "transfer_fee = 100000"], ["Members only", 'mode = "allowlist"'], ["Two of three validators sign", "threshold = 2"], ["Settles in its own token", 'token = "usd"']] },
-    { name: "a game economy", kind: "Your engine", tail: ", on the app SDK", rules: [["200 ms blocks", "block_time_ms = 200"], ["Players only", 'mode = "allowlist"'], ["50 moves a block per player", "max_txs_per_account_per_block = 50"], ["Its own in-game token", 'token = "gold"']] },
-    { name: "an agent marketplace", kind: "Template: Payments", tail: "", rules: [["No fee between agents", "transfer_fee = 0"], ["Session keys for each agent", "max_session_keys = 4"], ["Up to 256 agents", "max_accounts = 256"], ["Settles in USDC", 'token = "circle-usdc"']] },
+    { name: "a payment network", kind: "Template: Payments", tail: "", rules: [["A flat fee per transfer", "transfer_fee = 100000"], ["Members only", 'mode = "allowlist"'], ["2-of-3 validators", "threshold = 2"], ["Settles in its own token", 'token = "usd"']] },
+    { name: "a game economy", kind: "Your engine", tail: ", on the app SDK", rules: [["200 ms blocks", "block_time_ms = 200"], ["Players only", 'mode = "allowlist"'], ["50 moves per block", "max_txs_per_account_per_block = 50"], ["Its own in-game token", 'token = "gold"']] },
+    { name: "an agent marketplace", kind: "Template: Payments", tail: "", rules: [["No fee between agents", "transfer_fee = 0"], ["Session keys per agent", "max_session_keys = 4"], ["Up to 256 agents", "max_accounts = 256"], ["Settles in USDC", 'token = "circle-usdc"']] },
   ];
   const swap = document.getElementById("whoSwap"), list = document.getElementById("whoRules"), kind = document.getElementById("whoKind");
   const tabs = Array.from(document.querySelectorAll("#who .app"));
   if (!swap || !list || !tabs.length) return;
+  swap.firstElementChild.removeAttribute("aria-hidden");
   const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   let cur = 0, timer = null, picked = false, seen = false;
   const esc = (t) => t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -574,12 +579,14 @@ const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     kind.textContent = a.kind;
     kind.nextSibling.textContent = a.tail;
     const fill = () => { list.innerHTML = a.rules.map(([b, c]) => `<li><b>${esc(b)}</b><code>${esc(c)}</code></li>`).join(""); };
-    if (still) { swap.firstElementChild.textContent = a.name; fill(); return; }
-    const old = swap.firstElementChild, nu = document.createElement("span");
-    nu.textContent = a.name; nu.className = "pre"; swap.appendChild(nu);
-    void nu.offsetWidth; // commit the start position, then slide both
-    old.classList.add("out"); nu.classList.remove("pre");
-    setTimeout(() => old.remove(), 600);
+    const words = Array.from(swap.children);
+    words.forEach((w, k) => w.setAttribute("aria-hidden", String(k !== i)));
+    const old = words.find((w) => w.classList.contains("on")), nu = words[i];
+    if (still) { old.classList.remove("on"); nu.classList.add("on"); fill(); return; }
+    // The new subject rises from below while the old one leaves upwards.
+    nu.classList.add("snap"); nu.classList.remove("out"); void nu.offsetWidth; nu.classList.remove("snap");
+    old.classList.remove("on"); old.classList.add("out"); nu.classList.add("on");
+    setTimeout(() => { if (!old.classList.contains("on")) { old.classList.add("snap"); old.classList.remove("out"); void old.offsetWidth; old.classList.remove("snap"); } }, 600);
     list.classList.add("fade");
     setTimeout(() => { fill(); void list.offsetWidth; list.classList.remove("fade"); }, 260);
   }
