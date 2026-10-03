@@ -1,7 +1,7 @@
 {
   "feeds": [
     {
-      "intervalMs": 1000,
+      "intervalMs": 500,
       "module": "/opt/caravel/relayer-feeds/perps/dist/index.js",
       "options": {
         "markets": {

@@ -13,8 +13,8 @@ template = "perps"                         # the app this lane runs (DEC-054)
 engine_wasm_sha256 = "4571cd252d4b78d523d01fc4a31ab763a1aff77aecafbb9d7302cfb879abbf0a"   # the perps engine of record; nodes refuse another
 
 [node]                                     # not consensus
-block_time_ms = 1000                       # allowed 200..=5000
-checkpoint_every_blocks = 60                # one checkpoint a minute on testnet (DEC-044)
+block_time_ms = 500                        # allowed 200..=5000; 0.5 s on testnet (DEC-104)
+checkpoint_every_blocks = 120               # still one checkpoint a minute (DEC-044, DEC-104)
 max_batch_bytes = 96000
 
 [access]
@@ -150,7 +150,7 @@ intervals_ms = { inbox = 3000, checkpoints = 2000 }
 # The perps oracle (DEC-058): Coinbase's WebSocket first, then its REST spot, then Reflector.
 [[env.testnet.relayer.feeds]]
 module = "relayer-feeds/perps/dist/index.js"
-intervalMs = 1000
+intervalMs = 500
 
 [env.testnet.relayer.feeds.options]
 maxSourceAgeSecs = 900
