@@ -106,6 +106,18 @@ impl VarType {
         }
     }
 
+    pub(crate) fn parse_name(s: &str) -> Option<Self> {
+        Self::parse(s)
+    }
+
+    pub(crate) fn describe(&self) -> &'static str {
+        self.name()
+    }
+
+    pub(crate) fn accepts_value(&self, v: &toml::Value) -> bool {
+        self.accepts(v)
+    }
+
     fn accepts(&self, v: &toml::Value) -> bool {
         matches!(
             (self, v),
@@ -185,7 +197,7 @@ fn read_input(ty: VarType, raw: &str) -> Result<toml::Value, String> {
 }
 
 impl LaneDoc {
-    fn diag_at(&self, path: &str, message: String) -> Diagnostic {
+    pub(crate) fn diag_at(&self, path: &str, message: String) -> Diagnostic {
         let mut d = Diagnostic::new(message).at(self.origin(path).map(|o| o.span.clone()));
         if let Some(via) = self.origin(path).and_then(|o| o.via.clone()) {
             d = d.note(format!("inherited from [env.{via}]"));
@@ -479,12 +491,37 @@ impl LaneDoc {
         let mut deferred = Vec::new();
         let mut out = toml::Table::new();
         for (k, v) in table {
-            if k == "outputs" {
+            if k == "outputs" || k == "modules" {
                 continue;
             }
             let path = format!("env.{env}.{k}");
             if let Some(v) = self.eval_value(v, &scope, &path, &mut diags, &mut deferred) {
                 out.insert(k.clone(), v);
+            }
+        }
+        // A `.` in a name means a module's resource (C-21).
+        for (kinds, _) in crate::modules::KINDS {
+            if let Some(t) = table.get(kinds).and_then(|t| t.as_table()) {
+                for n in t.keys().filter(|n| n.contains('.')) {
+                    diags.push(self.diag_at(
+                        &format!("env.{env}.{kinds}.{n}"),
+                        format!("{kinds}.{n}: a name can't hold '.' (it would read as a module's)"),
+                    ));
+                }
+            }
+        }
+        // Modules' resources join the deployment's.
+        for inst in self.module_instances(env, &scope, &mut diags) {
+            for (kinds, resources) in self.module_resources(env, &inst, &mut diags, &mut deferred) {
+                let toml::Value::Table(t) = out
+                    .entry(kinds.to_string())
+                    .or_insert_with(|| toml::Value::Table(toml::Table::new()))
+                else {
+                    continue;
+                };
+                for (n, r) in resources {
+                    t.insert(n, r);
+                }
             }
         }
         if !diags.is_empty() {
@@ -512,6 +549,24 @@ impl LaneDoc {
         extra: &BTreeMap<String, Value>,
     ) -> Result<Vec<Output>, Error> {
         let (scope, _, sensitive_vars) = self.scope_for(env, inputs, extra)?;
+        // `module.<instance>.<output>` (C-21).
+        let mut diags = Vec::new();
+        let modules: BTreeMap<String, Value> = self
+            .module_instances(env, &scope, &mut diags)
+            .iter()
+            .map(|inst| {
+                (
+                    inst.name.clone(),
+                    Value::Map(self.module_outputs(inst, &mut diags)),
+                )
+            })
+            .collect();
+        if !diags.is_empty() {
+            return Err(self.error(diags));
+        }
+        let mut roots = scope.0.clone();
+        roots.insert("module".into(), Value::Map(modules));
+        let scope = MapScope(roots);
         let mut decls: BTreeMap<String, (toml::Value, String)> = self
             .outputs
             .iter()
@@ -777,7 +832,7 @@ impl LaneDoc {
     }
 
     /// A value with its expressions evaluated; `None` leaves the key out.
-    fn eval_value(
+    pub(crate) fn eval_value(
         &self,
         v: &toml::Value,
         scope: &MapScope,

@@ -991,3 +991,37 @@ fn a_wasm_hash_the_network_lacks_is_a_problem() {
     assert!(plan.problems.is_empty());
     assert!(matches!(&plan.steps[..], [Step::DeployContract { name, .. }] if name == "oracle"));
 }
+
+#[test]
+fn an_issuer_holding_its_own_token_needs_nothing_of_it() {
+    let mut d = desired();
+    let eur = asset_contract_id(Network::Local.passphrase(), "EUR", &key(0xE9));
+    d.tokens = vec![DeclaredToken {
+        name: "eur".into(),
+        code: "EUR".into(),
+        issuer: key(0xE9),
+        minter: Some("demo-treasury".into()),
+        contract: eur,
+    }];
+    // The treasury issues EUR and lists it as a trustline and a balance.
+    let mut treasury = account("treasury", 0xE9, false, None);
+    treasury.trustlines = vec![("EUR".into(), key(0xE9))];
+    treasury.balances = vec![Holding {
+        token: "eur".into(),
+        code: "EUR".into(),
+        issuer: key(0xE9),
+        contract: eur,
+        minter: Some("demo-treasury".into()),
+        want: USDC,
+    }];
+    d.accounts = vec![treasury];
+    let plan =
+        diff_with(&d, &Chain::default(), &Host::default(), &Options::default()).expect("no cycle");
+    let addrs = lines(&plan);
+    let at = |a: &str| addrs.iter().position(|x| x == a).unwrap();
+    assert!(at("account.treasury") < at("token.eur"));
+    assert!(!plan
+        .steps
+        .iter()
+        .any(|s| matches!(s, Step::Trust { .. } | Step::Mint { .. })));
+}

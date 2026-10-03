@@ -21,6 +21,7 @@
 
 pub mod diag;
 pub mod expr;
+mod modules;
 mod resolve;
 
 pub use resolve::{Inputs, Output, ResolvedEnv, VarType};
