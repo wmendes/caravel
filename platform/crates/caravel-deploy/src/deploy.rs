@@ -61,6 +61,8 @@ pub struct Keys {
     pub relayer: Key,
     /// In file order.
     pub validators: Vec<Key>,
+    /// Declared accounts, by name.
+    pub accounts: BTreeMap<String, Key>,
 }
 
 impl Keys {
@@ -75,6 +77,12 @@ impl Keys {
                 .iter()
                 .map(|v| Cli::public_key(&v.key))
                 .collect::<Result<Vec<_>>>()?,
+            accounts: m
+                .env
+                .accounts
+                .iter()
+                .map(|(name, a)| Ok((name.clone(), Cli::public_key(a.identity_of(name))?)))
+                .collect::<Result<_>>()?,
         })
     }
 }
@@ -162,6 +170,56 @@ pub fn desired(
         .collect();
     signers.sort();
     let sp = &m.env.settlement_params;
+    // The Stellar asset behind the settlement token, whoever deploys its
+    // contract (none for a SEP-41 contract).
+    let settlement_asset = match &m.env.token {
+        Token::Named(_) => Some((
+            "USDC".to_string(),
+            stellar_strkey::ed25519::PublicKey::from_string(crate::versions::testnet_usdc_issuer())
+                .map_err(|_| anyhow!("versions.json testnet.usdc_issuer"))?
+                .0,
+        )),
+        Token::Contract { .. } => None,
+        _ => a.token_asset.clone(),
+    };
+    let mut accounts = Vec::new();
+    for (name, spec) in &m.env.accounts {
+        let key = *keys
+            .accounts
+            .get(name)
+            .ok_or_else(|| anyhow!("no key for account {name}"))?;
+        let trustlines = spec
+            .trustlines
+            .iter()
+            .map(|t| {
+                if t == "settlement" {
+                    settlement_asset.clone().ok_or_else(|| {
+                        anyhow!(
+                            "accounts.{name}: the settlement token is no Stellar asset to trust"
+                        )
+                    })
+                } else {
+                    crate::manifest::parse_asset(t)
+                        .ok_or_else(|| anyhow!("accounts.{name}.trustlines: {t:?}"))
+                }
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let balance = spec
+            .balances
+            .get("settlement")
+            .map(|v| caravel_node::plugin::parse_amount(v, Some(7)))
+            .transpose()
+            .with_context(|| format!("accounts.{name}.balances.settlement"))?;
+        accounts.push(crate::plan::DeclaredAccount {
+            name: name.clone(),
+            identity: spec.identity_of(name).to_string(),
+            key,
+            fund: spec.fund.unwrap_or(true),
+            trustlines,
+            balance,
+            depends_on: spec.depends_on.clone(),
+        });
+    }
     Ok(Desired {
         lane_name: m.lane.lane.name.clone(),
         env: m.env_name.clone(),
@@ -174,6 +232,7 @@ pub fn desired(
         relayer: keys.relayer,
         token: a.token,
         token_asset: a.token_asset.clone(),
+        settlement_asset,
         settlement: a.settlement,
         settlement_pinned: a.settlement_pinned,
         settlement_wasm,
@@ -201,6 +260,7 @@ pub fn desired(
             files: BTreeMap::new(),
         },
         vars: m.vars.clone(),
+        accounts,
     })
 }
 
@@ -399,14 +459,20 @@ impl Prepared {
     }
 
     /// The deployment's resources and their edges (`caravel graph`).
-    pub fn graph(&self) -> crate::graph::Graph {
-        crate::graph::build(&self.desired, &self.host)
+    pub fn graph(&self) -> Result<crate::graph::Graph> {
+        crate::graph::build(&self.desired, &self.host).map_err(|e| anyhow!(e))
     }
 
-    fn identity_of(&self, who: &str) -> &str {
+    fn identity_of<'a>(&'a self, who: &'a str) -> &'a str {
         match who {
             "admin" => &self.m.env.admin,
-            _ => &self.m.env.relayer.account,
+            "relayer" => &self.m.env.relayer.account,
+            name => self
+                .m
+                .env
+                .accounts
+                .get(name)
+                .map_or(name, |a| a.identity_of(name)),
         }
     }
 
@@ -511,6 +577,10 @@ impl Prepared {
             eprintln!("→ {}", step_line(step));
             match step {
                 Step::Fund { who, .. } => self.cli.fund(self.identity_of(who))?,
+                Step::Trust { who, code, issuer } => {
+                    self.cli.change_trust(self.identity_of(who), code, issuer)?
+                }
+                Step::Mint { key, amount, .. } => self.cli.mint(admin, &d.token, key, *amount)?,
                 Step::DeployToken { code, issuer, .. } => {
                     self.cli.deploy_asset(admin, code, issuer)?
                 }
@@ -609,6 +679,15 @@ impl Prepared {
 fn step_line(s: &Step) -> String {
     match s {
         Step::Fund { who, .. } => format!("fund {who}"),
+        Step::Trust { who, code, .. } => format!("{who} trusts {code}"),
+        Step::Mint {
+            who, amount, code, ..
+        } => {
+            format!(
+                "mint {} {code} to {who}",
+                crate::flows::format_units(*amount, 7)
+            )
+        }
         Step::DeployToken { contract, .. } => format!("create token contract {}", strkey(contract)),
         Step::UploadWasm { .. } => "upload the settlement Wasm".into(),
         Step::DeploySettlement { contract } => format!("deploy settlement {}", strkey(contract)),

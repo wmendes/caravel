@@ -828,7 +828,7 @@ fn dispatch(cli: Cli) -> Result<u8> {
             let ctx = context(g, lane.as_deref())?;
             runtime()?.block_on(async {
                 let p = ctx.prepare(false).await?;
-                let graph = p.graph();
+                let graph = p.graph()?;
                 if g.json {
                     let kind = |k: caravel_deploy::graph::Kind| format!("{k:?}").to_lowercase();
                     print_json(&json!({

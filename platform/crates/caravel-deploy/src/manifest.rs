@@ -237,6 +237,38 @@ fn default_root() -> String {
     "/opt/caravel".into()
 }
 
+/// A declared account, `[env.<name>.accounts.<n>]` (M0.6, C-18): a
+/// Stellar CLI identity the deployment funds, trusts assets from and tops
+/// up.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AccountSpec {
+    /// The Stellar CLI identity; the account's name when not given.
+    #[serde(default)]
+    pub identity: Option<String>,
+    /// Friendbot funds it when the network doesn't have it (default true).
+    #[serde(default)]
+    pub fund: Option<bool>,
+    /// Assets it trusts: `"settlement"` (the settlement token's asset) or
+    /// `"CODE:ISSUER"`.
+    #[serde(default)]
+    pub trustlines: Vec<String>,
+    /// Balances to top up to, at least: `{ settlement = "100" }` in token
+    /// units. Minted by the admin, so the admin must issue the token.
+    #[serde(default)]
+    pub balances: BTreeMap<String, String>,
+    /// Addresses (`account.bob`, `contract.settlement`) applied before it.
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+}
+
+impl AccountSpec {
+    /// The identity it is, by the account's name.
+    pub fn identity_of<'a>(&'a self, name: &'a str) -> &'a str {
+        self.identity.as_deref().unwrap_or(name)
+    }
+}
+
 /// One `[env.<name>]` table.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -271,6 +303,9 @@ pub struct EnvSpec {
     /// aren't consensus, so deployments may differ).
     #[serde(default)]
     pub node: Option<toml::Table>,
+    /// Declared accounts, by name (`account.<name>`).
+    #[serde(default)]
+    pub accounts: BTreeMap<String, AccountSpec>,
 }
 
 /// A lane file and one of its deployments.
@@ -734,6 +769,54 @@ impl EnvSpec {
         }
         if self.validators.is_empty() {
             p.push("[[validators]]: a lane needs at least one validator".into());
+        }
+        for (name, a) in &self.accounts {
+            let at = format!("accounts.{name}");
+            if !identity_ok(name) {
+                p.push(format!(
+                    "{at}: an account's name is letters, digits, '-', '_', '.'"
+                ));
+            }
+            if matches!(name.as_str(), "admin" | "relayer") {
+                p.push(format!(
+                    "{at}: `{name}` is the deployment's own account; name it something else"
+                ));
+            }
+            p.extend(key_problem(&format!("{at}.identity"), a.identity_of(name)));
+            for t in &a.trustlines {
+                if t == "settlement" && matches!(self.token, Token::Contract { .. }) {
+                    p.push(format!(
+                        "{at}.trustlines: the settlement token is a contract, not a Stellar asset, so there is no trustline to it"
+                    ));
+                }
+                if t != "settlement" && parse_asset(t).is_none() {
+                    p.push(format!(
+                        "{at}.trustlines: {t:?} is \"settlement\" or CODE:ISSUER (a G… issuer)"
+                    ));
+                }
+            }
+            for (token, amount) in &a.balances {
+                if token != "settlement" {
+                    p.push(format!(
+                        "{at}.balances.{token}: only the settlement token can be topped up (`settlement = \"100\"`)"
+                    ));
+                }
+                if caravel_node::plugin::parse_amount(amount, Some(7)).is_err() {
+                    p.push(format!(
+                        "{at}.balances.{token} = {amount:?}: an amount in token units, e.g. \"100\" or \"12.5\""
+                    ));
+                }
+                if matches!(self.token, Token::Contract { .. }) {
+                    p.push(format!(
+                        "{at}.balances: the settlement token is a contract this tool can't read balances of; top it up by hand"
+                    ));
+                }
+                if !a.trustlines.iter().any(|t| t == "settlement") {
+                    p.push(format!(
+                        "{at}.balances.{token}: add \"settlement\" to its trustlines, which a balance needs"
+                    ));
+                }
+            }
         }
         let mut names = std::collections::BTreeSet::new();
         let mut keys = std::collections::BTreeSet::new();

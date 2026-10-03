@@ -67,6 +67,38 @@ fn contract_data(e: &Option<Entry>) -> Option<&ScVal> {
     }
 }
 
+/// The declared accounts (C-18): which exist, and their trustlines with
+/// balances, in one batched read.
+async fn read_declared(rpc: &Rpc, d: &Desired, chain: &mut Chain) -> Result<()> {
+    let mut keys = Vec::new();
+    let mut what: Vec<(Key, Option<(String, Key)>)> = Vec::new();
+    for a in &d.accounts {
+        keys.push(account_key(&a.key));
+        what.push((a.key, None));
+        for (code, issuer) in &a.trustlines {
+            keys.push(crate::address::trustline_key(&a.key, code, issuer));
+            what.push((a.key, Some((code.clone(), *issuer))));
+        }
+    }
+    for chunk in keys.chunks(100).zip(what.chunks(100)) {
+        let (entries, _) = rpc.ledger_entries(chunk.0).await?;
+        for (entry, (account, line)) in entries.iter().zip(chunk.1) {
+            match (entry.as_ref().map(|e| &e.data), line) {
+                (Some(LedgerEntryData::Account(_)), None) => {
+                    chain.accounts.insert(*account);
+                }
+                (Some(LedgerEntryData::Trustline(t)), Some((code, issuer))) => {
+                    chain
+                        .trustlines
+                        .insert((*account, code.clone(), *issuer), i128::from(t.balance));
+                }
+                _ => {}
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Reads the chain side of deployment `d`.
 pub async fn read(rpc: &Rpc, d: &Desired) -> Result<(Chain, Extra)> {
     let set_hash = signers_hash(&d.signers);
@@ -86,6 +118,7 @@ pub async fn read(rpc: &Rpc, d: &Desired) -> Result<(Chain, Extra)> {
     ];
     let (e, latest_ledger) = rpc.ledger_entries(&keys).await?;
     let mut chain = Chain::default();
+    read_declared(rpc, d, &mut chain).await?;
     let mut extra = Extra {
         latest_ledger,
         ..Extra::default()

@@ -201,6 +201,7 @@ fn lane_1_plans_no_changes() {
         admin: [0xA0; 32],
         relayer: [0xA1; 32],
         validators: vec![[1; 32], [2; 32], [3; 32]],
+        accounts: Default::default(),
     };
     let a = addresses(&m, &keys.admin).unwrap();
     assert!(a.settlement_pinned);
@@ -235,6 +236,7 @@ fn lane_1_plans_no_changes() {
         .collect();
     let chain = Chain {
         accounts: BTreeSet::from([d.admin, d.relayer]),
+        trustlines: Default::default(),
         token_exists: true,
         settlement_wasm_uploaded: true,
         settlement: Some(OnChain {

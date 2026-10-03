@@ -9,6 +9,7 @@ Decisions behind it: DEC-066 to DEC-068 (deployments), DEC-078 to DEC-082 (the l
 - [Two halves: genesis and deployments](#two-halves-genesis-and-deployments)
 - [Finding the file and the deployment](#finding-the-file-and-the-deployment)
 - [A deployment](#a-deployment)
+- [Declared accounts](#declared-accounts)
 - [Composition: include and extends](#composition-include-and-extends)
 - [Vars](#vars)
 - [Locals](#locals)
@@ -100,6 +101,29 @@ provider = "local"                 # or "ssh"
 | `{ local = "CODE" }` | A test asset issued by the admin, on a local network |
 
 **What a change does:** a validator swap becomes a signer rotation, and a `[node]` change becomes a restart. Anything the settlement contract fixed at deploy is refused: the lane's rules, the engine, the admin, the token and the settlement params.
+
+## Declared accounts
+
+A deployment can declare the Stellar accounts it needs beyond its admin and relayer: test users, a market maker, a treasury. `apply` makes each one exist, trust its assets and hold at least its balance:
+
+```toml
+[env.local.accounts.alice]
+identity = "acme-alice"            # a Stellar CLI identity; the account's name when not given
+fund = true                        # friendbot funds it when it's missing (the default)
+trustlines = ["settlement"]        # "settlement" (the settlement token's asset) or "CODE:G…"
+balances = { settlement = "100" }  # top up to at least this, in token units
+depends_on = ["account.bob"]       # applied after these addresses
+
+[env.local.accounts.bob]
+trustlines = ["settlement"]
+```
+
+- **Balances** are only ever topped up, never taken away. A top-up is minted by the admin, so the admin must issue the settlement token, as with a local `{ local = "USDC" }` token. If it doesn't (Circle's USDC, say), the plan reports a problem and the account needs funding by hand (`caravel account fund`).
+- **No float:** amounts are decimal strings in token units.
+- **Each account is a resource,** `account.<name>`. Its plan lines are `fund`, `trust` and `mint`. It runs after the token when it trusts or holds it, and after `depends_on`. `--target account.alice` plans just it and what it needs.
+- **Expressions** read `account.<name>.identity` and `account.<name>.public_key`.
+- **Identities:** on a local network, `apply` creates missing ones, as for the deployment's own. On testnet, `caravel keys ensure` creates them first.
+- **Names:** `admin` and `relayer` are taken, and a key in place of an identity is refused.
 
 ## Composition: include and extends
 
@@ -227,7 +251,7 @@ Some values exist only once the keys, the chain and the release are read. Expres
 |---|---|
 | `lane` | `name`, `template`, `id`, `engine_wasm_hash`, `config_hash`, `genesis_state_hash` |
 | `network` | `name`, `passphrase`, `rpc_url` |
-| `account.admin`, `account.relayer` | `identity`, `public_key` |
+| `account.admin`, `account.relayer`, `account.<name>` | `identity`, `public_key` |
 | `token.settlement` | `address`, `asset` |
 | `contract.settlement` | `address`, `pinned` |
 | `node.sequencer` | `url`, `port` |
@@ -271,7 +295,7 @@ Errors point into the file: the line and caret, where an inherited value came fr
 
 | Address | What |
 |---|---|
-| `account.admin`, `account.relayer` | The accounts the deployment pays from |
+| `account.admin`, `account.relayer`, `account.<name>` | The accounts the deployment pays from, and the ones it declares |
 | `token.settlement`, `wasm.settlement`, `contract.settlement` | The settlement token, the contract's Wasm, the contract |
 | `signers.settlement` | The signer set the contract checks |
 | `host`, `host.data`, `release` | The host's readiness, the lane's stores, the release it runs |

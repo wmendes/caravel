@@ -579,6 +579,7 @@ options = {{ settlement = \"${{contract.settlement.address}}\", lane = \"${{lane
         admin: [0xA0; 32],
         relayer: [0xA1; 32],
         validators: vec![[1; 32], [2; 32], [3; 32]],
+        accounts: Default::default(),
     };
     let a = addresses(&m, &keys.admin).unwrap();
     let attrs = attributes(&m, &keys, &a, None, None);
@@ -630,4 +631,56 @@ options = {{ settlement = \"${{contract.settlement.address}}\", lane = \"${{lane
         e.contains("admin uses a value known only once") && e.contains("lane.toml:"),
         "{e}"
     );
+}
+
+#[test]
+fn declared_accounts_parse_with_their_defaults() {
+    let env = format!(
+        "{ENV}\n[env.testnet.accounts.alice]\ntrustlines = [\"settlement\"]\nbalances = {{ settlement = \"12.5\" }}\n\n[env.testnet.accounts.bob]\nidentity = \"demo-bob\"\nfund = false\ndepends_on = [\"account.alice\"]\n"
+    );
+    let m = Manifest::parse(&file(&env), "testnet").unwrap();
+    let alice = &m.env.accounts["alice"];
+    assert_eq!(alice.identity_of("alice"), "alice");
+    assert_eq!(alice.fund, None);
+    assert_eq!(alice.balances["settlement"], "12.5");
+    let bob = &m.env.accounts["bob"];
+    assert_eq!(bob.identity_of("bob"), "demo-bob");
+    assert_eq!(bob.fund, Some(false));
+    assert_eq!(bob.depends_on, ["account.alice"]);
+}
+
+#[test]
+fn declared_accounts_are_checked() {
+    let bad = |table: &str| err(&format!("{ENV}\n{table}"));
+    assert!(bad("[env.testnet.accounts.admin]\n").contains("the deployment's own account"));
+    assert!(bad("[env.testnet.accounts.x]\ntrustlines = [\"USDC\"]\n")
+        .contains("is \"settlement\" or CODE:ISSUER"));
+    assert!(bad(
+        "[env.testnet.accounts.x]\ntrustlines = [\"settlement\"]\nbalances = { xlm = \"1\" }\n"
+    )
+    .contains("only the settlement token can be topped up"));
+    assert!(bad("[env.testnet.accounts.x]\ntrustlines = [\"settlement\"]\nbalances = { settlement = \"1.5x\" }\n")
+        .contains("an amount in token units"));
+    assert!(
+        bad("[env.testnet.accounts.x]\nbalances = { settlement = \"1\" }\n")
+            .contains("add \"settlement\" to its trustlines")
+    );
+    let e = bad(&format!(
+        "[env.testnet.accounts.x]\nidentity = \"{}\"\n",
+        secret()
+    ));
+    assert!(
+        e.contains("holds a secret") && !e.contains(&secret()),
+        "{e}"
+    );
+    assert!(bad("[env.testnet.accounts.x]\nfunded = true\n").contains("unknown field"));
+    // A contract token has no trustline and no balance this tool reads.
+    let contract = ENV.replace(
+        "token = \"circle-usdc\"",
+        "token = { contract = \"CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA\" }",
+    );
+    let e = err(&format!(
+        "{contract}\n[env.testnet.accounts.x]\ntrustlines = [\"settlement\"]\n"
+    ));
+    assert!(e.contains("no trustline to it"), "{e}");
 }

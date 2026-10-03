@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use caravel_deploy::address::{asset_contract_id, contract_id, settlement_salt};
 use caravel_deploy::manifest::{Network, Provider};
 use caravel_deploy::plan::{
-    diff, diff_with, step_addr, target_epoch, Chain, Desired, DesiredHost, Host, NodeReport,
-    NodeState, OnChain, Options, Params, Plan, Problem, SignerSet, Step,
+    diff, diff_with, step_addr, target_epoch, Chain, DeclaredAccount, Desired, DesiredHost, Host,
+    NodeReport, NodeState, OnChain, Options, Params, Plan, Problem, SignerSet, Step,
 };
 
 fn key(n: u8) -> [u8; 32] {
@@ -61,6 +61,7 @@ fn desired() -> Desired {
         relayer: key(RELAYER),
         token: asset_contract_id(passphrase, "USDC", &key(ADMIN)),
         token_asset: Some(("USDC".into(), key(ADMIN))),
+        settlement_asset: Some(("USDC".into(), key(ADMIN))),
         settlement: contract_id(passphrase, &key(ADMIN), &settlement_salt(&lane_id)),
         settlement_pinned: false,
         settlement_wasm: hex_key(caravel_deploy::versions::settlement_wasm()),
@@ -84,6 +85,7 @@ fn desired() -> Desired {
             files: files(1, &["1", "2", "3"]),
         },
         vars: String::new(),
+        accounts: vec![],
     }
 }
 
@@ -91,6 +93,7 @@ fn desired() -> Desired {
 fn deployed(d: &Desired) -> Chain {
     Chain {
         accounts: BTreeSet::from([d.admin, d.relayer]),
+        trustlines: BTreeMap::new(),
         token_exists: true,
         settlement_wasm_uploaded: true,
         settlement: Some(OnChain {
@@ -174,11 +177,11 @@ fn a_fresh_lane() {
         plan.steps[..5],
         [
             Step::Fund {
-                who: "admin",
+                who: "admin".into(),
                 key: d.admin
             },
             Step::Fund {
-                who: "relayer",
+                who: "relayer".into(),
                 key: d.relayer
             },
             Step::DeployToken {
@@ -346,6 +349,7 @@ fn after_a_testnet_reset() {
     d.token_asset = None;
     let chain = Chain {
         accounts: BTreeSet::new(),
+        trustlines: BTreeMap::new(),
         token_exists: true,
         settlement_wasm_uploaded: false,
         settlement: None,
@@ -702,4 +706,123 @@ fn the_plan_for_scripts_names_each_resource() {
         .unwrap()
         .starts_with("the network has no token contract"));
     let _ = d;
+}
+
+fn account(name: &str, k: u8, trust: bool, balance: Option<i128>) -> DeclaredAccount {
+    DeclaredAccount {
+        name: name.into(),
+        identity: format!("demo-{name}"),
+        key: key(k),
+        fund: true,
+        trustlines: if trust {
+            vec![("USDC".into(), key(ADMIN))]
+        } else {
+            vec![]
+        },
+        balance,
+        depends_on: vec![],
+    }
+}
+
+const USDC: i128 = 10_000_000;
+
+#[test]
+fn declared_accounts_are_funded_trusted_and_topped_up() {
+    let mut d = desired();
+    d.accounts = vec![
+        account("alice", 0xE1, true, Some(100 * USDC)),
+        account("bob", 0xE2, true, None),
+    ];
+    let plan = diff(&d, &Chain::default(), &Host::default());
+    assert!(plan.problems.is_empty(), "{:?}", plan.problems);
+    // After the token (alice is minted to, bob trusts it), before the contract.
+    let addrs = lines(&plan);
+    let at = |a: &str| addrs.iter().position(|x| x == a).unwrap();
+    assert!(at("token.settlement") < at("account.alice"));
+    assert!(at("account.alice") < at("contract.settlement"));
+    check("accounts", &d, &plan);
+
+    // Topped up by what's missing; nothing once it holds enough.
+    let mut chain = deployed(&d);
+    for a in &d.accounts {
+        chain.accounts.insert(a.key);
+    }
+    chain
+        .trustlines
+        .insert((key(0xE1), "USDC".into(), key(ADMIN)), 40 * USDC);
+    chain
+        .trustlines
+        .insert((key(0xE2), "USDC".into(), key(ADMIN)), 0);
+    let plan = diff(&d, &chain, &running(&d));
+    assert_eq!(
+        plan.steps,
+        [Step::Mint {
+            who: "alice".into(),
+            key: key(0xE1),
+            code: "USDC".into(),
+            amount: 60 * USDC
+        }]
+    );
+    chain
+        .trustlines
+        .insert((key(0xE1), "USDC".into(), key(ADMIN)), 150 * USDC);
+    assert!(diff(&d, &chain, &running(&d)).is_empty());
+}
+
+#[test]
+fn what_the_admin_does_not_issue_it_cannot_mint() {
+    let mut d = desired();
+    // Another issuer's asset (Circle's USDC, say).
+    d.settlement_asset = Some(("USDC".into(), key(0xC1)));
+    let mut alice = account("alice", 0xE1, false, Some(5 * USDC));
+    alice.trustlines = vec![("USDC".into(), key(0xC1))];
+    let mut bob = account("bob", 0xE2, false, None);
+    bob.fund = false;
+    d.accounts = vec![alice, bob];
+    let mut chain = deployed(&d);
+    chain.accounts.insert(key(0xE1));
+    chain
+        .trustlines
+        .insert((key(0xE1), "USDC".into(), key(0xC1)), USDC);
+    let plan = diff(&d, &chain, &running(&d));
+    assert!(plan.steps.is_empty(), "{:?}", plan.steps);
+    assert_eq!(
+        plan.problems,
+        [
+            Problem::CannotMint {
+                who: "alice".into(),
+                code: "USDC".into(),
+                have: USDC,
+                want: 5 * USDC
+            },
+            Problem::AccountMissing { who: "bob".into() },
+        ]
+    );
+    let text = plan.render(&d);
+    assert!(
+        text.contains(
+            "! alice holds 1 USDC, less than its balance of 5, and the admin doesn't issue USDC"
+        ),
+        "{text}"
+    );
+    let json = plan.to_json(&d);
+    assert_eq!(json["problems"][1]["address"], "account.bob");
+}
+
+#[test]
+fn depends_on_orders_declared_accounts() {
+    let mut d = desired();
+    let mut alice = account("alice", 0xE1, false, None);
+    alice.depends_on = vec!["account.bob".into()];
+    d.accounts = vec![alice, account("bob", 0xE2, false, None)];
+    let plan = diff(&d, &Chain::default(), &Host::default());
+    let addrs = lines(&plan);
+    let at = |a: &str| addrs.iter().position(|x| x == a).unwrap();
+    assert!(at("account.bob") < at("account.alice"));
+    d.accounts[0].depends_on = vec!["account.carol".into()];
+    let err = diff_with(&d, &Chain::default(), &Host::default(), &Options::default()).unwrap_err();
+    assert!(
+        err.contains("accounts.alice.depends_on: no resource \"account.carol\""),
+        "{err}"
+    );
 }

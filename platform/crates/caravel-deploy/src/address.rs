@@ -55,6 +55,34 @@ pub fn asset_contract_id(passphrase: &str, code: &str, issuer: &[u8; 32]) -> [u8
     id_of(passphrase, ContractIdPreimage::Asset(asset))
 }
 
+/// The ledger key of `account`'s trustline to `code:issuer`.
+pub fn trustline_key(
+    account_key: &[u8; 32],
+    code: &str,
+    issuer: &[u8; 32],
+) -> stellar_xdr::LedgerKey {
+    use stellar_xdr::{LedgerKey, LedgerKeyTrustLine, TrustLineAsset};
+    let asset = if code.len() <= 4 {
+        let mut c = [0u8; 4];
+        c[..code.len()].copy_from_slice(code.as_bytes());
+        TrustLineAsset::CreditAlphanum4(AlphaNum4 {
+            asset_code: AssetCode4(c),
+            issuer: account(issuer),
+        })
+    } else {
+        let mut c = [0u8; 12];
+        c[..code.len()].copy_from_slice(code.as_bytes());
+        TrustLineAsset::CreditAlphanum12(AlphaNum12 {
+            asset_code: AssetCode12(c),
+            issuer: account(issuer),
+        })
+    };
+    LedgerKey::Trustline(LedgerKeyTrustLine {
+        account_id: account(account_key),
+        asset,
+    })
+}
+
 fn account(key: &[u8; 32]) -> AccountId {
     AccountId(PublicKey::PublicKeyTypeEd25519(Uint256(*key)))
 }

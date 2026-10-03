@@ -51,7 +51,8 @@ pub fn free_port(from: u16, width: u16) -> Result<u16> {
 }
 
 /// The roles a deployment's identities play, with their names, in a stable
-/// order: admin, relayer, each validator, each feed key.
+/// order: admin, relayer, each validator, each feed key, each declared
+/// account.
 pub fn roles(m: &Manifest) -> Vec<(String, String)> {
     let mut out = vec![
         ("admin".to_string(), m.env.admin.clone()),
@@ -62,6 +63,9 @@ pub fn roles(m: &Manifest) -> Vec<(String, String)> {
     }
     for (var, id) in &m.env.relayer.feed_keys {
         out.push((format!("feed {var}"), id.clone()));
+    }
+    for (name, a) in &m.env.accounts {
+        out.push((format!("account {name}"), a.identity_of(name).to_string()));
     }
     out
 }
