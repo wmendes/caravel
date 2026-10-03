@@ -339,6 +339,8 @@ fn prevalidation_rejects_what_the_engine_would_not_take() {
     );
     submit(&mut t, &sep53).unwrap();
     assert_eq!(submit(&mut t, &sep53), Err(Reject::Duplicate));
+    // Another transaction with a queued nonce could never run (DEC-085).
+    assert_eq!(submit(&mut t, &ok), Err(Reject::NonceQueued));
     t.block();
     assert_eq!(submit(&mut t, &ok), Err(Reject::StaleNonce));
 }

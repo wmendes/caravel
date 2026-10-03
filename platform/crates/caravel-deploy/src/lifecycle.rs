@@ -37,11 +37,22 @@ fn stop_order(nodes: &mut [String]) {
     });
 }
 
+/// Each node once (its first mention), in stop order.
+fn once_in_stop_order(nodes: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out: Vec<String> = nodes
+        .into_iter()
+        .filter(|n| seen.insert(n.clone()))
+        .collect();
+    stop_order(&mut out);
+    out
+}
+
 impl Prepared {
     /// The nodes named (all of them when none is), in stop order.
     pub fn nodes(&self, given: &[String]) -> Result<Vec<String>> {
         let all = self.all_nodes();
-        let mut out = if given.is_empty() {
+        let named = if given.is_empty() {
             all.clone()
         } else {
             given
@@ -49,9 +60,7 @@ impl Prepared {
                 .map(|g| node_name(g, &all))
                 .collect::<Result<Vec<_>>>()?
         };
-        out.dedup();
-        stop_order(&mut out);
-        Ok(out)
+        Ok(once_in_stop_order(named))
     }
 
     /// Stops nodes and leaves the lane as it is. While the sequencer is down
@@ -111,9 +120,43 @@ impl Prepared {
     }
 }
 
-/// GET `<base><path>` as JSON.
+/// `<base>/<path>`, with exactly one `/` between them.
+pub fn url(base: &str, path: &str) -> String {
+    format!(
+        "{}/{}",
+        base.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    )
+}
+
+/// GET `<base><path>` as JSON; a reply that isn't JSON is an error.
 pub async fn get(base: &str, path: &str) -> Result<Value> {
-    let url = format!("{}{}", base.trim_end_matches('/'), path);
+    get_opt(base, path)
+        .await?
+        .ok_or_else(|| anyhow!("GET {}: 404 not found", url(base, path)))
+}
+
+/// POST JSON to `<base><path>`: the status and the JSON reply (an API error
+/// is `{error, code}`).
+pub async fn post(base: &str, path: &str, body: &Value) -> Result<(u16, Value)> {
+    let url = url(base, path);
+    let r = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()?
+        .post(&url)
+        .json(body)
+        .send()
+        .await
+        .with_context(|| format!("POST {url}"))?;
+    let status = r.status().as_u16();
+    let text = r.text().await.with_context(|| format!("POST {url}"))?;
+    let v = serde_json::from_str(&text).unwrap_or(Value::String(text));
+    Ok((status, v))
+}
+
+/// GET `<base><path>` as JSON, `None` on a 404 (e.g. no lane account).
+pub async fn get_opt(base: &str, path: &str) -> Result<Option<Value>> {
+    let url = url(base, path);
     let r = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()?
@@ -122,11 +165,16 @@ pub async fn get(base: &str, path: &str) -> Result<Value> {
         .await
         .with_context(|| format!("GET {url}"))?;
     let status = r.status();
-    let body: Value = r.json().await.unwrap_or(Value::Null);
-    if !status.is_success() {
-        bail!("GET {url}: {status} {body}");
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
     }
-    Ok(body)
+    let text = r.text().await.with_context(|| format!("GET {url}"))?;
+    if !status.is_success() {
+        bail!("GET {url}: {status} {}", text.trim());
+    }
+    serde_json::from_str(&text)
+        .map(Some)
+        .with_context(|| format!("GET {url}: the reply is not JSON"))
 }
 
 /// What `caravel wait` waits for.
@@ -195,47 +243,84 @@ pub fn api_matches(v: &Value, pointer: &str, want: Option<&str>) -> bool {
 
 impl Prepared {
     /// Waits for `w`, polling every `every`; false when `timeout` runs out.
+    /// `api` is the lane's API, which `checkpoint` and `api` need.
     pub async fn wait(
         &self,
         w: &Wait,
         timeout: Duration,
         every: Duration,
-        api: &str,
+        api: Option<&str>,
     ) -> Result<bool> {
         let deadline = Instant::now() + timeout;
-        // The next checkpoint: one past what is accepted now.
-        let target = match w {
-            Wait::Checkpoint {
-                seq: None, signed, ..
-            } => {
-                let s = get(api, "/v1/status").await?;
-                let c = &s["checkpoints"];
-                let now = if *signed {
-                    num(&c["signed"])
-                } else {
-                    num(&c["accepted"])
-                };
-                Some(now.unwrap_or(0) + 1)
+        let need_api = || api.ok_or_else(|| anyhow!("the host has no public_url: pass --api-url"));
+        if let Wait::Api { pointer, .. } = w {
+            if !pointer.is_empty() && !pointer.starts_with('/') {
+                bail!("{pointer:?} is not a JSON pointer: start it with / (e.g. /0/oracle_price)");
             }
-            _ => None,
+        }
+        // The checkpoint waited for: the one given, else the next one (one
+        // past what the lane had when it first answered).
+        let mut target: Option<u64> = *match w {
+            Wait::Checkpoint { seq, .. } => seq,
+            _ => &None,
         };
         loop {
             let done = match w {
-                Wait::Checkpoint { seq, signed, epoch } => match seq {
-                    Some(n) => get(api, &format!("/v1/checkpoints/{n}"))
-                        .await
-                        .is_ok_and(|d| checkpoint_is(&d, *signed, *epoch)),
-                    None => get(api, "/v1/status")
-                        .await
-                        .is_ok_and(|s| checkpoint_reached(&s, target.unwrap_or(1), *signed)),
-                },
+                Wait::Checkpoint { seq, signed, epoch } => {
+                    let api = need_api()?;
+                    if target.is_none() {
+                        if let Ok(s) = get(api, "/v1/status").await {
+                            let c = &s["checkpoints"];
+                            let now = if *signed {
+                                num(&c["signed"])
+                            } else {
+                                num(&c["accepted"])
+                            };
+                            target = Some(now.unwrap_or(0) + 1);
+                        }
+                    }
+                    match target {
+                        None => false,
+                        // A given checkpoint: read it.
+                        Some(n) if seq.is_some() => get_opt(api, &format!("/v1/checkpoints/{n}"))
+                            .await
+                            .ok()
+                            .flatten()
+                            .is_some_and(|d| checkpoint_is(&d, *signed, *epoch)),
+                        // Any checkpoint from the next one on at an epoch:
+                        // read each that reached the stage, moving past the
+                        // ones at another epoch.
+                        Some(mut n) if epoch.is_some() => {
+                            let mut hit = false;
+                            while let Ok(Some(d)) =
+                                get_opt(api, &format!("/v1/checkpoints/{n}")).await
+                            {
+                                if !checkpoint_is(&d, *signed, None) {
+                                    break;
+                                }
+                                if checkpoint_is(&d, *signed, *epoch) {
+                                    hit = true;
+                                    break;
+                                }
+                                n += 1;
+                            }
+                            target = Some(n);
+                            hit
+                        }
+                        Some(n) => get(api, "/v1/status")
+                            .await
+                            .is_ok_and(|s| checkpoint_reached(&s, n, *signed)),
+                    }
+                }
                 Wait::Api {
                     path,
                     pointer,
                     value,
-                } => get(api, path)
+                } => get_opt(need_api()?, path)
                     .await
-                    .is_ok_and(|v| api_matches(&v, pointer, value.as_deref())),
+                    .ok()
+                    .flatten()
+                    .is_some_and(|v| api_matches(&v, pointer, value.as_deref())),
                 Wait::Healthy => {
                     let host = self.host_provider.read(&self.m).await?;
                     self.all_nodes().iter().all(|n| {
@@ -303,5 +388,17 @@ mod tests {
         assert!(api_matches(&m, "/0/oracle_price", None));
         assert!(!api_matches(&m, "/0/oracle_price", Some("1")));
         assert!(!api_matches(&m, "/1/oracle_price", None));
+        assert_eq!(url("http://x/", "v1/status"), "http://x/v1/status");
+        assert_eq!(url("http://x", "/v1/status"), "http://x/v1/status");
+        let named = |n: &[&str]| once_in_stop_order(n.iter().map(|s| s.to_string()).collect());
+        assert_eq!(
+            named(&["validator-1", "sequencer", "validator-1"]),
+            ["sequencer", "validator-1"]
+        );
+        // Not adjacent after the sort either (`stop 1 2 1`).
+        assert_eq!(
+            named(&["validator-1", "validator-2", "validator-1", "relayer"]),
+            ["relayer", "validator-1", "validator-2"]
+        );
     }
 }

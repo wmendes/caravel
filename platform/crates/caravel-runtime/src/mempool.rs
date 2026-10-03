@@ -23,6 +23,9 @@ pub enum Reject {
     StaleNonce,
     UnknownAccount,
     Duplicate,
+    /// Another queued transaction of the account has this nonce: only one
+    /// of them could run, so the second is refused at once.
+    NonceQueued,
     MempoolFull,
     AccountQueueFull,
 }
@@ -37,6 +40,7 @@ impl Reject {
             Self::StaleNonce => "BAD_NONCE",
             Self::UnknownAccount => "UNKNOWN_ACCOUNT",
             Self::Duplicate => "DUPLICATE",
+            Self::NonceQueued => "NONCE_QUEUED",
             Self::MempoolFull => "MEMPOOL_FULL",
             Self::AccountQueueFull => "ACCOUNT_QUEUE_FULL",
         }
@@ -51,6 +55,9 @@ impl Reject {
             Self::StaleNonce => "the nonce was already used",
             Self::UnknownAccount => "no lane account for this key; deposit first",
             Self::Duplicate => "the transaction is already queued",
+            Self::NonceQueued => {
+                "a queued transaction of this account has this nonce: sign with the next one"
+            }
             Self::MempoolFull => "the mempool is full",
             Self::AccountQueueFull => "too many queued transactions for this account",
         }
@@ -156,9 +163,25 @@ impl Mempool {
         self.hashes.contains(hash)
     }
 
+    /// The nonce after `account`'s queued transactions, if it has any.
+    pub fn next_queued_nonce(&self, account: &[u8; 32]) -> Option<u64> {
+        self.queue
+            .iter()
+            .filter(|q| &q.tx.account == account)
+            .map(|q| q.tx.nonce.saturating_add(1))
+            .max()
+    }
+
     pub fn push(&mut self, hash: [u8; 32], tx: TxEnvelopeV1) -> Result<(), Reject> {
         if self.hashes.contains(&hash) {
             return Err(Reject::Duplicate);
+        }
+        if self
+            .queue
+            .iter()
+            .any(|q| q.tx.account == tx.account && q.tx.nonce == tx.nonce)
+        {
+            return Err(Reject::NonceQueued);
         }
         if self.queue.len() >= self.max_total {
             return Err(Reject::MempoolFull);
@@ -184,5 +207,51 @@ impl Mempool {
         }
         self.queue.retain(|q| !hashes.contains(&q.hash));
         self.hashes.retain(|h| !hashes.contains(h));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tx(account: u8, nonce: u64) -> TxEnvelopeV1 {
+        TxEnvelopeV1 {
+            lane_id: [0; 32],
+            account: [account; 32],
+            signer: [account; 32],
+            nonce,
+            expiry_ms: 0,
+            kind: 0,
+            sig_scheme: SigScheme::RawEd25519,
+            body: vec![],
+            signature: [0; 64],
+        }
+    }
+
+    #[test]
+    fn next_queued_nonce_is_after_the_accounts_highest() {
+        let mut m = Mempool::new(10, 10);
+        assert_eq!(m.next_queued_nonce(&[1; 32]), None);
+        m.push([1; 32], tx(1, 7)).unwrap();
+        m.push([2; 32], tx(1, 5)).unwrap();
+        m.push([3; 32], tx(2, 40)).unwrap();
+        assert_eq!(m.next_queued_nonce(&[1; 32]), Some(8));
+        assert_eq!(m.next_queued_nonce(&[2; 32]), Some(41));
+        m.remove(&HashSet::from([[1; 32]]));
+        assert_eq!(m.next_queued_nonce(&[1; 32]), Some(6));
+    }
+
+    #[test]
+    fn a_second_transaction_with_a_queued_nonce_is_refused() {
+        let mut m = Mempool::new(10, 10);
+        m.push([1; 32], tx(1, 7)).unwrap();
+        assert_eq!(m.push([1; 32], tx(1, 7)), Err(Reject::Duplicate));
+        let mut other = tx(1, 7);
+        other.kind = 1;
+        assert_eq!(m.push([2; 32], other), Err(Reject::NonceQueued));
+        // Another account's nonce 7 is its own.
+        m.push([3; 32], tx(2, 7)).unwrap();
+        m.remove(&HashSet::from([[1; 32]]));
+        m.push([4; 32], tx(1, 7)).unwrap();
     }
 }

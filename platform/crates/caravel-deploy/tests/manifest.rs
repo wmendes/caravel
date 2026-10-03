@@ -580,7 +580,7 @@ options = {{ settlement = \"${{contract.settlement.address}}\", lane = \"${{lane
         relayer: [0xA1; 32],
         validators: vec![[1; 32], [2; 32], [3; 32]],
     };
-    let a = addresses(&m, &keys).unwrap();
+    let a = addresses(&m, &keys.admin).unwrap();
     let attrs = attributes(&m, &keys, &a, None, None);
     m.finish(&attrs).unwrap();
     let settlement = stellar_strkey::Contract(a.settlement).to_string();
