@@ -665,22 +665,24 @@ address = <span class="s">"caravel-1"</span></pre>
         <div>
           <p class="eyebrow">Open source</p>
           <h2 id="start-h">Run a lane on your machine.</h2>
-          <p class="lede">A Payments lane on a local Stellar network, from its lane file. You need Rust 1.93, the Stellar CLI 28.1.0, Node.js 22 and Docker.</p>
+          <p class="lede">A Payments lane on a local Stellar network: install the CLI, write the lane file with <code>caravel init</code>, apply it, and use the lane. You need Rust 1.93, the Stellar CLI 28.1.0, Node.js 22 and Docker.</p>
           <div class="cta-row"><a class="btn btn-primary" href="https://github.com/wmendes/caravel"><svg class="gh" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>View on GitHub</a><a class="btn btn-ghost" href="https://github.com/wmendes/caravel#quickstart">Read the quickstart</a></div>
-          <p class="doclinks"><a href="https://github.com/wmendes/caravel/blob/main/docs/CARAVEL_SPEC.md">Spec</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/RUNBOOK.md">Runbook</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/RESULTS.md">Results</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/SECURITY.md">Security review</a> · <a href="https://github.com/wmendes/caravel/blob/main/CONTRIBUTING.md">Contributing</a></p>
+          <p class="doclinks"><a href="https://github.com/wmendes/caravel/blob/main/docs/CARAVEL_SPEC.md">Spec</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/LANE_FILE.md">Lane file</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/RUNBOOK.md">Runbook</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/RESULTS.md">Results</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/SECURITY.md">Security review</a> · <a href="https://github.com/wmendes/caravel/blob/main/CONTRIBUTING.md">Contributing</a></p>
         </div>
-        <pre class="lanefile" aria-label="Quickstart commands"><span class="c"># build, then the keys the lane file names</span>
-./scripts/build-contracts.sh
-cargo build --release -p caravel-cli -p caravel-payments-node
-npm --prefix platform/relayer ci &amp;&amp; npm --prefix platform/relayer run build
-for k in pay-local-admin pay-local-v1 pay-local-v2 \
-  pay-local-v3 pay-local-relayer; do stellar keys generate "$k"; done
+        <pre class="lanefile" aria-label="Quickstart commands"><span class="c"># install from a clone, into ~/.caravel</span>
+./scripts/install.sh
+export PATH="$HOME/.caravel/bin:$PATH"
 
-<span class="c"># the lane</span>
-L=lanes/payments/config/lane.caravel-payments.local.toml
-./target/release/caravel <span class="h">plan</span>    $L --env local
-./target/release/caravel <span class="h">apply</span>   $L --env local
-./target/release/caravel <span class="h">destroy</span> $L --env local</pre>
+<span class="c"># a lane, its users, its end</span>
+caravel <span class="h">init</span> payments my-lane &amp;&amp; cd my-lane
+caravel <span class="h">apply</span>
+caravel account create alice --amount 100
+caravel account create bob --amount 10
+caravel deposit alice 50 &amp;&amp; caravel deposit bob 5
+caravel tx --from alice transfer --to @bob --amount 5
+caravel withdraw alice 10
+caravel <span class="h">destroy</span> --yes
+caravel escape alice</pre>
       </div>
     </div>
   </section>

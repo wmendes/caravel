@@ -78,6 +78,11 @@ pub fn strkey(contract: &[u8; 32]) -> String {
         .to_string()
 }
 
+/// A `C…` contract address, if `s` is one.
+pub fn parse_contract(s: &str) -> Option<[u8; 32]> {
+    stellar_strkey::Contract::from_string(s).ok().map(|c| c.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

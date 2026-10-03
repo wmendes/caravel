@@ -108,7 +108,7 @@ pub enum Cmd {
     Apply {
         /// The lane file (the same as -f).
         lane: Option<PathBuf>,
-        /// Apply without asking.
+        /// Apply without asking (also CARAVEL_YES=1).
         #[arg(short = 'y', long)]
         yes: bool,
     },
@@ -128,7 +128,7 @@ pub enum Cmd {
     Destroy {
         /// The lane file (the same as -f).
         lane: Option<PathBuf>,
-        /// Don't ask (the lane can't be restarted afterwards).
+        /// Don't ask (the lane can't be restarted afterwards; also CARAVEL_YES=1).
         #[arg(short = 'y', long)]
         yes: bool,
         /// Stop after the trigger and print when a freeze becomes possible;
@@ -166,7 +166,7 @@ pub enum Cmd {
     Stop {
         /// sequencer, relayer, validator-<n> (or <n>).
         nodes: Vec<String>,
-        /// Don't ask, even off a local network.
+        /// Don't ask, even off a local network (also CARAVEL_YES=1).
         #[arg(short = 'y', long)]
         yes: bool,
     },
@@ -222,9 +222,10 @@ pub enum Cmd {
         #[command(subcommand)]
         cmd: AccountCmd,
     },
-    /// An account's settlement token on Stellar, and its lane account.
+    /// An account's settlement token on Stellar, and its lane account (a
+    /// C… contract's on Stellar only).
     Balance {
-        /// An identity or a G… account.
+        /// An identity, a G… account or a C… contract.
         who: String,
     },
     /// Deposit into the lane; returns once the lane has credited it.
@@ -622,6 +623,7 @@ fn dispatch(cli: Cli) -> Result<u8> {
             })
         }
         Cmd::Apply { lane, yes } => {
+            let yes = yes || assume_yes();
             let ctx = context(g, lane.as_deref())?;
             let m = ctx.manifest()?;
             let missing = init::missing_identities(&m);
@@ -718,6 +720,7 @@ fn dispatch(cli: Cli) -> Result<u8> {
             pay_out,
             wipe,
         } => {
+            let yes = yes || assume_yes();
             let ctx = context(g, lane.as_deref())?;
             runtime()?.block_on(async {
                 let p = ctx.prepare(true).await?;
@@ -745,6 +748,7 @@ fn dispatch(cli: Cli) -> Result<u8> {
         }
         Cmd::Validate { lane } => validate(g, lane.as_deref()),
         Cmd::Stop { nodes, yes } => {
+            let yes = yes || assume_yes();
             let ctx = context(g, None)?;
             runtime()?.block_on(async {
                 let p = ctx.prepare(false).await?;
@@ -927,6 +931,19 @@ fn dispatch(cli: Cli) -> Result<u8> {
         Cmd::Balance { who } => {
             let ctx = context(g, None)?;
             let flows = flows_for(&ctx)?;
+            // A contract (the settlement's vault, say): Stellar only.
+            if let Some(c) = caravel_deploy::address::parse_contract(&who) {
+                let b = flows.contract_balance(&c)?;
+                if g.json {
+                    print_json(&b)?;
+                } else {
+                    println!(
+                        "{who}\n  on Stellar  {}",
+                        b["stellar"].as_str().unwrap_or_default()
+                    );
+                }
+                return Ok(exit::OK);
+            }
             let key = Stellar::public_key(&who).or_else(|_| {
                 stellar_strkey(&who)
                     .ok_or_else(|| anyhow!("{who:?} is neither an identity nor a G… account"))
@@ -1933,6 +1950,12 @@ fn release_check(ctx: &Ctx, t: Option<&Plugin>) -> Result<String> {
         );
     }
     Ok(format!("{} (engine {}…)", r.commit, &hex(&want)[..16]))
+}
+
+/// `CARAVEL_YES=1` (or `true`): every command that asks first runs as with
+/// `--yes`, for scripts and CI.
+fn assume_yes() -> bool {
+    std::env::var("CARAVEL_YES").is_ok_and(|v| v == "1" || v == "true")
 }
 
 /// The user flows of the context's deployment, with its exit file.

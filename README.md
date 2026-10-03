@@ -63,86 +63,103 @@ A Payments lane was also run through its whole life on testnet from a lane file:
 
 ## Quickstart
 
-This brings up a Payments lane on your machine, against a local Stellar network.
+This brings up a Payments lane on your machine, against a local Stellar network, and uses it.
 
 **Requirements:**
 - Rust 1.93 with the `wasm32v1-none` target (both pinned in `rust-toolchain.toml`);
 - the Stellar CLI 28.1.0: `cargo install --locked stellar-cli@28.1.0`;
 - Node.js 22;
-- Docker, for the local Stellar network;
-- jq, for `scripts/e2e-local.sh`.
+- Docker, for the local Stellar network.
 
-**Build:**
-
-```sh
-./scripts/build-contracts.sh
-cargo build --release -p caravel-cli -p caravel-payments-node
-npm --prefix platform/relayer ci && npm --prefix platform/relayer run build
-```
-
-**Create keys.** The lane file names its keys as Stellar CLI identities. Create them once:
+**Install** from a clone. This builds the CLI, the templates' nodes, the contracts and the relayer into `~/.caravel`:
 
 ```sh
-for k in pay-local-admin pay-local-v1 pay-local-v2 pay-local-v3 pay-local-relayer; do
-  stellar keys generate "$k"
-done
+./scripts/install.sh
+export PATH="$HOME/.caravel/bin:$PATH"
 ```
 
-**Run the lane:**
+**Run a lane and use it:**
 
+<!-- quickstart: scripts/check-quickstart.sh runs this block as written -->
 ```sh
-L=lanes/payments/config/lane.caravel-payments.local.toml
-./target/release/caravel plan    $L --env local   # changes nothing
-./target/release/caravel apply   $L --env local   # starts a local network, deploys, runs the nodes
-./target/release/caravel status  $L --env local
-./target/release/caravel destroy $L --env local   # drain, export every exit, freeze
+caravel init payments my-lane && cd my-lane    # lane.toml, and Stellar CLI identities my-lane-<role>
+caravel apply                                  # starts a local network, deploys, runs the nodes
+caravel account create alice --amount 100      # XLM from friendbot, a trustline, 100 test USDC
+caravel account create bob --amount 10
+caravel deposit alice 50                       # returns once the lane has credited it
+caravel deposit bob 5
+caravel tx --from alice transfer --to @bob --amount 5
+caravel balance bob
+caravel withdraw alice 10                      # waits for its checkpoint on Stellar, then claims it
+caravel status
+caravel destroy --yes                          # drain, export every exit to exit.json, freeze
+caravel escape alice                           # take the rest back on Stellar
 ```
 
-**The full lifecycle:** `./scripts/e2e-local.sh` runs every step of a lane's life through the CLI, including user flows, a rotation, destroy, escapes and replay:
+Each command finds `lane.toml` in the current directory (or `-f`) and uses its default deployment (or `--env`). Every command takes `--json`.
+
+**The commands:**
+
+| For | Commands |
+|---|---|
+| A lane file | `init`, `validate`, `render`, `env list`, `keys list\|ensure\|show`, `output` |
+| Running a lane | `plan`, `apply`, `status`, `destroy`, `stop`, `start`, `restart`, `logs`, `wait`, `api`, `replay`, `doctor` |
+| Using a lane | `account create\|fund`, `balance`, `deposit`, `tx`, `withdraw`, `claim`, `force-withdraw`, `escape` |
+
+Lane transactions are signed through the Stellar CLI's keystore (SEP-53 message signing), so no key is ever written out.
+
+**Exit codes:** 0 done, 1 error, 2 usage, 3 changes pending (`plan --exit-code`), 4 a wait timed out.
+
+**The full lifecycle:** `./scripts/e2e-local.sh` runs every step of a lane's life with these commands: user flows, a signer rotation, a forced withdrawal, destroy, escapes and replay.
 - `E2E_TEMPLATE=perps` or `payments` picks the template;
 - `E2E_NETWORK=testnet` runs it on testnet.
 
-**As a Stellar CLI plugin:**
-
-```sh
-ln -s "$PWD/target/release/caravel" ~/.local/bin/stellar-caravel
-stellar caravel plan lanes/payments/config/lane.caravel-payments.local.toml --env local
-```
+**As a Stellar CLI plugin:** the installer also links `stellar-caravel`, so `stellar caravel plan` works too.
 
 ## The lane file
 
-The lane's own sections define its genesis: `[lane]`, `[app]`, `[node]`, `[access]`, `[limits]` and the template's table. Each `[env.<name>]` table is one deployment of the lane. This is the local deployment of the Payments lane, from [`lanes/payments/config/lane.caravel-payments.local.toml`](lanes/payments/config/lane.caravel-payments.local.toml):
+The lane's own sections define its genesis: `[lane]`, `[app]`, `[node]`, `[access]`, `[limits]` and the template's table. They are consensus config and stay literal. Each `[env.<name>]` table is one deployment of the lane, and deployments are where the language is: vars, locals, `${…}` expressions, `extends`, `include`, `for_each` and outputs.
 
 ```toml
+[vars.validators]
+type = "list"
+default = ["1", "2", "3"]
+
+[env.base]
+abstract = true                                # only for extending
+admin = "acme-admin"                           # a Stellar CLI identity; keys never go in the file
+threshold = "${length(var.validators) / 2 + 1}"
+relayer = { account = "acme-relayer" }
+
+[env.base.validators]                          # one validator per name
+for_each = "${var.validators}"
+name = "${each.value}"
+key = "acme-v${each.value}"
+
 [env.local]
-network = "local"                  # or "testnet"; mainnet is refused
-admin = "pay-local-admin"          # a Stellar CLI identity; keys never go in the file
-token = { local = "USDC" }         # the settlement token
-threshold = 2
+extends = "base"
+default = true
+network = "local"                              # or "testnet"; mainnet is refused
+token = { local = "USDC" }
+host = { provider = "local" }
 
-[env.local.settlement_params]
-force_inclusion_window_secs = 20
-escape_timeout_secs = 30
-min_rotation_delay_secs = 3600
-signer_retention_epochs = 2
+[env.testnet]
+extends = "base"
+network = "testnet"
+token = "circle-usdc"
+host = { provider = "ssh", address = "deploy@lane.example", public_url = "https://lane.example" }
 
-[[env.local.validators]]
-name = "1"
-key = "pay-local-v1"
-# validators 2 and 3 follow the same shape
-
-[env.local.relayer]
-account = "pay-local-relayer"
-
-[env.local.host]
-provider = "local"                 # or "ssh", for a Linux host you already have
+[outputs]
+settlement = "${contract.settlement.address}"
 ```
+
+`caravel apply --var 'validators=["1","2","4"]'` then replaces validator 3, and `caravel output settlement` prints the contract's address.
 
 **What a change does:**
 - **Applied as a step:** a validator swap becomes a signer rotation, and a `[node]` setting becomes a restart.
 - **Refused:** anything the settlement contract fixed at deploy (the lane's rules, the engine, the admin, the token, the settlement params). For those, destroy the lane or give it a new name.
 
-There is no state file. The lane file and the chain are the whole truth, and `plan` reads both.
+There is no state file. The lane file and the chain are the whole truth, and `plan` reads both. The full reference is [`docs/LANE_FILE.md`](docs/LANE_FILE.md).
 
 ## Settlement tokens
 
@@ -185,7 +202,9 @@ The two examples above are the same token, Circle's testnet USDC, written both w
 | `platform/crates/caravel-app-sdk` | The `no_std` SDK for lane engines |
 | `platform/crates/caravel-runtime` | Executor, store, sequencer and validator cores |
 | `platform/crates/caravel-node` | Sequencer, validator, replay and genesis for any app |
-| `platform/crates/caravel-deploy` | The deploy tool: `plan`, `apply`, `status`, `destroy` |
+| `platform/crates/caravel-lanefile` | The lane file language: include, extends, vars, expressions |
+| `platform/crates/caravel-deploy` | The deploy library: plans, providers, chain reads, user flows |
+| `platform/crates/caravel-cli` | `caravel`, the one CLI for every template |
 | `platform/contracts/settlement` | The settlement contract (vault, inbox, checkpoints, freeze, escape) |
 | `platform/relayer` | Posts inbox entries and checkpoints to Stellar, and hosts feed modules |
 | `lanes/perps` | Caravel Perps: its frozen engine, node, trading app and oracle feed |
@@ -195,6 +214,7 @@ The two examples above are the same token, Circle's testnet USDC, written both w
 ## Documentation
 
 - [`docs/CARAVEL_SPEC.md`](docs/CARAVEL_SPEC.md): the specification, the source of truth, with every design decision in §22.
+- [`docs/LANE_FILE.md`](docs/LANE_FILE.md): the lane file language.
 - [`docs/RUNBOOK.md`](docs/RUNBOOK.md): operating a lane.
 - [`docs/RESULTS.md`](docs/RESULTS.md): measured results on testnet.
 - [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md): engine benchmarks at full caps.

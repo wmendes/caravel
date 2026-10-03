@@ -441,6 +441,11 @@ impl Cli {
 
     /// A SEP-41 token balance (a read, nothing sent).
     pub fn token_balance(&self, source: &str, token: &Key, who: &Key) -> Result<i128> {
+        self.token_balance_of(source, token, &g(who))
+    }
+
+    /// The token balance of any address (a G… account or a C… contract).
+    pub fn token_balance_of(&self, source: &str, token: &Key, address: &str) -> Result<i128> {
         let out = run(&self.with_net(vec![
             s("contract"),
             s("invoke"),
@@ -452,7 +457,7 @@ impl Cli {
             s("--"),
             s("balance"),
             s("--id"),
-            g(who),
+            s(address),
         ]))?;
         out.trim()
             .trim_matches('"')
