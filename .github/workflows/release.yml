@@ -1,0 +1,148 @@
+# Prebuilt Caravel releases (M0.7, H-02): what `scripts/install.sh` downloads.
+#
+# A `v*` tag builds every platform and opens a DRAFT GitHub Release with the
+# archives; a person publishes it. A pull request that touches this file or
+# the release scripts builds everything, checks it, and publishes nothing.
+#
+# Every archive carries the contracts of record, built once on x86_64 Linux
+# (DEC-033), next to that platform's binaries, the relayer and the web apps.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - scripts/assemble-release.sh
+      - scripts/install.sh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Must match versions.json "stellar_cli"; the digest is GitHub's published sha256 for the asset.
+  STELLAR_CLI_VERSION: "28.1.0"
+  STELLAR_CLI_SHA256: "c1680deee94301d33ada7a17f98411e642a4248c727afbd2e43050d345746462"
+
+jobs:
+  # The Wasm of record: built and checked against versions.json on the
+  # platform its hashes come from.
+  contracts:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Stellar CLI
+        run: |
+          curl -sSfL -o stellar-cli.tar.gz \
+            "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${STELLAR_CLI_SHA256}  stellar-cli.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar xzf stellar-cli.tar.gz -C "$HOME/.local/bin" stellar
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: ./scripts/build-contracts.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: contracts-of-record
+          path: target/contracts/*.wasm
+
+  build:
+    needs: contracts
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # glibc 2.35, so the Linux builds run on Ubuntu 22.04 and later.
+          - { os: ubuntu-22.04, target: x86_64-linux }
+          - { os: ubuntu-22.04-arm, target: aarch64-linux }
+          - { os: macos-14, target: aarch64-macos }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then V="${GITHUB_REF_NAME#v}"; else V="0.0.0-${GITHUB_SHA::7}"; fi
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+          echo "NAME=caravel-$V-${{ matrix.target }}" >> "$GITHUB_ENV"
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@v4
+        with:
+          name: contracts-of-record
+          path: target/contracts
+      # Each node reports this commit in /v1/status (the deploy tool's host check).
+      - run: cargo build --release --locked -p caravel-cli -p caravel-perps-node -p caravel-payments-node
+        env:
+          CARAVEL_COMMIT: ${{ github.sha }}
+      - run: npm --prefix platform/relayer ci && npm --prefix platform/relayer run build
+      - run: npm --prefix lanes/perps/relayer-feeds ci && npm --prefix lanes/perps/relayer-feeds run build
+      - run: npm --prefix lanes/perps/web ci && npm --prefix lanes/perps/web run build
+      - name: Assemble
+        shell: bash
+        run: ./scripts/assemble-release.sh "dist/$NAME" --commit "$GITHUB_SHA"
+      - name: Check it runs here
+        shell: bash
+        run: |
+          "dist/$NAME/bin/caravel" version
+          for t in perps payments; do "dist/$NAME/bin/caravel-$t-node" plugin info; done
+          # The runner's keystore has none of the lane's identities, so only the genesis is asserted.
+          "dist/$NAME/bin/caravel" validate --json -f lanes/payments/config/lane.caravel-payments.local.toml > validate.json || true
+          jq -e '.checks[] | select(.check == "genesis") | .ok' validate.json
+      - name: Pack
+        shell: bash
+        run: |
+          tar -C dist -czf "dist/$NAME.tar.gz" "$NAME"
+          (cd dist && if command -v sha256sum > /dev/null; then sha256sum "$NAME.tar.gz"; else shasum -a 256 "$NAME.tar.gz"; fi) > "dist/$NAME.tar.gz.sha256"
+          cat "dist/$NAME.tar.gz.sha256"
+      # The install path, from the archive just made.
+      - name: Install from the archive
+        shell: bash
+        run: |
+          ./scripts/install.sh --archive "dist/$NAME.tar.gz" --prefix "$RUNNER_TEMP/caravel"
+          "$RUNNER_TEMP/caravel/bin/caravel" version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NAME }}
+          path: |
+            dist/${{ env.NAME }}.tar.gz
+            dist/${{ env.NAME }}.tar.gz.sha256
+
+  # A tag opens a draft release; a person reads it and publishes it.
+  draft:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd assets
+          cat *.sha256 > SHA256SUMS
+          cat SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            --title "Caravel $GITHUB_REF_NAME" \
+            --notes "Testnet only, not audited. Install: curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_REF_NAME/scripts/install.sh | bash" \
+            *.tar.gz SHA256SUMS

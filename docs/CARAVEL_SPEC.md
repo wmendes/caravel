@@ -2256,7 +2256,7 @@ Branches are `h-0x-short-name`. Gates: H1 (H-01), H2 (H-04), H3 (H-06, the Groun
 | ID | Task | Depends | Status |
 |---|---|---|---|
 | H-01 | **The landing page tells it straight** — **Gate H1**. Add "Who it's for", with the perps and just-in-time card payment cases. Describe block time as configurable. Move validity proofs and bonded validators into a section clearly labelled planned. Keep "testnet only, not audited" in the hero and the trust section. Deploy only with the human's OK | — | review |
-| H-02 | **Prebuilt binaries.** The CI release job builds `caravel` and each template's node binary for macOS (arm64) and Linux (x86_64, arm64), with the relayer, the web apps and the contracts of record, plus `SHA256SUMS`. A tag publishes them as a GitHub Release, the first public one, with the human's OK. Reuses `scripts/assemble-release.sh` and the platform guard (C-04) | H-01 | todo |
+| H-02 | **Prebuilt binaries.** The CI release job builds `caravel` and each template's node binary for macOS (arm64) and Linux (x86_64, arm64), with the relayer, the web apps and the contracts of record, plus `SHA256SUMS`. A tag publishes them as a GitHub Release, the first public one, with the human's OK. Reuses `scripts/assemble-release.sh` and the platform guard (C-04) | H-01 | review |
 | H-03 | **One-line install.** `curl -fsSL <raw>/scripts/install.sh \| sh` fetches the release for this platform, checks its checksum, and installs into `~/.caravel`. `--from-source` keeps today's path. Covers the Stellar CLI the CLI needs (an install hint, or a pinned download), and `caravel doctor` says what's missing | H-02 | todo |
 | H-04 | **The 15-minute path, measured** — **Gate H2**. On a clean macOS machine and a clean Linux one, take the time from nothing to a lane in use (install, `init`, `apply`, deposit, `tx`, withdraw) and record it in RESULTS. Fix what blocks it (first start of the local network, keys, Docker). README and landing quickstart on the release path. `check-quickstart.sh` runs it from a release in CI | H-03 | todo |
 | H-05 | **Groundhog: find out.** What it is today (the Stanford parallel execution engine): status, interface, what contracts it runs, license, readiness for Meridian, and who mentors it (Tyler's note in the tracks doc). Record the facts with sources in `docs/SOURCES.md` and the open questions as an OQ. No code | H-01 | todo |
@@ -3061,6 +3061,15 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - unit tests: deferred values filled in and host refusals; lane #1's file with a web config renders `web.json`, with the route ahead of the app's catch-all; a `web.json` change restarts nothing; the web app's `applyConfig`/`loadConfig` (known keys only, URLs resolved, defaults kept without a file);
   - `caddy adapt` (Caddy 2, Docker) accepts lane #1's Caddyfile with the route;
   - on a local lane: `web.json` holds the sequencer's and validators' URLs, the settlement address and the passphrase, then "No changes." | The web app's deployment was baked in at build time (`VITE_*`), so one build couldn't serve another lane | Serving `web.json` from a local lane's dev server |
+| DEC-098 | **M0.7 (H-02).** Prebuilt releases, built by `.github/workflows/release.yml`.
+- **Build:** one job builds the contracts of record on x86_64 Linux and checks them against `versions.json` (DEC-033). One job per platform then builds `caravel` and every template's node, the relayer, the feed modules and the web apps, and assembles them with `scripts/assemble-release.sh`, the layout `install.sh` already installs. The platforms:
+  - `x86_64-linux` and `aarch64-linux` on Ubuntu 22.04 (glibc 2.35, so they run on 22.04 and later);
+  - `aarch64-macos` on macOS 14.
+- **Check:** each platform runs its own binaries (`caravel version`, `plugin info`, a genesis check). It packs `caravel-<version>-<target>.tar.gz` with a `.sha256`, and installs from the archive.
+- **Publish:** a `v*` tag opens a **draft** GitHub Release with the archives and a combined `SHA256SUMS`. A person publishes it, and the first public release waits for the human.
+- **Test runs:** a pull request that touches the workflow or the release scripts builds and checks everything and publishes nothing.
+- **`install.sh --archive FILE`** installs a release archive without build tools. It checks the archive against its `.sha256` when present and every file against the release's `SHA256SUMS`, then installs as the source path does. Node.js 22 is still needed at run time, for a lane's relayer.
+- **Still separate:** the CI `release` job stays as the VM's artifact. | Building from source took a Rust toolchain and a long first build, too much for a hackathon's first hour | Intel macOS, Windows, signed and notarized macOS binaries |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 
