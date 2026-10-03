@@ -2967,6 +2967,7 @@ Agents append new decisions here as `DEC-018+` with the same columns.
 | OQ-006 | License for the repo | `MIT OR Apache-2.0` |
 | OQ-007 | Should the deck be updated to match §2.3 (ed25519 now, BLS later; no stellar-core close-time claim)? | Yes, before any public pitch |
 | OQ-008 | Open access invites slot squatting (1,024 accounts × 1 USDC of free testnet USDC). Use an allowlist for the public demo? | Open mode with `min_deposit` 10 USDC; switch the demo instance to allowlist if squatted |
+| OQ-009 | C-23: once nodes run on several hosts, what protects the sequencer's call to each validator's `/v1/sign`, and who may run a validator? | **Answered 2026-10-03.** Every call is authenticated, as the zero-trust tools do; the network isn't the boundary. **(1) Signed requests:** the sequencer gets its own identity (`[env.X.sequencer] key`), signs each `/v1/sign` request (ed25519 over the time and the body's hash), and validators check it against that key from the lane file, within a time window. No token, no CA and no state file. **(2) A private network is optional:** `private_address` per host carries node-to-node traffic when declared; otherwise traffic goes over public HTTPS. It's defence in depth, not the boundary. **(3) External validators are in C-23:** a validator run elsewhere is a reference (its URL and key), put in the signer set and called by the sequencer, never deployed. `/internal/*` stays on localhost (the relayer shares the sequencer's host) |
 
 ---
 
