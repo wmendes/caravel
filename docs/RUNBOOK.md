@@ -190,6 +190,7 @@ L=lanes/perps/config/lane.caravel-perps.testnet.toml
 - The stores in `/opt/caravel/data` stay. A new release must open them. Check the store schema in `platform/crates/caravel-runtime/src/store.rs` before deploying one that changes it.
 - For a release that could change execution (the engine or the lane's consensus sections), first re-execute a copy of the live store on the VM with the new binary: `caravel-perps-node check-store --config <a sequencer config pointing at the copy>`. The human chose not to require this for other releases (P-11).
 - To roll back, apply with the previous release.
+- Review, then apply exactly what was reviewed: `caravel plan $L --env testnet --release-dir /tmp/release --out release.plan.json`, then `caravel apply release.plan.json`. It refuses if the lane file, Stellar or the VM moved in between, and says what moved.
 - One part at a time: `caravel plan $L --env testnet --target node.relayer` plans only the relayer and what it needs, and `caravel apply ... --replace file.Caddyfile` writes a file again even if it matches (it restarts the nodes that read it). Each plan line ends with the address to use; `caravel graph` lists them all.
 
 Status and logs:

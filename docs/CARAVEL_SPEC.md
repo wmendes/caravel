@@ -2212,7 +2212,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-14 | The e2e on the CLI only; README, landing quickstart, RUNBOOK, `docs/LANE_FILE.md` — **Gate G3** (DEC-086) | C-13 | review |
 | C-15 | The resource graph, with identical plans (goldens byte for byte) (DEC-087) | C-14 | review |
 | C-16 | Addresses in plans; `plan --json`; `graph`; `depends_on`, `--target`, `--replace` (DEC-088) | C-15 | review |
-| C-17 | Saved plans: `plan --out`, `apply <planfile>` refused when anything moved — **Gate G4** | C-16 | todo |
+| C-17 | Saved plans: `plan --out`, `apply <planfile>` refused when anything moved — **Gate G4** (DEC-089) | C-16 | review |
 | C-18 | Accounts: funding, trustlines, balances topped up | C-17 | todo |
 | C-19 | Tokens: issued assets and their contracts; a declared token as the settlement token | C-18 | todo |
 | C-20 | Contracts: any Wasm, constructor arguments, derived addresses, `prevent_destroy` | C-19 | todo |
@@ -2838,6 +2838,36 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 - **`depends_on`:** the graph takes extra `Order` edges (`Graph::depends_on`), and a cycle is an error that names it. No lane-file table is a free-standing resource yet, so the lane-file syntax comes with declared accounts, tokens and contracts (C-18 to C-20).
 - **The old fixed-order diff** stays under `cfg(test)`: the property test still checks the graph's untargeted plans against it.
 - **Lane #1's plan** is still "No changes." (no lines, so no column) | Operators need to act on one part of a lane and to read plans as data; addresses are what `--target`, `--replace` and saved plans (C-17) refer to | `depends_on` in the lane file (C-18) |
+| DEC-089 | **M0.6 (C-17), Gate G4.** Saved plans (`caravel_deploy::saved`): `plan --out FILE`, then `apply FILE`.
+- **The file (`caravel-saved-plan/1`)** records:
+  - the lane file, the deployment, the release and Wasm dirs, `--target` and `--replace`;
+  - the plan (`caravel-plan/1`), and the release commit;
+  - the caravel version that made it;
+  - its basis:
+    - the sha256 of every file the lane file loaded (itself and its includes) and of every `--var-file`;
+    - each var's value as `--var` reads it back; a sensitive var only as `sha256:` of its value salted with the lane id and the var's name;
+    - three digests, of the resolved deployment (`desired`), of what Stellar has (`chain`) and of what the host has (`host`). Each is the sha256 of the value's `Debug` form, which is deterministic (ordered maps and sets) within one caravel version, so another version's plan is refused.
+- **No secret goes in:** no key, no file's content, no sensitive value. A run checked every identity's secret against a saved plan.
+- **`apply FILE`** runs as the plan was made. It takes the plan's lane file, deployment, release and wasm dirs (unless given) and the plan's vars as `--var`; a sensitive var must be given again as before. A different `--env` is refused. It refuses a missing identity rather than create it.
+- **It recomputes everything.** It refuses, naming each thing that moved, when:
+  - a loaded file or var file changed, appeared or went away;
+  - a var differs (a sensitive one says only that it differs);
+  - the deployment differs (the release, if that's what changed);
+  - Stellar differs;
+  - the host differs.
+
+  If the basis matches but the steps computed now aren't the saved ones (or have problems), that is refused too.
+- **A plan runs once.** A plan with problems can't be saved. After it applies, the file is marked `applied` and refused afterwards, so a `--replace` can't run twice by accident. `--json` prints one document, `{ok: false, moved}`, when refused.
+- **Checked on a local lane:**
+  - save then apply;
+  - apply again (refused);
+  - a stopped node (refused: the host changed);
+  - a `[node]` edit (refused: the lane file changed);
+  - another `--env` (refused);
+  - vars restored from the plan;
+  - no identity's secret in the file.
+
+  Unit tests cover each refusal, the salted hash, the version and format checks, and the applied mark | Review a plan, then apply exactly what was reviewed, for CI and team review, still with no state file | Remote or signed plan files |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 
