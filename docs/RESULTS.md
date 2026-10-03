@@ -204,3 +204,14 @@ Lane #1's deployment is now the `[env.testnet]` table of its lane file (DEC-070)
 | Replay | `caravel replay --prove-escape` | OK over 15 checkpoints from Stellar data alone, with the same escape proof as `exit.json` |
 
 The same script passed on a local network for both templates (perps in 251 s, payments in 182 s), and `scripts/check-quickstart.sh` ran the README's quickstart as written, from `install.sh` to `caravel escape`, on macOS. Lane #1's read-only `caravel plan --exit-code` with its CI release still printed "No changes." the same day.
+
+## From a prebuilt release to a lane in use (M0.7 H-04, 2026-10-03)
+
+`scripts/check-quickstart.sh` with `ARCHIVE=` installs Caravel from a release archive, then runs the README quickstart as written. That covers a Payments lane on a local network, two accounts, deposits, a transfer, a withdrawal claimed on Stellar, `destroy` and an escape.
+
+| Machine | Install | Quickstart | Notes |
+|---|---|---|---|
+| GitHub `ubuntu-24.04` runner, fresh (x86_64) | 2 s | 120 s | No Rust and no Stellar CLI beforehand: the installer downloaded the pinned CLI. The quickstart time includes pulling the local network's Docker image. Release workflow run 37138976666 on commit c476981. |
+| MacBook (arm64), Docker already warm | 8 s | 85 s | The local network's image was already pulled. A best case, not a clean machine. |
+
+So, once the archive is there, a clean Linux machine goes from nothing to a lane in use in about two minutes. The download of the archive itself isn't counted (about 40 MB). A clean Mac is still to be measured.

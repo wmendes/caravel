@@ -6,6 +6,9 @@
 # Stellar CLI 28.1.0 and Node.js 22, like the quickstart itself.
 #
 #   ./scripts/check-quickstart.sh            # SKIP_BUILD=1 reuses this checkout's builds
+#   ARCHIVE=caravel-<v>-<target>.tar.gz ./scripts/check-quickstart.sh   # from a release (H-04)
+#
+# It prints how long the install and the quickstart took (TIMING lines).
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK="${WORK:-$(mktemp -d)}"
@@ -25,13 +28,21 @@ block="$(awk '/<!-- quickstart/ { on = 1; next } on && /^```sh/ { inside = 1; ne
 [[ -n "$block" ]] || { echo "README.md has no quickstart block" >&2; exit 1; }
 
 echo "== install"
-args=(--templates payments)
-[[ "${SKIP_BUILD:-0}" == 1 ]] && args+=(--skip-build)
+start=$SECONDS
+if [[ -n "${ARCHIVE:-}" ]]; then
+  args=(--archive "$ARCHIVE")
+else
+  args=(--templates payments)
+  [[ "${SKIP_BUILD:-0}" == 1 ]] && args+=(--skip-build)
+fi
 "$ROOT/scripts/install.sh" "${args[@]}" > "$WORK/install.log" 2>&1 || { tail -30 "$WORK/install.log"; exit 1; }
+install_secs=$((SECONDS - start))
 
 echo "== the quickstart, as written"
 mkdir -p "$WORK/run" && cd "$WORK/run"
 printf '%s\n' "$block"
+start=$SECONDS
 bash -euo pipefail -c "$block" > "$WORK/quickstart.log" 2>&1 || { tail -40 "$WORK/quickstart.log"; exit 1; }
 tail -5 "$WORK/quickstart.log"
+echo "TIMING install ${install_secs}s, quickstart $((SECONDS - start))s ($(uname -sm))"
 echo "QUICKSTART OK in $WORK"
