@@ -62,10 +62,26 @@ fn alive(pid: u32) -> bool {
 impl Local {
     /// `.caravel/<lane>/<env>` under `state_root`, absolute.
     pub fn new(m: &Manifest, template: &str, state_root: &std::path::Path) -> Result<Self> {
+        Self::named(m, template, state_root, &m.env.primary_host())
+    }
+
+    /// Host `host` of the deployment: the sequencer's at
+    /// `.caravel/<lane>/<env>`, another at `.caravel/<lane>/<env>@<host>`.
+    pub fn named(
+        m: &Manifest,
+        template: &str,
+        state_root: &std::path::Path,
+        host: &str,
+    ) -> Result<Self> {
+        let env = if host == m.env.primary_host() {
+            m.env_name.clone()
+        } else {
+            format!("{}@{host}", m.env_name)
+        };
         let root = std::path::absolute(state_root)?
             .join(".caravel")
             .join(&m.lane.lane.name)
-            .join(&m.env_name);
+            .join(env);
         Ok(Self {
             root,
             template: template.to_string(),
@@ -217,6 +233,15 @@ impl Local {
         std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
         for (node, secret) in validators {
             write_private(&dir.join(format!("{node}.key")), &format!("{secret}\n"))?;
+        }
+        // A validator moved to another host, or rotated out, takes its key.
+        for f in std::fs::read_dir(&dir)? {
+            let name = f?.file_name().to_string_lossy().to_string();
+            if let Some(node) = name.strip_suffix(".key") {
+                if node.starts_with("validator-") && !validators.iter().any(|(n, _)| n == node) {
+                    std::fs::remove_file(dir.join(&name))?;
+                }
+            }
         }
         let token = match self.env_var("CARAVEL_INTERNAL_TOKEN") {
             Some(t) => t,

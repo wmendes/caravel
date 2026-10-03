@@ -13,7 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use caravel_deploy::deploy::{addresses, desired, Keys};
 use caravel_deploy::manifest::{Manifest, Network, SettlementParams, Token};
 use caravel_deploy::plan::{diff, fingerprint, Chain, Host, NodeReport, NodeState, OnChain};
-use caravel_deploy::render::{render, Resolved};
+use caravel_deploy::render::{render, render_for, Resolved};
 use caravel_deploy::template::{InProcess, Template};
 use caravel_perps_node::PerpsApp;
 
@@ -44,6 +44,64 @@ fn files() -> std::collections::BTreeMap<String, String> {
         web: true,
     };
     render(&m, &r, "/opt/caravel", 1).unwrap()
+}
+
+/// Lane #1 split across two hosts (C-22): validator 3 on `b`, reached at
+/// its private address and reaching the sequencer at `a`'s.
+#[test]
+fn files_for_two_hosts() {
+    let text =
+        std::fs::read_to_string(root().join("lanes/perps/config/lane.caravel-perps.testnet.toml"))
+            .unwrap();
+    let text = text
+        .replace(
+            "[env.testnet.sequencer]\n",
+            "[env.testnet.sequencer]\nhost = \"a\"\n",
+        )
+        .replace(
+            "key = \"caravel-validator-3\"\n",
+            "key = \"caravel-validator-3\"\nhost = \"b\"\n",
+        )
+        .replace("[env.testnet.host]\n", "[env.testnet.hosts.a]\nprivate_address = \"10.0.0.2\"\n")
+        + "\n[env.testnet.hosts.b]\nprovider = \"ssh\"\naddress = \"caravel-2\"\npublic_url = \"https://b.example\"\nprivate_address = \"10.0.0.3\"\n";
+    let m = Manifest::parse(&text, "testnet").unwrap();
+    let r = Resolved {
+        template: "perps".into(),
+        engine_wasm_hash: m.lane.engine_wasm_hash().unwrap().unwrap(),
+        settlement: [9; 32],
+        validator_keys: vec![[1; 32], [2; 32], [3; 32]],
+        web: true,
+    };
+    let a = render(&m, &r, "/opt/caravel", 1).unwrap();
+    let b = render_for(&m, &r, "b", "/opt/caravel", 1).unwrap();
+    // The sequencer's host runs the sequencer, the relayer and validators
+    // 1 and 2; b runs validator 3 and serves its routes only.
+    assert!(a.contains_key("sequencer.toml") && a.contains_key("relayer.json"));
+    assert!(a.contains_key("validator-1.toml") && !a.contains_key("validator-3.toml"));
+    assert!(b.contains_key("validator-3.toml") && b.contains_key("lane.toml"));
+    for f in [
+        "sequencer.toml",
+        "relayer.json",
+        "validator-1.toml",
+        "systemd/caravel-sequencer.service",
+    ] {
+        assert!(!b.contains_key(f), "{f} on b");
+    }
+    assert_eq!(a["lane.toml"], b["lane.toml"]);
+    // The sequencer listens where validator 3 reaches it, and calls it at b.
+    let seq = &a["sequencer.toml"];
+    assert!(seq.contains("10.0.0.2:8080"), "{seq}");
+    assert!(seq.contains("http://10.0.0.3:8083"), "{seq}");
+    assert!(seq.contains("http://127.0.0.1:8081"), "{seq}");
+    let v3 = &b["validator-3.toml"];
+    assert!(v3.contains("http://10.0.0.2:8080"), "{v3}");
+    assert!(v3.contains("10.0.0.3:8083"), "{v3}");
+    // Validator 1 stays on loopback.
+    assert!(a["validator-1.toml"].contains("127.0.0.1:8081"));
+    // b's Caddyfile has validator 3's routes, not the sequencer's.
+    let caddy = &b["caddy/Caddyfile"];
+    assert!(caddy.contains("10.0.0.3:8083"), "{caddy}");
+    assert!(!caddy.contains(":8080"), "{caddy}");
 }
 
 #[test]
@@ -294,6 +352,7 @@ fn lane_1_plans_no_changes() {
         files: d.host.files.clone(),
         nodes,
         has_data: true,
+        others: Default::default(),
     };
     let plan = diff(&d, &chain, &host);
     assert!(plan.is_empty(), "{}", plan.render(&d));

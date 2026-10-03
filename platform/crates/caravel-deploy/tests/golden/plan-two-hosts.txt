@@ -1,0 +1,21 @@
+Lane demo-pay-0 · env local · network local
+  lane_id 01010101…  config_hash 02020202…  engine 04040404…
+  settlement CC3UKZIZZ2LOLG6ZXQ3UNAEAP5JSCTWSSU4X33RU3VIAJMYUDZCSC6D4 (derived from the admin and the lane), admin GCQK…AGP5, token CADF…T54G
+  signers: 2 of 3 at epoch 1
+
++ release   0a1b2c3d                 release
++ release   0a1b2c3d (on b)          host.b.release
+~ write     lane.toml                file.lane.toml
+~ write     relayer.json             file.relayer.json
+~ write     sequencer.toml           file.sequencer.toml
+~ write     validator-1.toml         file.validator-1.toml
+~ write     validator-2.toml         file.validator-2.toml
+~ write     lane.toml (on b)         host.b.file.lane.toml
+~ write     validator-3.toml (on b)  host.b.file.validator-3.toml
++ start     validator-1              node.validator-1
++ start     validator-2              node.validator-2
++ start     validator-3              node.validator-3
++ start     sequencer                node.sequencer
++ start     relayer                  node.relayer
+
+14 step(s), 0 problem(s).

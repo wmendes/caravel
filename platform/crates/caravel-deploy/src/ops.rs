@@ -88,7 +88,22 @@ impl Prepared {
                 json!({ "running": state.running, "answers": state.report.is_some() }),
             );
         }
-        let seq = self.host_provider.status(seq_port).await;
+        // Nodes on the other hosts (C-22), with their host.
+        for (h, observed) in &self.host.others {
+            for (name, state) in &observed.nodes {
+                if self.desired.host_of(name) == Some(h.as_str()) || state.running {
+                    nodes.insert(
+                        name.clone(),
+                        json!({ "running": state.running, "answers": state.report.is_some(), "host": h }),
+                    );
+                }
+            }
+        }
+        let seq_addr = self
+            .m
+            .env
+            .listen_on(&self.desired.primary_host, "sequencer");
+        let seq = self.host_provider.status(&seq_addr, seq_port).await;
         let oc = self.chain.settlement.as_ref();
         json!({
             "lane": d.lane_name,
@@ -276,7 +291,11 @@ impl Prepared {
     /// for its first.
     async fn drain(&self) -> Result<()> {
         let port = self.m.env.sequencer.port;
-        if self.host_provider.status(port).await.is_none() {
+        let addr = self
+            .m
+            .env
+            .listen_on(&self.desired.primary_host, "sequencer");
+        if self.host_provider.status(&addr, port).await.is_none() {
             return Ok(());
         }
         eprintln!("→ drain: wait until every signed checkpoint is accepted, and at least one is");
@@ -284,7 +303,7 @@ impl Prepared {
         loop {
             let s = self
                 .host_provider
-                .status(port)
+                .status(&addr, port)
                 .await
                 .ok_or_else(|| anyhow!("the sequencer stopped answering"))?;
             let n = |k: &str| {
@@ -314,7 +333,7 @@ impl Prepared {
             let mut last_err = None;
             for v in &self.m.env.validators {
                 let node = validator_node(&v.name);
-                match self.host_provider.export_proofs(&node, exit) {
+                match self.provider_of(&node).export_proofs(&node, exit) {
                     Ok(_) => return Ok(()),
                     Err(e) => last_err = Some(e),
                 }
@@ -390,15 +409,26 @@ impl Prepared {
 
     fn stop_nodes(&self, validators: bool, wipe: bool) -> Result<()> {
         if wipe {
-            eprintln!("→ stop every node and wipe the host's lane data");
-            return self.host_provider.wipe(&self.all_nodes());
+            eprintln!("→ stop every node and wipe each host's lane data");
+            let all = self.all_nodes();
+            let mine = |h: Option<&str>| -> Vec<String> {
+                all.iter()
+                    .filter(|n| self.desired.host_of(n) == h)
+                    .cloned()
+                    .collect()
+            };
+            for o in &self.others {
+                o.provider.wipe(&mine(Some(&o.name)))?;
+            }
+            return self.host_provider.wipe(&mine(None));
         }
         self.host_provider.stop("relayer")?;
         self.host_provider.stop("sequencer")?;
         if validators {
             eprintln!("→ stop the validators");
             for v in &self.m.env.validators {
-                self.host_provider.stop(&validator_node(&v.name))?;
+                let node = validator_node(&v.name);
+                self.provider_of(&node).stop(&node)?;
             }
         } else {
             eprintln!("The validators keep running as the public proof source (--stop-validators stops them).");

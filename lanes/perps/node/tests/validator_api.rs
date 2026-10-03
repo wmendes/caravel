@@ -362,7 +362,14 @@ async fn validators_follow_sign_and_refuse_a_tampered_chain() {
     }
     // Every validator computed the same header and records what it signed.
     for u in &urls {
-        let (_, vcp) = c.get(&format!("{u}/v1/checkpoints/1")).await;
+        // A validator may compute it a moment after the sequencer sealed it.
+        let vcp = c
+            .until(
+                &format!("{u}/v1/checkpoints/1"),
+                "checkpoint 1",
+                |status, _| status == 200,
+            )
+            .await;
         assert_eq!(vcp["header_hex"], cp["header_hex"]);
         let st = c
             .until(&format!("{u}/v1/status"), "a signature", |_, v| {

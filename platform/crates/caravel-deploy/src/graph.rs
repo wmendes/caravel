@@ -310,16 +310,50 @@ pub fn build(d: &Desired, host: &Host) -> Result<Graph, String> {
         .map(|c| g.add(res_addr("contract", &c.name), Kind::Contract))
         .collect();
     let signers = g.add("signers.settlement", Kind::Signers);
-    let host_r = g.add("host", Kind::Host);
-    let data = g.add("host.data", Kind::HostData);
-    let release = g.add("release", Kind::Release);
-    let files: Vec<(String, usize)> = d
-        .host
-        .files
-        .keys()
-        .map(|p| (p.clone(), g.add(format!("file.{p}"), Kind::File)))
-        .collect();
     let all = nodes(d);
+    // Each host: its readiness, its data, its release and its files. The
+    // sequencer's keep their one-host addresses; another host's are under
+    // `host.<name>` (C-22).
+    struct HostIds {
+        host: usize,
+        data: usize,
+        release: usize,
+        files: Vec<(String, usize)>,
+        nodes: Vec<String>,
+    }
+    let mut hosts: Vec<HostIds> = Vec::new();
+    let primary_nodes: Vec<String> = all
+        .iter()
+        .filter(|n| d.host_of(n).is_none())
+        .cloned()
+        .collect();
+    hosts.push(HostIds {
+        host: g.add("host", Kind::Host),
+        data: g.add("host.data", Kind::HostData),
+        release: g.add("release", Kind::Release),
+        files: d
+            .host
+            .files
+            .keys()
+            .map(|p| (p.clone(), g.add(format!("file.{p}"), Kind::File)))
+            .collect(),
+        nodes: primary_nodes,
+    });
+    for o in &d.others {
+        let h = &o.name;
+        hosts.push(HostIds {
+            host: g.add(format!("host.{h}"), Kind::Host),
+            data: g.add(format!("host.{h}.data"), Kind::HostData),
+            release: g.add(format!("host.{h}.release"), Kind::Release),
+            files: o
+                .host
+                .files
+                .keys()
+                .map(|p| (p.clone(), g.add(format!("host.{h}.file.{p}"), Kind::File)))
+                .collect(),
+            nodes: o.nodes.clone(),
+        });
+    }
     // Declared in the order they start: validators, then the sequencer and
     // the relayer.
     let mut declared: Vec<String> = d.validators.clone();
@@ -329,9 +363,29 @@ pub fn build(d: &Desired, host: &Host) -> Result<Graph, String> {
         .iter()
         .map(|n| (n.clone(), g.add(format!("node.{n}"), Kind::Node)))
         .collect();
+    // Running nodes the lane file doesn't place there: gone from the file
+    // (`node.<name>`), or moved to another host (`node.<name>@<host>`).
     for (name, state) in &host.nodes {
-        if state.running && !all.contains(name) {
+        if !state.running {
+            continue;
+        }
+        if !all.contains(name) {
             g.add(format!("node.{name}"), Kind::Orphan);
+        } else if d.host_of(name).is_some() {
+            g.add(format!("node.{name}@{}", d.primary_host), Kind::Orphan);
+        }
+    }
+    for o in &d.others {
+        for (name, state) in host
+            .others
+            .get(&o.name)
+            .map(|h| &h.nodes)
+            .into_iter()
+            .flatten()
+        {
+            if state.running && d.host_of(name) != Some(o.name.as_str()) {
+                g.add(format!("node.{name}@{}", o.name), Kind::Orphan);
+            }
         }
     }
 
@@ -342,22 +396,25 @@ pub fn build(d: &Desired, host: &Host) -> Result<Graph, String> {
     g.edge(contract, signers, Order);
     // The host: its data goes with the contract; nothing installs on a host
     // that isn't ready.
-    g.edge(contract, data, Order);
-    g.edge(host_r, data, Order);
-    g.edge(data, release, Order);
-    for (_, f) in &files {
-        g.edge(release, *f, Order);
-    }
-    for &n in node.values() {
-        // A node checks what it reports against the contract.
-        g.edge(contract, n, Order);
-        g.edge(data, n, Restart);
-        g.edge(release, n, Restart);
-    }
-    for (path, f) in &files {
-        for target in nodes_of(path, &all) {
-            if let Some(&n) = node.get(&target) {
-                g.edge(*f, n, Restart);
+    for h in &hosts {
+        g.edge(contract, h.data, Order);
+        g.edge(h.host, h.data, Order);
+        g.edge(h.data, h.release, Order);
+        for (_, f) in &h.files {
+            g.edge(h.release, *f, Order);
+        }
+        for name in &h.nodes {
+            let n = node[name];
+            // A node checks what it reports against the contract.
+            g.edge(contract, n, Order);
+            g.edge(h.data, n, Restart);
+            g.edge(h.release, n, Restart);
+        }
+        for (path, f) in &h.files {
+            for target in nodes_of(path, &h.nodes) {
+                if let Some(&n) = node.get(&target) {
+                    g.edge(*f, n, Restart);
+                }
             }
         }
     }
@@ -714,6 +771,36 @@ pub fn diff(d: &Desired, chain: &Chain, host: &Host, opts: &Options) -> Result<P
     };
     let target = target_epoch(d, chain);
     let mut out: Vec<Outcome> = vec![Outcome::default(); g.resources.len()];
+    // Each host's wanted and observed sides, by its label (`None`: the
+    // sequencer's).
+    let empty = Host::default();
+    let want = |h: &Option<String>| match h {
+        None => &d.host,
+        Some(n) => &d.others.iter().find(|o| o.name == *n).expect("a host").host,
+    };
+    let have = |h: &Option<String>| match h {
+        None => host,
+        Some(n) => host.others.get(n).unwrap_or(&empty),
+    };
+    // `host.<name>…` → the host's label and the rest.
+    let label = |addr: &str| -> (Option<String>, String) {
+        for o in &d.others {
+            if let Some(rest) = addr.strip_prefix(&format!("host.{}", o.name)) {
+                if rest.is_empty() || rest.starts_with('.') {
+                    return (
+                        Some(o.name.clone()),
+                        rest.trim_start_matches('.').to_string(),
+                    );
+                }
+            }
+        }
+        (
+            None,
+            addr.trim_start_matches("host")
+                .trim_start_matches('.')
+                .to_string(),
+        )
+    };
     for &i in &order {
         let r = &g.resources[i];
         let mut o = Outcome::default();
@@ -799,24 +886,30 @@ pub fn diff(d: &Desired, chain: &Chain, host: &Host, opts: &Options) -> Result<P
                     }
                 }
             }
-            (Kind::Host, _) => {
+            (Kind::Host, addr) => {
+                let (on, _) = label(addr);
+                let (want, host) = (want(&on), have(&on));
                 if !host.missing.is_empty() {
                     o.problems.push(Problem::HostNotReady {
+                        on: on.clone(),
                         missing: host.missing.clone(),
                     });
                 }
                 // A release that would be installed must run there (a macOS
                 // build never reaches a Linux host).
-                if let (Some(want), Some(have)) = (&d.host.platform, &host.platform) {
-                    if want != have && host.release.as_deref() != Some(d.host.release.as_str()) {
+                if let (Some(w), Some(h)) = (&want.platform, &host.platform) {
+                    if w != h && host.release.as_deref() != Some(want.release.as_str()) {
                         o.problems.push(Problem::WrongPlatform {
-                            release: want.clone(),
-                            host: have.clone(),
+                            on,
+                            release: w.clone(),
+                            host: h.clone(),
                         });
                     }
                 }
             }
-            (Kind::HostData, _) => {
+            (Kind::HostData, addr) => {
+                let (on, _) = label(addr);
+                let host = have(&on);
                 // The stores belong to a contract that is gone.
                 let fresh = g.sources(i, EdgeKind::Order).any(|s| {
                     out[s]
@@ -825,26 +918,41 @@ pub fn diff(d: &Desired, chain: &Chain, host: &Host, opts: &Options) -> Result<P
                         .any(|st| matches!(st, Step::DeploySettlement { .. }))
                 });
                 if fresh && host.has_data {
-                    o.steps.push(Step::WipeHostData);
+                    o.steps.push(Step::WipeHostData { host: on });
                 }
             }
-            (Kind::Release, _) => {
-                if host.release.as_deref() != Some(d.host.release.as_str()) || replace.contains(&i)
-                {
+            (Kind::Release, addr) => {
+                let on = if addr == "release" {
+                    None
+                } else {
+                    label(addr).0
+                };
+                let (want, host) = (want(&on), have(&on));
+                if host.release.as_deref() != Some(want.release.as_str()) || replace.contains(&i) {
                     o.steps.push(Step::InstallRelease {
+                        host: on,
                         from: host.release.clone(),
-                        to: d.host.release.clone(),
+                        to: want.release.clone(),
                     });
                 }
             }
             (Kind::File, addr) => {
-                let path = addr.trim_start_matches("file.");
-                if host.files.get(path) != d.host.files.get(path) || replace.contains(&i) {
-                    o.steps.push(Step::WriteFile { path: path.into() });
+                let (on, path) = match addr.strip_prefix("file.") {
+                    Some(p) => (None, p.to_string()),
+                    None => {
+                        let (on, rest) = label(addr);
+                        (on, rest.trim_start_matches("file.").to_string())
+                    }
+                };
+                let (want, host) = (want(&on), have(&on));
+                if host.files.get(&path) != want.files.get(&path) || replace.contains(&i) {
+                    o.steps.push(Step::WriteFile { host: on, path });
                 }
             }
             (Kind::Node, addr) => {
                 let name = addr.trim_start_matches("node.");
+                let on = d.host_of(name).map(String::from);
+                let (want, host) = (want(&on), have(&on));
                 let state = host.nodes.get(name).cloned().unwrap_or_default();
                 let report = state.report.as_ref();
                 let restart = g.sources(i, EdgeKind::Restart).any(|s| out[s].changes());
@@ -859,12 +967,12 @@ pub fn diff(d: &Desired, chain: &Chain, host: &Host, opts: &Options) -> Result<P
                 });
                 let stale = state
                     .started_with
-                    .is_some_and(|f| f != fingerprint(&d.host.files, name))
+                    .is_some_and(|f| f != fingerprint(&want.files, name))
                     // A sequencer on another epoch than the chain will have.
                     || report.and_then(|r| r.epoch).is_some_and(|e| e != target)
                     // A binary from another release than the host has.
                     || report.and_then(|r| r.release.as_deref()).is_some_and(|c| {
-                        !c.starts_with(d.host.release.as_str()) && !d.host.release.starts_with(c)
+                        !c.starts_with(want.release.as_str()) && !want.release.starts_with(c)
                     });
                 if !state.running {
                     o.steps.push(Step::Start { node: name.into() });
@@ -890,9 +998,14 @@ pub fn diff(d: &Desired, chain: &Chain, host: &Host, opts: &Options) -> Result<P
                     }
                 }
             }
-            (Kind::Orphan, addr) => o.steps.push(Step::Stop {
-                node: addr.trim_start_matches("node.").into(),
-            }),
+            (Kind::Orphan, addr) => {
+                let rest = addr.trim_start_matches("node.");
+                let (node, on) = match rest.split_once('@') {
+                    Some((n, h)) => (n.to_string(), Some(h.to_string())),
+                    None => (rest.to_string(), None),
+                };
+                o.steps.push(Step::Stop { node, host: on });
+            }
         }
         out[i] = o;
     }
@@ -1031,6 +1144,8 @@ mod tests {
             accounts: vec![],
             tokens: vec![],
             contracts: vec![],
+            others: vec![],
+            primary_host: "default".into(),
         };
 
         let mut accounts = BTreeSet::new();
@@ -1151,6 +1266,7 @@ mod tests {
             files: host_files,
             nodes,
             has_data: r.yes(),
+            others: BTreeMap::new(),
         };
         (d, chain, host)
     }

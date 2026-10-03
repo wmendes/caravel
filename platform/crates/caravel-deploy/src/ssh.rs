@@ -27,6 +27,8 @@ pub struct Ssh {
     template: String,
     /// Where this machine keeps the lane's exported proofs.
     pub local_dir: PathBuf,
+    /// Its name in the deployment.
+    pub host: String,
 }
 
 fn q(s: &str) -> String {
@@ -56,15 +58,32 @@ impl Ssh {
     /// The host's files are under `[host] root`; this machine keeps the
     /// lane's exit file under `<state_root>/.caravel/<lane>/<env>`.
     pub fn new(m: &Manifest, template: &str, state_root: &std::path::Path) -> Result<Self> {
+        Self::named(m, template, state_root, &m.env.primary_host())
+    }
+
+    /// Host `host` of the deployment (C-22).
+    pub fn named(
+        m: &Manifest,
+        template: &str,
+        state_root: &std::path::Path,
+        host: &str,
+    ) -> Result<Self> {
+        let env = if host == m.env.primary_host() {
+            m.env_name.clone()
+        } else {
+            format!("{}@{host}", m.env_name)
+        };
         let local_dir = std::path::absolute(state_root)?
             .join(".caravel")
             .join(&m.lane.lane.name)
-            .join(&m.env_name);
+            .join(env);
+        let spec = m.env.host_spec(host).clone();
         Ok(Self {
-            root: m.env.host.root.clone(),
-            spec: m.env.host.clone(),
+            root: spec.root.clone(),
+            spec,
             template: template.to_string(),
             local_dir,
+            host: host.to_string(),
         })
     }
 
@@ -191,7 +210,7 @@ impl Ssh {
              v=$(node --version 2>/dev/null | sed 's/^v//; s/\\..*//'); [ \"${{v:-0}}\" -ge 22 ] || echo 'MISSING Node 22 or newer'\n",
             r = q(r)
         );
-        if m.env.host.public_url.is_some() {
+        if self.spec.public_url.is_some() {
             script += "command -v caddy >/dev/null || echo 'MISSING caddy'\n";
         }
         script += "echo \"UNAME $(uname -sm)\"\n\
@@ -211,7 +230,12 @@ impl Ssh {
             script += n;
         }
         for (n, p) in &ports {
-            script += &format!("echo \"STATUS {n} $(curl -sf -m 3 http://127.0.0.1:{p}/v1/status | tr -d '\\n')\"\n");
+            // Where it listens: a node another host calls binds this host's
+            // private address.
+            let addr = m.env.listen_on(&self.host, n);
+            script += &format!(
+                "echo \"STATUS {n} $(curl -sf -m 3 http://{addr}:{p}/v1/status | tr -d '\\n')\"\n"
+            );
         }
         let out = self.exec(&script, b"")?;
         let mut host = Host::default();
@@ -354,6 +378,15 @@ impl Ssh {
                 format!("{secret}\n").as_bytes(),
             )?;
         }
+        // A validator moved to another host, or rotated out, takes its key.
+        let keep: String = validators
+            .iter()
+            .map(|(node, _)| format!(" ! -name {}", q(&format!("{node}.key"))))
+            .collect();
+        self.exec(
+            &format!("sudo find {r}/keys -maxdepth 1 -name 'validator-*.key'{keep} -delete"),
+            b"",
+        )?;
         let body: String = env.iter().map(|(k, v)| format!("{k}={v}\n")).collect();
         self.exec(
             &format!(
@@ -444,10 +477,10 @@ impl Ssh {
         Ok(out.strip_prefix("EXISTS\n").map(str::to_string))
     }
 
-    pub async fn status(&self, port: u16) -> Option<serde_json::Value> {
+    pub async fn status(&self, addr: &str, port: u16) -> Option<serde_json::Value> {
         let out = self
             .exec(
-                &format!("curl -sf -m 3 http://127.0.0.1:{port}/v1/status"),
+                &format!("curl -sf -m 3 http://{addr}:{port}/v1/status"),
                 b"",
             )
             .ok()?;
@@ -483,6 +516,7 @@ impl Ssh {
     /// Waits until the node on `port` reports `want`.
     pub async fn wait_healthy(
         &self,
+        addr: &str,
         port: u16,
         want: &NodeReport,
         timeout: Duration,
@@ -490,7 +524,7 @@ impl Ssh {
         let deadline = Instant::now() + timeout;
         let mut last = "no answer".to_string();
         while Instant::now() < deadline {
-            if let Some(v) = self.status(port).await {
+            if let Some(v) = self.status(addr, port).await {
                 match crate::local::node_report(&v) {
                     Some(r) if want.key.is_some() && r.key != want.key => {
                         last = "another validator answers on its port".into()

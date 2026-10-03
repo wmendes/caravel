@@ -18,6 +18,21 @@ pub enum HostProvider {
 }
 
 impl HostProvider {
+    /// Host `host` of the deployment, by its provider (C-22).
+    pub fn named(
+        m: &Manifest,
+        template: &str,
+        state_root: &std::path::Path,
+        host: &str,
+    ) -> Result<Self> {
+        Ok(match m.env.host_spec(host).provider {
+            crate::manifest::Provider::Local => {
+                Self::Local(Local::named(m, template, state_root, host)?)
+            }
+            crate::manifest::Provider::Ssh => Self::Ssh(Ssh::named(m, template, state_root, host)?),
+        })
+    }
+
     /// The lane's root on the host.
     pub fn root_str(&self) -> String {
         match self {
@@ -102,10 +117,11 @@ impl HostProvider {
         }
     }
 
-    pub async fn status(&self, port: u16) -> Option<serde_json::Value> {
+    /// A node's `/v1/status`, where it listens on the host (`addr`).
+    pub async fn status(&self, addr: &str, port: u16) -> Option<serde_json::Value> {
         match self {
             Self::Local(l) => l.status(port).await,
-            Self::Ssh(s) => s.status(port).await,
+            Self::Ssh(s) => s.status(addr, port).await,
         }
     }
 
@@ -126,13 +142,14 @@ impl HostProvider {
 
     pub async fn wait_healthy(
         &self,
+        addr: &str,
         port: u16,
         want: &NodeReport,
         timeout: Duration,
     ) -> Result<()> {
         match self {
             Self::Local(_) => crate::local::wait_healthy(port, want, timeout).await,
-            Self::Ssh(s) => s.wait_healthy(port, want, timeout).await,
+            Self::Ssh(s) => s.wait_healthy(addr, port, want, timeout).await,
         }
     }
 }

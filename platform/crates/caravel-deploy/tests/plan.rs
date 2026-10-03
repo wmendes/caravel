@@ -10,7 +10,7 @@ use caravel_deploy::manifest::{Network, Provider};
 use caravel_deploy::plan::{
     diff, diff_with, step_addr, target_epoch, Chain, DeclaredAccount, DeclaredContract,
     DeclaredToken, Desired, DesiredHost, Holding, Host, NodeReport, NodeState, OnChain, Options,
-    Params, Plan, Problem, SignerSet, Step,
+    OtherHost, Params, Plan, Problem, SignerSet, Step,
 };
 
 fn key(n: u8) -> [u8; 32] {
@@ -89,6 +89,8 @@ fn desired() -> Desired {
         accounts: vec![],
         tokens: vec![],
         contracts: vec![],
+        others: vec![],
+        primary_host: "default".into(),
     }
 }
 
@@ -156,6 +158,7 @@ fn running(d: &Desired) -> Host {
         files: d.host.files.clone(),
         nodes,
         has_data: true,
+        others: BTreeMap::new(),
     }
 }
 
@@ -258,6 +261,7 @@ fn a_new_release_restarts_every_node() {
     assert_eq!(
         plan.steps[0],
         Step::InstallRelease {
+            host: None,
             from: Some("99887766".into()),
             to: "0a1b2c3d".into()
         }
@@ -306,6 +310,7 @@ fn a_validator_change_is_a_rotation_in_order() {
     });
     let stop3 = pos(&Step::Stop {
         node: "validator-3".into(),
+        host: None,
     });
     assert!(start4 < rotate && rotate < restart_seq && restart_seq < stop3);
     check("validator-change", &d, &plan);
@@ -370,7 +375,7 @@ fn after_a_testnet_reset() {
     let wipe = plan
         .steps
         .iter()
-        .position(|s| *s == Step::WipeHostData)
+        .position(|s| *s == Step::WipeHostData { host: None })
         .unwrap();
     let deploy = plan
         .steps
@@ -448,6 +453,7 @@ fn a_host_that_is_not_ready() {
     assert_eq!(
         plan.problems,
         [Problem::HostNotReady {
+            on: None,
             missing: vec!["Node 22".into(), "caddy".into()]
         }]
     );
@@ -518,6 +524,7 @@ fn a_release_for_another_platform() {
     assert_eq!(
         plan.problems,
         [Problem::WrongPlatform {
+            on: None,
             release: "Darwin arm64".into(),
             host: "Linux x86_64".into()
         }]
@@ -662,6 +669,7 @@ fn a_replacement_is_planned_even_when_nothing_differs() {
         one(&["file.relayer.json"]).steps,
         [
             Step::WriteFile {
+                host: None,
                 path: "relayer.json".into()
             },
             Step::Restart {
@@ -1024,4 +1032,124 @@ fn an_issuer_holding_its_own_token_needs_nothing_of_it() {
         .steps
         .iter()
         .any(|s| matches!(s, Step::Trust { .. } | Step::Mint { .. })));
+}
+
+/// `desired()` on two hosts (C-22): validator 3 runs on host `b`, the rest
+/// on the sequencer's, `a`.
+fn on_two_hosts() -> Desired {
+    let mut d = desired();
+    d.primary_host = "a".into();
+    d.host.files.remove("validator-3.toml");
+    let mut files = BTreeMap::new();
+    files.insert("validator-3.toml".to_string(), key(0x73));
+    files.insert("lane.toml".to_string(), key(0x11));
+    d.others = vec![OtherHost {
+        name: "b".into(),
+        host: DesiredHost {
+            files,
+            ..d.host.clone()
+        },
+        nodes: vec!["validator-3".into()],
+    }];
+    d
+}
+
+/// Both hosts after a first apply.
+fn running_on_two(d: &Desired) -> Host {
+    let mut host = running(d);
+    let v3 = host.nodes.remove("validator-3").unwrap();
+    for (name, n) in host.nodes.iter_mut() {
+        n.started_with = Some(caravel_deploy::plan::fingerprint(&d.host.files, name));
+    }
+    let b = &d.others[0].host;
+    let mut nodes = BTreeMap::new();
+    nodes.insert(
+        "validator-3".to_string(),
+        NodeState {
+            started_with: Some(caravel_deploy::plan::fingerprint(&b.files, "validator-3")),
+            ..v3
+        },
+    );
+    host.others.insert(
+        "b".into(),
+        Host {
+            files: b.files.clone(),
+            nodes,
+            ..running(d)
+        },
+    );
+    host
+}
+
+#[test]
+fn a_lane_on_two_hosts() {
+    let d = on_two_hosts();
+    let chain = deployed(&d);
+    // Each host gets its release and its files; a node starts on its own.
+    let plan = diff(&d, &chain, &Host::default());
+    check("two-hosts", &d, &plan);
+    let addrs = lines(&plan);
+    for a in [
+        "release",
+        "host.b.release",
+        "file.lane.toml",
+        "host.b.file.validator-3.toml",
+        "node.validator-3",
+    ] {
+        assert!(addrs.iter().any(|x| x == a), "{a} in {addrs:?}");
+    }
+    assert!(
+        !addrs.iter().any(|x| x == "file.validator-3.toml"),
+        "{addrs:?}"
+    );
+    // Applied, nothing to do.
+    let host = running_on_two(&d);
+    assert!(diff(&d, &chain, &host).steps.is_empty());
+
+    // A file on b changed: its validator restarts, nothing else.
+    let mut changed = d.clone();
+    changed.others[0]
+        .host
+        .files
+        .insert("validator-3.toml".into(), key(0x74));
+    let addrs = lines(&diff(&changed, &chain, &host));
+    assert_eq!(addrs, ["host.b.file.validator-3.toml", "node.validator-3"]);
+
+    // Moved from a to b: it starts on b and stops on a.
+    let mut moved = host.clone();
+    let v3 = moved
+        .others
+        .get_mut("b")
+        .unwrap()
+        .nodes
+        .remove("validator-3")
+        .unwrap();
+    moved.nodes.insert("validator-3".into(), v3);
+    let plan = diff(&d, &chain, &moved);
+    let addrs = lines(&plan);
+    assert!(
+        addrs.contains(&"node.validator-3@a".to_string()),
+        "{addrs:?}"
+    );
+    assert!(addrs.contains(&"node.validator-3".to_string()), "{addrs:?}");
+    assert!(plan.steps.contains(&Step::Stop {
+        node: "validator-3".into(),
+        host: Some("a".into()),
+    }));
+    check("two-hosts-moved", &d, &plan);
+
+    // A host that isn't ready says which.
+    let mut not_ready = host.clone();
+    not_ready.others.get_mut("b").unwrap().missing = vec!["systemd".into()];
+    let plan = diff(&d, &chain, &not_ready);
+    assert!(plan.problems.contains(&Problem::HostNotReady {
+        on: Some("b".into()),
+        missing: vec!["systemd".into()],
+    }));
+    // And a target on it plans that host's resources only.
+    let t = diff_with(&changed, &chain, &host, &target(&["node.validator-3"])).unwrap();
+    assert_eq!(
+        lines(&t),
+        ["host.b.file.validator-3.toml", "node.validator-3"]
+    );
 }
