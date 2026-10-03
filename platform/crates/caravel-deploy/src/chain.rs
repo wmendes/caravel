@@ -67,11 +67,31 @@ fn contract_data(e: &Option<Entry>) -> Option<&ScVal> {
     }
 }
 
-/// The declared tokens (C-19) and accounts (C-18): which contracts and
-/// accounts exist, and the accounts' trustlines with balances, in batched
-/// reads.
+/// The declared contracts (C-20), tokens (C-19) and accounts (C-18): which
+/// contracts (and Wasm) and accounts exist, and the accounts' trustlines
+/// with balances, in batched reads.
 async fn read_declared(rpc: &Rpc, d: &Desired, chain: &mut Chain) -> Result<()> {
-    // Declared tokens' contracts first.
+    // Declared contracts (C-20): the Wasm each runs, and which Wasm is
+    // uploaded.
+    if !d.contracts.is_empty() {
+        let mut keys = Vec::new();
+        for c in &d.contracts {
+            keys.push(instance_key(&c.address));
+            keys.push(code_key(&c.wasm));
+        }
+        let (entries, _) = rpc.ledger_entries(&keys).await?;
+        for (c, pair) in d.contracts.iter().zip(entries.chunks(2)) {
+            if let Some(ScVal::ContractInstance(i)) = contract_data(&pair[0]) {
+                if let ContractExecutable::Wasm(h) = &i.executable {
+                    chain.contracts.insert(c.address, h.0);
+                }
+            }
+            if pair[1].is_some() {
+                chain.wasms.insert(c.wasm);
+            }
+        }
+    }
+    // Declared tokens' contracts.
     if !d.tokens.is_empty() {
         let keys: Vec<_> = d.tokens.iter().map(|t| instance_key(&t.contract)).collect();
         let (entries, _) = rpc.ledger_entries(&keys).await?;

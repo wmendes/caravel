@@ -734,3 +734,46 @@ fn declared_tokens_are_checked_and_can_settle_a_lane() {
     assert!(bad("[env.testnet.accounts.x]\nbalances = { usd = \"1\" }\n[env.testnet.tokens.usd]\ncode = \"USD\"\nissuer = \"admin\"\n")
         .contains("add \"usd\" to its trustlines"));
 }
+
+#[test]
+fn declared_contracts_are_checked() {
+    let ok = format!(
+        "{ENV}\n[env.testnet.contracts.oracle]\nwasm = \"wasm/oracle.wasm\"\nsalt = \"v1\"\nlifecycle = {{ prevent_destroy = true }}\n[env.testnet.contracts.oracle.args]\nadmin = \"${{account.admin.public_key}}\"\ndecimals = 7\nfeeds = [\"BTC\", \"ETH\"]\n"
+    );
+    let m = Manifest::parse(&file(&ok), "testnet").unwrap();
+    let c = &m.env.contracts["oracle"];
+    assert_eq!(c.deployer(), "admin");
+    assert!(c.lifecycle.prevent_destroy);
+    // Arguments as `--name value`: numbers as written, lists as JSON; a
+    // value known only with the keys stays as written until then.
+    let args = c.arg_strings();
+    assert!(args.contains(&("decimals".into(), "7".into())));
+    assert!(args.contains(&("feeds".into(), "[\"BTC\",\"ETH\"]".into())));
+    let bad = |table: &str| err(&format!("{ENV}\n{table}"));
+    assert!(
+        bad("[env.testnet.contracts.settlement]\nwasm = \"x.wasm\"\n").contains("not `settlement`")
+    );
+    assert!(bad("[env.testnet.contracts.c]\nwasm = \"x.zip\"\n").contains("a .wasm file"));
+    assert!(
+        bad("[env.testnet.contracts.c]\nwasm = \"x.wasm\"\ndeployer = \"nobody\"\n")
+            .contains("\"admin\" or a declared account's name")
+    );
+    assert!(
+        bad("[env.testnet.contracts.c]\nwasm = \"x.wasm\"\nargs = { \"a-b\" = 1 }\n")
+            .contains("letters, digits and '_'")
+    );
+    // Values known only with the keys are refused elsewhere in a deployment.
+    assert!(bad(
+        "[env.testnet.contracts.c]\nwasm = \"x.wasm\"\nsalt = \"${account.admin.public_key}\"\n"
+    )
+    .contains("only relayer feeds, contracts' args and [outputs] can"));
+    let hash = "ab".repeat(32);
+    let m = Manifest::parse(
+        &file(&format!(
+            "{ENV}\n[env.testnet.contracts.c]\nwasm = \"{hash}\"\n"
+        )),
+        "testnet",
+    )
+    .unwrap();
+    assert_eq!(m.env.contracts["c"].wasm_hash(), Some([0xab; 32]));
+}

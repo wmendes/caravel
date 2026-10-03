@@ -187,6 +187,23 @@ impl Prepared {
 
     /// Winds the lane down (see the module docs).
     pub async fn destroy(&self, o: &DestroyOptions) -> Result<()> {
+        // `lifecycle.prevent_destroy` (C-20): on the deployment, or on a
+        // contract it declares.
+        let mut kept: Vec<String> = Vec::new();
+        if self.m.env.lifecycle.prevent_destroy {
+            kept.push(format!("[env.{}]", self.m.env_name));
+        }
+        for (name, c) in &self.m.env.contracts {
+            if c.lifecycle.prevent_destroy {
+                kept.push(format!("contract.{name}"));
+            }
+        }
+        if !kept.is_empty() {
+            bail!(
+                "destroy is refused: {} set lifecycle.prevent_destroy (remove it from the lane file to destroy)",
+                kept.join(", ")
+            );
+        }
         let d = &self.desired;
         let admin = self.m.env.admin.as_str();
         let Some(oc) = &self.chain.settlement else {

@@ -304,6 +304,11 @@ pub fn build(d: &Desired, host: &Host) -> Result<Graph, String> {
         .collect();
     let wasm = g.add("wasm.settlement", Kind::Wasm);
     let contract = g.add("contract.settlement", Kind::Contract);
+    let contract_ids: Vec<usize> = d
+        .contracts
+        .iter()
+        .map(|c| g.add(format!("contract.{}", c.name), Kind::Contract))
+        .collect();
     let signers = g.add("signers.settlement", Kind::Signers);
     let host_r = g.add("host", Kind::Host);
     let data = g.add("host.data", Kind::HostData);
@@ -410,10 +415,45 @@ pub fn build(d: &Desired, host: &Host) -> Result<Graph, String> {
             }
         }
     }
+    // A declared contract follows its deployer, and every resource whose
+    // address its arguments name (an account, a token, another contract).
+    let mut by_address: BTreeMap<String, usize> = BTreeMap::new();
+    by_address.insert(caravel_runtime::views::g_address(&d.admin), admin);
+    by_address.insert(
+        caravel_runtime::views::g_address(&d.relayer),
+        relayer_account,
+    );
+    for (a, &i) in d.accounts.iter().zip(&account_ids) {
+        by_address.insert(caravel_runtime::views::g_address(&a.key), i);
+    }
+    by_address.insert(crate::address::strkey(&d.token), token);
+    by_address.insert(crate::address::strkey(&d.settlement), contract);
+    for (t, &i) in d.tokens.iter().zip(&token_ids) {
+        by_address.insert(crate::address::strkey(&t.contract), i);
+    }
+    for (c, &i) in d.contracts.iter().zip(&contract_ids) {
+        by_address.insert(crate::address::strkey(&c.address), i);
+    }
+    for (c, &i) in d.contracts.iter().zip(&contract_ids) {
+        if let Some(by) = account_of(&c.deployer_key) {
+            g.edge(by, i, Order);
+        }
+        for (_, v) in &c.args {
+            if let Some(&from) = by_address.get(v.as_str()) {
+                g.edge(from, i, Order);
+            }
+        }
+    }
     for a in &d.accounts {
         for on in &a.depends_on {
             g.depends_on(&format!("account.{}", a.name), on)
                 .map_err(|e| format!("accounts.{}.depends_on: {e}", a.name))?;
+        }
+    }
+    for c in &d.contracts {
+        for on in &c.depends_on {
+            g.depends_on(&format!("contract.{}", c.name), on)
+                .map_err(|e| format!("contracts.{}.depends_on: {e}", c.name))?;
         }
     }
     Ok(g)
@@ -424,12 +464,60 @@ pub fn build(d: &Desired, host: &Host) -> Result<Graph, String> {
 struct Outcome {
     steps: Vec<Step>,
     problems: Vec<Problem>,
+    notes: Vec<String>,
 }
 
 impl Outcome {
     fn changes(&self) -> bool {
         !self.steps.is_empty()
     }
+}
+
+/// A declared contract against the chain: deployed once at its derived
+/// address (its Wasm uploaded first), and never upgraded. Its constructor's
+/// arguments are set at deploy and can't be read back, so a deployed one's
+/// are only noted.
+fn declared_contract_outcome(chain: &Chain, c: &crate::plan::DeclaredContract) -> Outcome {
+    let mut o = Outcome::default();
+    match chain.contracts.get(&c.address) {
+        Some(code) if *code != c.wasm => o.problems.push(Problem::ContractCodeDrift {
+            name: c.name.clone(),
+            code: *code,
+            want: c.wasm,
+        }),
+        Some(_) => {
+            if !c.args.is_empty() {
+                o.notes.push(format!(
+                    "contract.{}'s constructor arguments were set when it was deployed and can't be read back, so they aren't checked; for others, give it a new salt (a new contract)",
+                    c.name
+                ));
+            }
+        }
+        None => {
+            if !chain.wasms.contains(&c.wasm) {
+                if c.wasm_file.is_some() {
+                    o.steps.push(Step::UploadWasm {
+                        name: c.name.clone(),
+                        hash: c.wasm,
+                    });
+                } else {
+                    o.problems.push(Problem::WasmMissing {
+                        name: c.name.clone(),
+                        hash: c.wasm,
+                    });
+                }
+            }
+            o.steps.push(Step::DeployContract {
+                name: c.name.clone(),
+                contract: c.address,
+                deployer: c.deployer.clone(),
+                wasm: c.wasm,
+                salt: c.salt,
+                args: c.args.clone(),
+            });
+        }
+    }
+    o
 }
 
 /// A declared account against the chain: funded, trusting its assets, and
@@ -581,7 +669,7 @@ fn unreplaceable(kind: Kind) -> Option<&'static str> {
     match kind {
         Kind::Node | Kind::File | Kind::Release => None,
         Kind::Contract => Some(
-            "a settlement contract can't be replaced in place: its address derives from the admin and the lane's name, so a new one is a new lane (destroy this one, or give the lane a new name)",
+            "a contract can't be replaced in place: its address derives from the admin and the lane's name (a settlement contract: a new one is a new lane) or from its deployer and salt (a declared contract: give it a new salt)",
         ),
         Kind::Account => Some("an account isn't replaced: its key is the lane file's identity"),
         Kind::Token => Some("the settlement token is fixed when the contract is deployed"),
@@ -680,11 +768,18 @@ pub fn diff(d: &Desired, chain: &Chain, host: &Host, opts: &Options) -> Result<P
                     && !chain.settlement_wasm_uploaded
                 {
                     o.steps.push(Step::UploadWasm {
+                        name: "settlement".into(),
                         hash: d.settlement_wasm,
                     });
                 }
             }
-            (Kind::Contract, _) => o = contract_outcome(d, chain),
+            (Kind::Contract, "contract.settlement") => o = contract_outcome(d, chain),
+            (Kind::Contract, addr) => {
+                let name = addr.trim_start_matches("contract.");
+                if let Some(c) = d.contracts.iter().find(|c| c.name == name) {
+                    o = declared_contract_outcome(chain, c);
+                }
+            }
             (Kind::Signers, _) => {
                 if let Some(oc) = &chain.settlement {
                     if oc.signers != d.signers {
@@ -805,12 +900,17 @@ pub fn diff(d: &Desired, chain: &Chain, host: &Host, opts: &Options) -> Result<P
         .filter(planned)
         .flat_map(|i| out[i].problems.clone())
         .collect();
+    let notes = (0..out.len())
+        .filter(planned)
+        .flat_map(|i| out[i].notes.clone())
+        .collect();
     Ok(Plan {
         target_epoch: target,
         steps,
         problems,
         targets: opts.target.clone(),
         replaced: opts.replace.clone(),
+        notes,
     })
 }
 
@@ -924,6 +1024,7 @@ mod tests {
             vars: String::new(),
             accounts: vec![],
             tokens: vec![],
+            contracts: vec![],
         };
 
         let mut accounts = BTreeSet::new();
@@ -966,6 +1067,8 @@ mod tests {
             accounts,
             trustlines: BTreeMap::new(),
             tokens: BTreeSet::new(),
+            contracts: BTreeMap::new(),
+            wasms: BTreeSet::new(),
             token_exists: r.yes(),
             settlement_wasm_uploaded: r.yes(),
             settlement,

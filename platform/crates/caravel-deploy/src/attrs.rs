@@ -43,6 +43,13 @@ pub const LATER: [&str; 8] = [
 /// are written.
 pub const DEFERRED_OK: [&str; 1] = ["relayer.feeds"];
 
+/// Whether a deferred value may be at `path`: under `relayer.feeds`, or a
+/// contract's `args` (filled in before it is deployed, C-20).
+pub fn deferred_ok(path: &str) -> bool {
+    DEFERRED_OK.iter().any(|ok| path.starts_with(ok))
+        || (path.starts_with("contracts.") && path.contains(".args"))
+}
+
 fn hex(k: &[u8]) -> String {
     k.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -230,16 +237,36 @@ pub fn attributes(
             }
             Value::Map(tokens)
         }),
-        (
-            "contract".to_string(),
-            map([(
-                "settlement",
+        ("contract".to_string(), {
+            let mut contracts = BTreeMap::from([(
+                "settlement".to_string(),
                 map([
                     ("address", s(strkey(&a.settlement))),
                     ("pinned", Value::Bool(a.settlement_pinned)),
                 ]),
-            )]),
-        ),
+            )]);
+            // Declared contracts (C-20): addresses from the deployer's key
+            // and the salt, known with the keys.
+            for (name, c) in &m.env.contracts {
+                let deployer = match c.deployer() {
+                    "admin" => Some(keys.admin),
+                    d => keys.accounts.get(d).copied(),
+                };
+                if let Some(k) = deployer {
+                    let salt = crate::address::contract_salt(
+                        &m.lane.lane_id(),
+                        name,
+                        c.salt.as_deref().unwrap_or(""),
+                    );
+                    let id = crate::address::contract_id(m.env.network.passphrase(), &k, &salt);
+                    contracts.insert(
+                        name.clone(),
+                        map([("address", s(strkey(&id))), ("deployer", s(g(&k)))]),
+                    );
+                }
+            }
+            Value::Map(contracts)
+        }),
         ("node".to_string(), Value::Map(nodes)),
         ("validators".to_string(), Value::List(validators)),
         (

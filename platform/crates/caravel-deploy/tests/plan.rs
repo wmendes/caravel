@@ -8,9 +8,9 @@ use std::path::PathBuf;
 use caravel_deploy::address::{asset_contract_id, contract_id, settlement_salt};
 use caravel_deploy::manifest::{Network, Provider};
 use caravel_deploy::plan::{
-    diff, diff_with, step_addr, target_epoch, Chain, DeclaredAccount, DeclaredToken, Desired,
-    DesiredHost, Holding, Host, NodeReport, NodeState, OnChain, Options, Params, Plan, Problem,
-    SignerSet, Step,
+    diff, diff_with, step_addr, target_epoch, Chain, DeclaredAccount, DeclaredContract,
+    DeclaredToken, Desired, DesiredHost, Holding, Host, NodeReport, NodeState, OnChain, Options,
+    Params, Plan, Problem, SignerSet, Step,
 };
 
 fn key(n: u8) -> [u8; 32] {
@@ -88,6 +88,7 @@ fn desired() -> Desired {
         vars: String::new(),
         accounts: vec![],
         tokens: vec![],
+        contracts: vec![],
     }
 }
 
@@ -97,6 +98,8 @@ fn deployed(d: &Desired) -> Chain {
         accounts: BTreeSet::from([d.admin, d.relayer]),
         trustlines: BTreeMap::new(),
         tokens: BTreeSet::new(),
+        contracts: BTreeMap::new(),
+        wasms: BTreeSet::new(),
         token_exists: true,
         settlement_wasm_uploaded: true,
         settlement: Some(OnChain {
@@ -194,6 +197,7 @@ fn a_fresh_lane() {
                 issuer: d.admin
             },
             Step::UploadWasm {
+                name: "settlement".into(),
                 hash: d.settlement_wasm
             },
             Step::DeploySettlement {
@@ -355,6 +359,8 @@ fn after_a_testnet_reset() {
         accounts: BTreeSet::new(),
         trustlines: BTreeMap::new(),
         tokens: BTreeSet::new(),
+        contracts: BTreeMap::new(),
+        wasms: BTreeSet::new(),
         token_exists: true,
         settlement_wasm_uploaded: false,
         settlement: None,
@@ -901,4 +907,87 @@ fn a_declared_token_is_deployed_and_minted_by_its_issuer() {
         .trustlines
         .insert((key(0xE1), "EUR".into(), key(0xE9)), 2 * USDC);
     assert!(diff(&d, &chain, &running(&d)).is_empty());
+}
+
+fn oracle(d: &Desired, args: Vec<(String, String)>) -> DeclaredContract {
+    let salt = caravel_deploy::address::contract_salt(&d.lane_id, "oracle", "");
+    DeclaredContract {
+        name: "oracle".into(),
+        wasm: key(0xD7),
+        wasm_file: Some("contracts/oracle.wasm".into()),
+        deployer: "demo-admin".into(),
+        deployer_key: d.admin,
+        salt,
+        address: contract_id(Network::Local.passphrase(), &d.admin, &salt),
+        args,
+        depends_on: vec![],
+    }
+}
+
+#[test]
+fn a_declared_contract_is_uploaded_and_deployed_once() {
+    let mut d = desired();
+    // Its admin is an address the file has: it follows the settlement token.
+    let token = caravel_deploy::address::strkey(&d.token);
+    d.contracts = vec![oracle(
+        &d,
+        vec![
+            ("admin".into(), caravel_runtime::views::g_address(&d.admin)),
+            ("token".into(), token),
+            ("decimals".into(), "7".into()),
+        ],
+    )];
+    let plan = diff(&d, &Chain::default(), &Host::default());
+    assert!(plan.problems.is_empty(), "{:?}", plan.problems);
+    let addrs = lines(&plan);
+    let at = |a: &str| addrs.iter().position(|x| x == a).unwrap();
+    assert!(at("token.settlement") < at("contract.oracle"));
+    assert!(at("account.admin") < at("contract.oracle"));
+    check("contracts", &d, &plan);
+
+    // Deployed: nothing to do, and a note that its args aren't checked.
+    let mut chain = deployed(&d);
+    chain.contracts.insert(d.contracts[0].address, key(0xD7));
+    chain.wasms.insert(key(0xD7));
+    let plan = diff(&d, &chain, &running(&d));
+    assert!(plan.steps.is_empty() && plan.problems.is_empty());
+    assert_eq!(plan.notes.len(), 1);
+    assert!(plan.render(&d).contains("  note: contract.oracle's constructor arguments were set when it was deployed and can't be read back"));
+    assert!(plan.render(&d).ends_with("No changes.\n"));
+
+    // Another build there: a problem, not an upgrade.
+    chain.contracts.insert(d.contracts[0].address, key(0xD8));
+    assert_eq!(
+        diff(&d, &chain, &running(&d)).problems,
+        [Problem::ContractCodeDrift {
+            name: "oracle".into(),
+            code: key(0xD8),
+            want: key(0xD7)
+        }]
+    );
+    // Replacing it means a new salt.
+    let err = diff_with(&d, &chain, &running(&d), &replace(&["contract.oracle"])).unwrap_err();
+    assert!(err.contains("give it a new salt"), "{err}");
+}
+
+#[test]
+fn a_wasm_hash_the_network_lacks_is_a_problem() {
+    let mut d = desired();
+    let mut c = oracle(&d, vec![]);
+    c.wasm_file = None;
+    d.contracts = vec![c];
+    let plan = diff(&d, &deployed(&d), &running(&d));
+    assert_eq!(
+        plan.problems,
+        [Problem::WasmMissing {
+            name: "oracle".into(),
+            hash: key(0xD7)
+        }]
+    );
+    // Uploaded already: just deployed.
+    let mut chain = deployed(&d);
+    chain.wasms.insert(key(0xD7));
+    let plan = diff(&d, &chain, &running(&d));
+    assert!(plan.problems.is_empty());
+    assert!(matches!(&plan.steps[..], [Step::DeployContract { name, .. }] if name == "oracle"));
 }

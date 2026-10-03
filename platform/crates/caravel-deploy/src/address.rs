@@ -106,6 +106,18 @@ pub fn strkey(contract: &[u8; 32]) -> String {
         .to_string()
 }
 
+/// A declared contract's salt (C-20): `sha256("caravel/contract" ‖ lane_id
+/// ‖ name ‖ 0 ‖ salt)`, so the same name and salt give one address per lane
+/// and deployer.
+pub fn contract_salt(lane_id: &[u8; 32], name: &str, salt: &str) -> [u8; 32] {
+    let mut pre = b"caravel/contract".to_vec();
+    pre.extend_from_slice(lane_id);
+    pre.extend_from_slice(name.as_bytes());
+    pre.push(0);
+    pre.extend_from_slice(salt.as_bytes());
+    sha256(&pre)
+}
+
 /// A `C…` contract address, if `s` is one.
 pub fn parse_contract(s: &str) -> Option<[u8; 32]> {
     stellar_strkey::Contract::from_string(s).ok().map(|c| c.0)
@@ -178,5 +190,30 @@ mod tests {
             settlement_salt(&[1; 32]),
             sha256(&[b"caravel/settlement".as_slice(), &[1; 32]].concat())
         );
+    }
+}
+
+#[cfg(test)]
+mod contract_salt_vector {
+    /// The address a declared contract derives, checked against `stellar
+    /// contract id wasm --salt c240… --source-account GAAQ…DZ7H --network
+    /// testnet` (CLI 28.1.0, 2026-10-03).
+    #[test]
+    fn a_declared_contracts_address_is_the_clis() {
+        let salt = super::contract_salt(&[7; 32], "oracle", "v1");
+        let hex: String = salt.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(
+            hex,
+            "c2402e64cdabba9162cf3afe14d3bf9944ff79dd379e32eb75609b8884af09d5"
+        );
+        let id = super::contract_id("Test SDF Network ; September 2015", &[1; 32], &salt);
+        assert_eq!(
+            super::strkey(&id),
+            "CDHH3RBLDP7GJNAS4X4CKGLBPJLEZVCU74CFXJHPEYYLPT2IVIDDNGV6"
+        );
+        // Another name or salt, another contract.
+        assert_ne!(salt, super::contract_salt(&[7; 32], "oracle", "v2"));
+        assert_ne!(salt, super::contract_salt(&[7; 32], "oracle2", "v1"));
+        assert_ne!(salt, super::contract_salt(&[8; 32], "oracle", "v1"));
     }
 }

@@ -2215,7 +2215,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-17 | Saved plans: `plan --out`, `apply <planfile>` refused when anything moved — **Gate G4** (DEC-089) | C-16 | review |
 | C-18 | Accounts: funding, trustlines, balances topped up (DEC-090) | C-17 | review |
 | C-19 | Tokens: issued assets and their contracts; a declared token as the settlement token (DEC-091) | C-18 | review |
-| C-20 | Contracts: any Wasm, constructor arguments, derived addresses, `prevent_destroy` | C-19 | todo |
+| C-20 | Contracts: any Wasm, constructor arguments, derived addresses, `prevent_destroy` (DEC-092) | C-19 | review |
 | C-21 | Local modules with inputs and outputs — **Gate G5** | C-20 | todo |
 | C-22 | Several hosts per deployment and node placement | C-21 | todo |
 | C-23 | Networking across hosts (private addresses) | C-22 | todo |
@@ -2907,6 +2907,30 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - a golden plan with a token issued by a declared account (issuer, then token, then holder), and its "No changes." once deployed;
   - C-18's golden, whose mint line now names the minting identity;
   - on a local lane: settling in a declared `usd`, with `eur` issued by a declared `treasury`; contracts deployed, trustlines, mints by each issuer; "No changes." after; outputs; a deposit in `usd` | A lane's tokens were fixed forms, and a second asset (for users, or a contract in C-20) needed shell steps | Tokens that aren't Stellar assets (SEP-41 contracts) as declared resources |
+| DEC-092 | **M0.6 (C-20).** Declared contracts: `[env.<name>.contracts.<n>]`. **Constructor arguments are set once (the human's choice).**
+- **Fields:**
+  - `wasm`: a `.wasm` file relative to the lane file, or the sha256 of uploaded Wasm;
+  - `deployer`: `"admin"` (default) or a declared account;
+  - `salt`;
+  - `args`, the constructor's arguments by name: strings as written, numbers and booleans as written, lists and tables as JSON. They may use values known only with the keys (account, token and contract addresses, the lane's hashes), filled in before the contract is deployed;
+  - `depends_on`;
+  - `lifecycle.prevent_destroy`. `[env.<name>] lifecycle` has `prevent_destroy` too.
+- **The address:** `contract_id(network, deployer, sha256("caravel/contract" ‖ lane_id ‖ name ‖ 0 ‖ salt))`. A unit vector matches `stellar contract id wasm`.
+- **Each contract is a resource, `contract.<n>`.**
+  - When it's missing: `UploadWasm` (when the network lacks the Wasm and a file is named; with a hash only, the problem is `WasmMissing`), then `DeployContract` (`stellar contract deploy --wasm-hash --salt -- --<arg> <value>…`). Apply checks the deployed address against the planned one.
+  - When it's deployed: running other Wasm is `ContractCodeDrift`, since this tool upgrades nothing.
+  - It follows its deployer, any resource whose address one of its arguments names, and its `depends_on`.
+- **Arguments aren't read back.** Stellar keeps no record of a constructor's arguments, so they are used at deploy and not checked again. `plan` gives a note (`Plan.notes`, in its text and `caravel-plan/1`) for a deployed contract that has some. Changing them means a new contract with a new salt, and `--replace contract.<n>` is refused with that hint. The rejected options were an on-chain fingerprint (a data entry on the deployer, ~0.5 XLM, bending "no state") and a local fingerprint file (a state file).
+- **`caravel destroy`** refuses while the deployment or any declared contract sets `lifecycle.prevent_destroy`, and names them.
+- **Expressions** read `contract.<n>.address` and `.deployer`. `contracts.*.args` joins `relayer.feeds` as a place a deferred value may be.
+- **The chain reader** reads each contract's instance (the Wasm it runs) and its Wasm's code entry, in one batch; nothing is read when none are declared.
+- **Checked:**
+  - the address vector;
+  - manifest checks;
+  - a golden plan (upload and deploy after the token and admin its arguments name);
+  - "No changes." with the note once deployed;
+  - `ContractCodeDrift`, `WasmMissing`, and the `--replace` refusal;
+  - on a local lane: a contract with no constructor (Wasm uploaded and deployed), and a second settlement contract whose arguments come from expressions (addresses, the lane's hashes, a signer struct, params). It was deployed at the planned address, then "No changes." with the note, and `--replace` and `destroy` refused | Lanes need their own contracts (oracles, registries) next to the settlement one, wired by address | Upgrades of declared contracts, and checking arguments that a contract exposes through a getter |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 
