@@ -18,6 +18,7 @@
 //! and each node reports what it runs (`/v1/status`).
 
 pub mod address;
+pub mod attrs;
 pub mod chain;
 pub mod cli;
 pub mod deploy;

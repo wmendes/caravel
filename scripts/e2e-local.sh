@@ -104,7 +104,7 @@ lane_get() { curl -sf "$SEQ$1"; }
 # The deploy tool runs from $WORK, so its state (.caravel/) stays there.
 # VARS: the deployment's inputs (the var file, and later the rotation).
 VARS=(--var-file "$WORK/e2e.vars.toml")
-caravel() { local cmd="$1"; shift; (cd "$WORK" && "$CARAVEL" "$cmd" "$LANE" --env e2e ${RELEASE[@]+"${RELEASE[@]}"} "${VARS[@]}" "$@"); }
+caravel() { local cmd="$1"; shift; (cd "$WORK" && "$CARAVEL" "$cmd" -f "$LANE" --env e2e ${RELEASE[@]+"${RELEASE[@]}"} "${VARS[@]}" "$@"); }
 status() { caravel status --json 2>> "$WORK/logs/caravel.log"; }
 
 log "tools"
@@ -158,8 +158,10 @@ log "0. caravel apply"
 caravel apply --yes > "$WORK/logs/apply.log" 2>&1 || { tail -30 "$WORK/logs/apply.log"; fail "caravel apply"; }
 grep -E '^\+|^~|^-|→|Applied' "$WORK/logs/apply.log" | sed 's/^/   /'
 caravel plan 2>/dev/null | grep -q "No changes." || fail "a second plan still has changes"
-st="$(status)"
-SETTLEMENT="$(jq -r .settlement <<< "$st")"; USDC_ID="$(jq -r .token <<< "$st")"
+# The deployment's outputs (built in, and its own [outputs] in scripts/e2e/env.toml).
+SETTLEMENT="$(caravel output settlement 2>> "$WORK/logs/caravel.log")"; USDC_ID="$(caravel output token 2>> "$WORK/logs/caravel.log")"
+[[ "$(caravel output sequencer 2>> "$WORK/logs/caravel.log")" == "$SEQ" ]] || fail "the sequencer output"
+[[ "$(status | jq -r .outputs.settlement_contract)" == "$SETTLEMENT" ]] || fail "status --json outputs"
 echo "settlement $SETTLEMENT, USDC $USDC_ID"
 lane_get /v1/status | jq -e ".template == \"$E2E_TEMPLATE\"" > /dev/null || fail "the sequencer runs another template"
 if [[ "$E2E_TEMPLATE" == perps ]]; then

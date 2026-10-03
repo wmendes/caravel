@@ -23,7 +23,7 @@ pub mod diag;
 pub mod expr;
 mod resolve;
 
-pub use resolve::{Inputs, ResolvedEnv, VarType};
+pub use resolve::{Inputs, Output, ResolvedEnv, VarType};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -33,9 +33,6 @@ pub use diag::{did_you_mean, Diagnostic, Error, Source, Sources, Span};
 /// Top-level keys that belong to deployments, not genesis. Lane file
 /// parsers set them aside, and no template may use them as its section.
 pub const DEPLOYMENT_KEYS: [&str; 5] = ["env", "include", "vars", "locals", "outputs"];
-
-/// Reserved for what comes later (M0.6, C-10: outputs).
-const LATER: [&str; 1] = ["outputs"];
 
 /// Where a value of a deployment came from.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -60,6 +57,8 @@ pub struct LaneDoc {
     /// `[locals]`: named values computed from vars, other locals, `lane`
     /// and `env`.
     pub locals: BTreeMap<String, toml::Value>,
+    /// `[outputs]`: what a deployment reports (`caravel output`).
+    pub outputs: BTreeMap<String, toml::Value>,
     /// `env.<name>.<path>`, `vars.<name>…`, `locals.<name>…` → where the
     /// value came from.
     origins: BTreeMap<String, Origin>,
@@ -83,6 +82,7 @@ impl LaneDoc {
             envs: BTreeMap::new(),
             vars: BTreeMap::new(),
             locals: BTreeMap::new(),
+            outputs: BTreeMap::new(),
             origins: BTreeMap::new(),
         };
         let genesis = l.file(path, None).unwrap_or_default();
@@ -155,6 +155,7 @@ struct Loader<'a> {
     envs: BTreeMap<String, RawEnv>,
     vars: BTreeMap<String, (toml::Value, usize)>,
     locals: BTreeMap<String, (toml::Value, usize)>,
+    outputs: BTreeMap<String, (toml::Value, usize)>,
     /// Per file, `path` → its span, and whether it is a table (tables
     /// merge; anything else replaces what it inherits).
     origins: BTreeMap<(usize, String), (Span, bool)>,
@@ -218,14 +219,6 @@ impl Loader<'_> {
         let is_main = from.is_none();
         self.stack.push(key);
 
-        for k in LATER {
-            if table.contains_key(k) {
-                self.diags.push(
-                    Diagnostic::new(format!("`{k}` is reserved for the lane file's outputs, which this version doesn't have yet"))
-                        .at(self.span(file, k)),
-                );
-            }
-        }
         // Includes first, so a name defined twice points at both.
         if let Some(inc) = table.remove("include") {
             let list: Vec<(usize, String)> = match &inc {
@@ -301,16 +294,16 @@ impl Loader<'_> {
                     .at(self.span(file, "env")),
             ),
         }
-        for (section, kind) in [("vars", "var"), ("locals", "local")] {
+        for (section, kind) in [("vars", "var"), ("locals", "local"), ("outputs", "output")] {
             match table.remove(section) {
                 None => {}
                 Some(toml::Value::Table(items)) => {
                     for (name, v) in items {
                         let here = format!("{section}.{name}");
-                        let into = if section == "vars" {
-                            &mut self.vars
-                        } else {
-                            &mut self.locals
+                        let into = match section {
+                            "vars" => &mut self.vars,
+                            "locals" => &mut self.locals,
+                            _ => &mut self.outputs,
                         };
                         if let Some((_, prev)) = into.get(&name) {
                             let prev = *prev;
@@ -329,10 +322,10 @@ impl Loader<'_> {
                             );
                             continue;
                         }
-                        let into = if section == "vars" {
-                            &mut self.vars
-                        } else {
-                            &mut self.locals
+                        let into = match section {
+                            "vars" => &mut self.vars,
+                            "locals" => &mut self.locals,
+                            _ => &mut self.outputs,
                         };
                         into.insert(name, (v, file));
                     }
@@ -342,9 +335,6 @@ impl Loader<'_> {
                         .at(self.span(file, section)),
                 ),
             }
-        }
-        for k in LATER {
-            table.remove(k);
         }
         self.stack.pop();
         if is_main {
@@ -407,6 +397,10 @@ impl Loader<'_> {
                     .split('.')
                     .nth(1)
                     .and_then(|n| self.locals.get(n.split('[').next().unwrap_or(n))),
+                "outputs" => p
+                    .split('.')
+                    .nth(1)
+                    .and_then(|n| self.outputs.get(n.split('[').next().unwrap_or(n))),
                 _ => None,
             };
             if owner.is_some_and(|(_, f)| f == file) {
@@ -426,6 +420,7 @@ impl Loader<'_> {
             abstract_envs,
             vars: self.vars.into_iter().map(|(k, (v, _))| (k, v)).collect(),
             locals: self.locals.into_iter().map(|(k, (v, _))| (k, v)).collect(),
+            outputs: self.outputs.into_iter().map(|(k, (v, _))| (k, v)).collect(),
             origins,
         })
     }

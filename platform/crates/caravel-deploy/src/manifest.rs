@@ -282,6 +282,12 @@ pub struct Manifest {
     /// The lane file's vars and their values (`name = value, …`, sensitive
     /// ones masked); empty when it declares none.
     pub vars: String,
+    /// The lane file language's document and inputs, for what is computed
+    /// once keys and addresses are known (relayer feeds, outputs).
+    pub doc: Option<caravel_lanefile::LaneDoc>,
+    pub inputs: Inputs,
+    /// Values left for then: paths in the deployment (under `relayer.feeds`).
+    pub deferred: Vec<String>,
 }
 
 /// One `[env.<name>]` table, as listed before any is chosen.
@@ -352,7 +358,44 @@ impl Manifest {
         if !problems.is_empty() {
             bail!("{}", problems.join("\n"));
         }
-        let r = doc.resolve_env(env, inputs).map_err(anyhow::Error::new)?;
+        let section = |k: &str, f: &str| {
+            doc.genesis
+                .get(k)
+                .and_then(|t| t.get(f))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string()
+        };
+        let name = section("lane", "name");
+        let lane_id =
+            caravel_runtime::checkpoint::sha256(&caravel_core::preimage::lane_id_preimage(&name));
+        let before = crate::attrs::before(
+            &name,
+            &section("app", "template"),
+            &lane_id,
+            &section("app", "engine_wasm_sha256"),
+        );
+        let r = doc
+            .resolve_env_with(env, inputs, &before)
+            .map_err(anyhow::Error::new)?;
+        // Values known only after keys and addresses go where they can wait.
+        let early: Vec<String> = r
+            .deferred
+            .iter()
+            .filter(|p| !crate::attrs::DEFERRED_OK.iter().any(|ok| p.starts_with(ok)))
+            .map(|p| {
+                let at = doc
+                    .locate(&format!("env.{env}.{p}"))
+                    .map(|l| format!("\n    at {l}"))
+                    .unwrap_or_default();
+                format!(
+                    "{p} uses a value known only once the lane's keys and addresses are (account, contract, token, node, …): only relayer feeds and [outputs] can{at}"
+                )
+            })
+            .collect();
+        if !early.is_empty() {
+            bail!("{}", early.join("\n"));
+        }
         let values: toml::Table = r
             .vars
             .iter()
@@ -373,6 +416,9 @@ impl Manifest {
         let locate = |msg: &str| locate_problem(doc, env, &r.table, msg);
         let mut m = Self::from_lane_with(LaneFile::from_table(t)?, env, &locate)?;
         m.vars = r.vars_line();
+        m.doc = Some(doc.clone());
+        m.inputs = inputs.clone();
+        m.deferred = r.deferred;
         Ok(m)
     }
 
@@ -448,7 +494,52 @@ impl Manifest {
             env_name: env.to_string(),
             env: spec,
             vars: String::new(),
+            doc: None,
+            inputs: Inputs::default(),
+            deferred: Vec::new(),
         })
+    }
+
+    /// Fills in what was left for once keys and addresses are known (the
+    /// relayer's feeds), from `attrs` (`crate::attrs::attributes`).
+    pub fn finish(
+        &mut self,
+        attrs: &BTreeMap<String, caravel_lanefile::expr::Value>,
+    ) -> Result<()> {
+        let Some(doc) = &self.doc else {
+            return Ok(());
+        };
+        if self.deferred.is_empty() {
+            return Ok(());
+        }
+        let r = doc
+            .resolve_env_with(&self.env_name, &self.inputs, attrs)
+            .map_err(anyhow::Error::new)?;
+        let feeds: Vec<toml::Table> = r
+            .table
+            .get("relayer")
+            .and_then(|t| t.get("feeds"))
+            .cloned()
+            .map(|f| f.try_into())
+            .transpose()
+            .context("relayer.feeds")?
+            .unwrap_or_default();
+        self.env.relayer.feeds = feeds;
+        self.deferred.clear();
+        Ok(())
+    }
+
+    /// The deployment's `[outputs]`, from `attrs`.
+    pub fn outputs(
+        &self,
+        attrs: &BTreeMap<String, caravel_lanefile::expr::Value>,
+    ) -> Result<Vec<caravel_lanefile::Output>> {
+        match &self.doc {
+            None => Ok(Vec::new()),
+            Some(doc) => doc
+                .outputs(&self.env_name, &self.inputs, attrs)
+                .map_err(anyhow::Error::new),
+        }
     }
 
     /// The settlement's `min_deposit`: the table's, or `[limits] min_deposit`.
