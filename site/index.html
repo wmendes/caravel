@@ -3,13 +3,36 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="Infrastructure as code for Stellar appchains. Open source. Declare a lane in one file, see the plan, apply it, and wind it down to exit proofs. It settles to Stellar in the token you choose.">
-<title>Caravel</title>
+<meta name="description" content="Appchains with their own rules, settled on Stellar. Declare a lane in one file, see the plan, apply it. Open source; testnet only, not audited.">
+<title>Caravel: appchains as code, settled on Stellar</title>
+<link rel="canonical" href="https://caravel-tau.vercel.app/">
+<meta name="theme-color" content="#081E22" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#F3EEE4" media="(prefers-color-scheme: light)">
+<link rel="icon" href="/favicon.ico" sizes="32x32">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Caravel">
+<meta property="og:url" content="https://caravel-tau.vercel.app/">
+<meta property="og:title" content="Caravel: appchains as code, settled on Stellar">
+<meta property="og:description" content="Appchains with their own rules, settled on Stellar. Declare a lane in one file, see the plan, apply it. Open source; testnet only, not audited.">
+<meta property="og:image" content="https://caravel-tau.vercel.app/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Caravel. Declare a lane. Plan it. Apply it. Appchains with their own rules, settled on Stellar.">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Caravel: appchains as code, settled on Stellar">
+<meta name="twitter:description" content="Appchains with their own rules, settled on Stellar. Declare a lane in one file, see the plan, apply it. Open source; testnet only, not audited.">
+<meta name="twitter:image" content="https://caravel-tau.vercel.app/og.png">
+<meta name="twitter:image:alt" content="Caravel. Declare a lane. Plan it. Apply it. Appchains with their own rules, settled on Stellar.">
 <script>document.documentElement.classList.add("js");</script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;700&display=swap">
+<link rel="preload" href="/fonts/schibsted-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin>
 <style>
+/* Schibsted Grotesk (SIL OFL 1.1, fonts/OFL.txt), self-hosted: one variable file per subset. */
+@font-face { font-family: "Schibsted Grotesk"; font-style: normal; font-weight: 400 700; font-display: swap; src: url("/fonts/schibsted-grotesk-latin-ext.woff2") format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "Schibsted Grotesk"; font-style: normal; font-weight: 400 700; font-display: swap; src: url("/fonts/schibsted-grotesk-latin.woff2") format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
 /* Layout: a harbor chart read left to right. Dark "Stage" first; coral = the lane, teal = Stellar, never swapped. */
 :root {
   --ground: #081E22; --raised: #102C31; --rule: #1C3B41; --line: #4B7178;
@@ -52,9 +75,11 @@ h1, h2, h3 { text-wrap: balance; font-weight: 700; }
 a { color: inherit; }
 code { font-family: var(--mono); font-size: .9em; }
 :focus-visible { outline: 3px solid var(--lane); outline-offset: 3px; border-radius: 4px; }
+.skip { position: absolute; left: 16px; top: -100px; z-index: 100; background: var(--lane); color: var(--on-lane); font-weight: 700; padding: 10px 16px; border-radius: 8px; text-decoration: none; }
+.skip:focus { top: 12px; }
 .wrap { max-width: var(--wrap); margin-inline: auto; padding-inline: clamp(16px, 4vw, 40px); }
 .eyebrow { font-size: .8125rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
-.lede { font-size: clamp(1.0625rem, 1.6vw, 1.25rem); color: var(--muted); max-width: 60ch; }
+.lede { font-size: clamp(1.0625rem, 1.6vw, 1.25rem); color: var(--muted); max-width: 60ch; text-wrap: pretty; }
 .lede code { color: var(--ink); }
 .lane-t { color: var(--lane); }
 .harbor-t { color: var(--harbor-ink); }
@@ -108,6 +133,8 @@ code { font-family: var(--mono); font-size: .9em; }
 .plan { list-style: none; padding: 0; margin-top: 12px; display: grid; gap: 7px; }
 .plan li { display: grid; grid-template-columns: 1.5ch 7.5ch minmax(0, 1fr) 20px; column-gap: 10px; align-items: center; color: var(--muted); opacity: 0; transform: translate3d(0, 6px, 0); transition: opacity .5s var(--out), transform .5s var(--out), color .3s ease; }
 .plan li.in { opacity: 1; transform: none; }
+/* Without JavaScript the replay never runs: show the plan as written. */
+html:not(.js) .plan li, html:not(.js) .pl li { opacity: 1; transform: none; }
 .plan li.on, .plan li.ok { color: var(--ink); }
 .plan.idle li.in { opacity: .5; }
 .plan .sg { color: var(--lane); font-weight: 700; }
@@ -117,8 +144,7 @@ code { font-family: var(--mono); font-size: .9em; }
 .plan li.st .bx { border-color: var(--harbor); }
 .bx::after { content: ""; position: absolute; inset: 0; background: var(--lane); transform-origin: left center; transform: scaleX(var(--p, 0)); }
 .plan li.st .bx::after { background: var(--harbor); }
-html:not(.js) .plan li { opacity: 1; transform: none; color: var(--ink); }
-html:not(.js) .bx::after { transform: none; }
+
 .said { margin-top: 14px; min-height: 1.5em; color: var(--muted); }
 .said.ok { color: var(--ink); font-weight: 700; }
 .track { position: relative; height: 176px; margin-top: 22px; overflow: hidden; border-radius: 8px; }
@@ -141,121 +167,48 @@ html:not(.js) .bx::after { transform: none; }
 .replay[hidden] { display: inline-block; visibility: hidden; }
 .track .wait { position: absolute; left: 0; top: 34px; font-size: .875rem; color: var(--muted); transition: opacity .4s var(--out); }
 .track .wait.gone { opacity: 0; }
-html:not(.js) .track .wait { display: none; }
+
 @media (prefers-reduced-motion: reduce) { .plan li, .pl li { transition: none; } }
 
 /* Sections */
 section.band { padding-block: clamp(48px, 6vw, 72px); border-top: 1px solid var(--rule); }
 .head { display: grid; gap: 12px; max-width: 760px; }
 .head h2 { font-size: clamp(1.875rem, 4.2vw, 3rem); line-height: 1.06; letter-spacing: -.02em; }
-.scroll-x { overflow-x: auto; margin-top: 40px; }
-.scroll-x > .chart { min-width: 680px; }
-.chart { display: block; width: 100%; height: auto; }
-.chart text { font-family: var(--font); }
-.c-lb { fill: var(--lane); stroke: none; }
-.c-sb { fill: var(--harbor); stroke: none; }
-.c-cp, .c-mk { fill: var(--ink); stroke: none; }
-.c-drop { stroke: var(--ink); stroke-width: 2; stroke-dasharray: 4 4; fill: none; }
-.c-doc { stroke: var(--ink); stroke-width: 2; fill: none; stroke-linejoin: round; }
-.c-keep { stroke: var(--lane); stroke-width: 2; stroke-dasharray: 6 5; fill: none; }
-.c-cut { stroke: var(--ground); stroke-width: 5; fill: none; }
-.c-br-lane { stroke: var(--lane); stroke-width: 2.5; fill: none; }
-.c-br-harbor { stroke: var(--harbor-ink); stroke-width: 2.5; fill: none; }
-.c-lab { font-size: 15px; font-weight: 700; fill: var(--ink); }
-.c-lab-lane { fill: var(--lane); } .c-lab-harbor { fill: var(--harbor-ink); }
-.c-tick { font-size: 14px; fill: var(--muted); }
-.c-phase { font-size: 14px; font-weight: 700; fill: var(--muted); }
-.c-note { font-size: 14px; fill: var(--ink); }
-text.c-note.c-lab-lane { fill: var(--lane); } text.c-note.c-lab-harbor { fill: var(--harbor-ink); }
 
-/* How it works */
-.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; margin-top: 48px; counter-reset: step; }
-@media (max-width: 1000px) { .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 560px) { .steps { grid-template-columns: minmax(0, 1fr); } }
-.step { background: var(--raised); border: 1px solid var(--rule); border-radius: 12px; padding: 20px; display: grid; gap: 14px; align-content: start; min-width: 0; }
-.glyph { width: 100%; height: auto; display: block; }
-.g-lane { fill: var(--lane-soft); } .g-harbor { fill: var(--harbor-soft); }
-.g-lb { fill: var(--lane); } .g-sb { fill: var(--harbor); }
-.g-arrow { stroke: var(--ink); stroke-width: 3; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.g-head { stroke: var(--ink); stroke-width: 3; fill: none; stroke-linecap: round; stroke-linejoin: round; }
-.g-wallet { fill: none; stroke: var(--harbor-ink); stroke-width: 3; }
-.step .where { font-size: .75rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
-.step h3 { font-size: 1.25rem; line-height: 1.25; }
-.step h3::before { counter-increment: step; content: counter(step) "  "; color: var(--muted); white-space: pre; }
-.step p { color: var(--muted); font-size: .9375rem; }
-.bandkey { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-top: 28px; font-size: .9375rem; color: var(--muted); }
-.bandkey span { display: inline-flex; align-items: center; gap: 10px; }
-.bk { width: 28px; height: 14px; border-radius: 3px; display: inline-block; }
-.bk-lane { background: var(--lane-soft); outline: 2px solid var(--lane); outline-offset: -2px; }
-.bk-harbor { background: var(--harbor-soft); outline: 2px solid var(--harbor-ink); outline-offset: -2px; }
-.props { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; margin-top: 48px; }
-@media (max-width: 760px) { .props { grid-template-columns: minmax(0, 1fr); } }
-.prop { border-top: 3px solid var(--lane); padding-top: 16px; min-width: 0; }
-.prop.st { border-top-color: var(--harbor); }
-.prop h3 { font-size: 1.125rem; }
-.prop p { margin-top: 6px; color: var(--muted); font-size: .9375rem; }
+/* Who it's for: one sentence whose subject changes, and the four rules that app would set, each over the line that sets it */
+.who-for h2 { font-size: clamp(2rem, 7vw, 4.5rem); line-height: 1.04; letter-spacing: -.03em; }
+/* The subject is its own line. Every subject sits in the same cell, so the line keeps the size of the longest and nothing below moves; the clip box is padded so descenders aren't cut. */
+.who-for .swap { display: grid; overflow: hidden; color: var(--lane); padding-block: .04em .2em; margin-block: -.04em -.2em; }
+.who-for .swap > span { grid-area: 1 / 1; opacity: 0; transform: translateY(130%); transition: transform .55s var(--out), opacity .55s var(--out); }
+.who-for .swap > span.on { opacity: 1; transform: none; }
+.who-for .swap > span.out { opacity: 0; transform: translateY(-130%); }
+.who-for .swap > span.snap { transition: none; }
+.apps { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-top: 28px; }
+.app { font: 700 .9375rem var(--font); color: var(--muted); background: none; border: 0; padding: 6px 0; min-height: 40px; cursor: pointer; border-bottom: 2px solid transparent; transition: color .2s ease, border-color .2s ease; }
+.app:hover { color: var(--ink); }
+.app[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--lane); }
+.rules4 { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px; margin-top: 36px; }
+@media (max-width: 960px) { .rules4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .rules4 { grid-template-columns: minmax(0, 1fr); gap: 20px; } }
+.rules4 li { border-top: 2px solid var(--rule); padding-top: 14px; display: grid; gap: 6px; align-content: start; transition: opacity .45s var(--out), transform .45s var(--out); }
+.rules4 li b { font-size: 1.1875rem; line-height: 1.25; }
+.rules4 li code { font-size: .8125rem; color: var(--harbor-ink); overflow-wrap: anywhere; }
+/* Four across, the longest setting takes two lines: keep that room for every app so nothing below moves. */
+@media (min-width: 961px) { .rules4 li code { min-height: 3.1em; } }
+.rules4.fade li { opacity: 0; transform: translateY(6px); }
+.rules4 li:nth-child(2) { transition-delay: .04s; } .rules4 li:nth-child(3) { transition-delay: .08s; } .rules4 li:nth-child(4) { transition-delay: .12s; }
+.who-note { margin-top: 28px; display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: .9375rem; color: var(--muted); }
+.who-note .kind { color: var(--ink); font-weight: 700; }
+@media (prefers-reduced-motion: reduce) { .who-for .swap > span, .rules4 li, .app { transition: none; } }
 
-/* Trust */
-.cards3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-top: 36px; }
-@media (max-width: 900px) { .cards3 { grid-template-columns: minmax(0, 1fr); } }
-.tcard { border-radius: 12px; padding: 24px; display: grid; gap: 10px; align-content: start; min-width: 0; }
-.tcard.soft { background: var(--lane-soft); }
-.tcard.hard { background: var(--harbor-soft); }
-.tcard.exit { background: var(--raised); border: 1px solid var(--rule); }
-.pill { justify-self: start; font-size: .8125rem; font-weight: 700; padding: 4px 12px; border-radius: 999px; }
-.pill.l { background: var(--lane); color: var(--on-lane); }
-.pill.h { background: var(--harbor); color: var(--on-harbor); }
-.pill.o { border: 2px solid var(--line); color: var(--ink); padding: 2px 10px; }
-.tcard h3 { font-size: 1.25rem; }
-.tcard p { color: var(--muted); font-size: .9375rem; }
-.tcard.soft p, .tcard.hard p { color: var(--ink); }
-
-/* Lanes */
-.lanes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-top: 48px; }
-@media (max-width: 1000px) { .lanes { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 560px) { .lanes { grid-template-columns: minmax(0, 1fr); } }
-.lanecard { border: 1px solid var(--rule); border-radius: 12px; padding: 22px; display: grid; gap: 10px; align-content: start; min-width: 0; }
-.lanecard.first { border: 2px solid var(--lane); background: var(--lane-soft); }
-.lanecard .row5 { display: flex; gap: 5px; }
-.lanecard .row5 i { width: 18px; height: 14px; border-radius: 3px; border: 2px solid var(--lane); display: block; }
-.lanecard.first .row5 i { background: var(--lane); }
-.lanecard .tag { font-size: .75rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
-.lanecard.first .tag { color: var(--lane); }
-.lanecard h3 { font-size: 1.1875rem; }
-.lanecard p { font-size: .9375rem; color: var(--muted); }
-.lanecard.first p { color: var(--ink); }
-.lanecard .cfgline { font: 700 .8125rem var(--mono); color: var(--ink); }
-.lanecard:not(.first) .cfgline { color: var(--muted); }
-
-/* Roadmap */
-.stairs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; margin-top: 48px; align-items: end; }
-.stair { display: grid; gap: 8px; min-width: 0; }
-.stair .when { font-size: .8125rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
-.stair h3 { font-size: 1.1875rem; }
-.stair p { font-size: .9375rem; color: var(--muted); }
-.stair .riser { margin-top: 10px; background: var(--raised); border-top: 4px solid var(--harbor); border-radius: 4px; }
-.stair.l .riser { border-top-color: var(--lane); }
-.stair:nth-child(1) .riser { height: 40px; } .stair:nth-child(2) .riser { height: 96px; }
-.stair:nth-child(3) .riser { height: 152px; } .stair:nth-child(4) .riser { height: 208px; }
-@media (max-width: 860px) {
-  .stairs { grid-template-columns: minmax(0, 1fr); align-items: start; }
-  .stair { border-left: 4px solid var(--harbor); padding-left: 18px; }
-  .stair.l { border-left-color: var(--lane); }
-  .stair .riser { display: none; }
-}
-
-/* Waitlist */
+/* Quickstart */
 .join { background: var(--raised); border: 1px solid var(--rule); border-radius: 16px; padding: clamp(28px, 5vw, 56px); display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: clamp(24px, 4vw, 56px); align-items: center; }
 @media (max-width: 860px) { .join { grid-template-columns: minmax(0, 1fr); } }
 .join h2 { font-size: clamp(2rem, 4.2vw, 3rem); line-height: 1.06; letter-spacing: -.02em; }
 .join .lede { margin-top: 14px; }
-.who { list-style: none; padding: 0; display: grid; gap: 10px; }
-.who li { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 12px; align-items: baseline; font-size: .9375rem; color: var(--muted); }
-.who li b { color: var(--ink); }
-.who li::before { content: ""; width: 14px; height: 14px; border-radius: 3px; background: var(--lane); transform: translateY(2px); }
-.who li.v::before { background: var(--harbor); }
+.join .small { margin-top: 12px; font-size: .875rem; color: var(--muted); }
+
 .join .cta-row { margin-top: 24px; }
-.join .small { margin-top: 12px; font-size: .8125rem; color: var(--muted); }
 
 /* Footer */
 footer { border-top: 1px solid var(--rule); padding-block: 40px 56px; }
@@ -264,46 +217,13 @@ footer p { font-size: .875rem; color: var(--muted); }
 .social { display: flex; flex-wrap: wrap; gap: 16px; font-size: .9375rem; }
 .social a { color: var(--ink); }
 
-/* Configure: six settings drawn on the same two bands as "How it works", lane on top, Stellar below, and the line that sets each */
-.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.dials { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; margin-top: 28px; }
-@media (max-width: 1000px) { .dials { grid-template-columns: repeat(3, minmax(0, 1fr)); } .dial:nth-child(n+4) h3 { padding-top: 28px; } }
-@media (max-width: 600px) { .dials { grid-template-columns: repeat(2, minmax(0, 1fr)); } .dial:nth-child(n+3) h3 { padding-top: 28px; } }
-.dial { display: grid; grid-row: span 4; grid-template-rows: subgrid; row-gap: 6px; min-width: 0; }
-.dial h3 { font-size: 1.0625rem; padding: 0 2px 4px; }
-.cell { border-radius: 8px; padding: 16px 14px 14px; display: grid; gap: 12px; align-content: space-between; min-width: 0; }
-.cell.l { background: var(--lane-soft); }
-.cell.s { background: var(--harbor-soft); }
-.cell b { font-size: .9375rem; line-height: 1.3; }
-.seen { display: grid; gap: 2px; align-content: start; padding: 8px 2px 0; font-size: .8125rem; color: var(--muted); }
-.seen code { font-size: .8125rem; font-weight: 700; color: var(--ink); overflow-wrap: anywhere; }
-.kv { font: 700 .8125rem var(--mono); color: var(--ink); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; }
-@media (max-width: 600px) { .cell { padding: 14px 12px 12px; } .cell b { font-size: .875rem; } }
-.dp { display: block; width: 100%; max-width: 190px; height: auto; overflow: visible; }
-.dp text { font-family: var(--font); font-weight: 700; }
-.d-lf { fill: var(--lane); } .d-lo { fill: none; stroke: var(--lane); stroke-width: 2.5; }
-.d-sf { fill: var(--harbor-ink); } .d-so { fill: none; stroke: var(--harbor-ink); stroke-width: 2.5; }
-.d-dash { stroke-dasharray: 4 4; } .d-dim { opacity: .5; }
-.d-net { fill: none; stroke: var(--harbor-ink); stroke-width: 1.5; opacity: .6; }
-.d-onl { fill: var(--on-lane); } .d-ons { fill: var(--on-harbor); }
-/* Block time ticks at real cadence: a lane block every second, one ledger sweep every five */
-.d-b2 { animation: d-b2 5s linear infinite; } .d-b3 { animation: d-b3 5s linear infinite; }
-.d-b4 { animation: d-b4 5s linear infinite; } .d-b5 { animation: d-b5 5s linear infinite; }
-@keyframes d-b2 { 0%, 19.9% { opacity: 0; } 20%, 100% { opacity: 1; } }
-@keyframes d-b3 { 0%, 39.9% { opacity: 0; } 40%, 100% { opacity: 1; } }
-@keyframes d-b4 { 0%, 59.9% { opacity: 0; } 60%, 100% { opacity: 1; } }
-@keyframes d-b5 { 0%, 79.9% { opacity: 0; } 80%, 100% { opacity: 1; } }
-.d-sweep { transform-box: fill-box; transform-origin: left center; animation: d-sweep 5s linear infinite; }
-@keyframes d-sweep { from { transform: scaleX(0); } to { transform: scaleX(1); } }
-@media (prefers-reduced-motion: reduce) { .d-b2, .d-b3, .d-b4, .d-b5, .d-sweep { animation: none; } }
+/* Small shared pieces: source notes, the GitHub mark */
+
 .srcs { margin-top: 24px; font-size: .8125rem; color: var(--muted); max-width: 90ch; }
 
 .gh { width: 18px; height: 18px; fill: currentColor; flex: none; }
-.docs { list-style: none; padding: 0; display: grid; gap: 8px; margin-top: 24px; font-size: .9375rem; }
-.docs a { color: var(--ink); text-underline-offset: 3px; }
-.docs span { color: var(--muted); }
-.join .lanefile { font-size: .8125rem; }
 
+.join .lanefile { font-size: .8125rem; }
 
 /* Configure and plan: the rules grouped by what a change does, and the plan for the selected group */
 .plangrid { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); gap: 28px; margin-top: 32px; align-items: start; }
@@ -322,119 +242,27 @@ footer p { font-size: .875rem; color: var(--muted); }
 .planout .srcs { margin-top: 0; }
 @media (prefers-reduced-motion: reduce) { .grp { transition: none; } }
 
-/* How it works: four phases, each a two-band glyph (lane on top, Stellar below) animating in turn */
-.phases { list-style: none; padding: 0; margin: 20px 0 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-@media (max-width: 960px) { .phases { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 520px) { .phases { grid-template-columns: minmax(0, 1fr); } }
-.phase { background: var(--raised); border: 1px solid var(--rule); border-radius: 12px; overflow: hidden; min-width: 0; }
-.phase > .tick { display: block; height: 3px; background: var(--lane); transform-origin: left center; }
-.phase.st > .tick { background: var(--harbor); }
-.pg { position: relative; height: 120px; margin: 16px 16px 0; }
-.pg > * { position: absolute; }
-.pg .bl, .pg .bs { left: 0; right: 0; height: 54px; border-radius: 8px; }
-.pg .bl { top: 0; background: var(--lane-soft); }
-.pg .bs { top: 66px; background: var(--harbor-soft); }
-.pg .bar { left: 12px; right: 12px; top: 80px; height: 26px; border-radius: 4px; border: 2px solid var(--harbor); overflow: hidden; }
-.pg .bar i { position: absolute; inset: 0; background: var(--harbor); transform-origin: left center; }
-.pg .one { top: 14px; width: 26px; height: 26px; border-radius: 3px; background: var(--lane); }
-.pg .row { left: 12px; top: 14px; display: flex; gap: 6px; }
-.pg .row > i { position: relative; flex: none; width: 22px; height: 22px; border-radius: 3px; border: 2px solid var(--lane); overflow: hidden; }
-.pg .row > i b { position: absolute; inset: 0; background: var(--lane); }
-.pg .row > i.f { background: var(--lane); }
-.pg .row > span { position: relative; width: 0; }
-.pg .dia { position: absolute; left: -9px; top: 30px; width: 12px; height: 12px; background: var(--ink); transform: rotate(45deg); }
-.pg .vdash { left: calc(70% + 12px); top: 42px; height: 36px; border-left: 2px dashed var(--ink); opacity: .7; }
-.pg .paid { left: 12px; width: 50%; top: 80px; height: 26px; border-radius: 4px; background: var(--harbor); }
-.pg .hdash { left: calc(50% + 18px); right: 52px; top: 92px; border-top: 2px dashed var(--ink); opacity: .7; }
-.pg .ring { right: 12px; top: 78px; width: 30px; height: 30px; border-radius: 50%; border: 3px solid var(--harbor-ink); display: grid; place-items: center; }
-.pg .ring i { width: 14px; height: 14px; border-radius: 50%; background: var(--harbor-ink); }
-.phase .pt { padding: 14px 18px 18px; display: grid; gap: 4px; }
-.phase .pt .where { font-size: .75rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
-.phase .pt b { font-size: 1.125rem; }
-.phase .pt span:last-child { font-size: .875rem; color: var(--muted); }
-.ph1 { animation: p1 12s linear infinite; } .ph2 { animation: p2 12s linear infinite; } .ph3 { animation: p3 12s linear infinite; } .ph4 { animation: p4 12s linear infinite; }
-.ph1 > .tick { animation: r1 12s linear infinite; } .ph2 > .tick { animation: r2 12s linear infinite; } .ph3 > .tick { animation: r3 12s linear infinite; } .ph4 > .tick { animation: r4 12s linear infinite; }
-.ph1 .bar i { animation: depfill 12s linear infinite; } .ph1 .one { animation: depblk 12s linear infinite; }
-.ph2 .row > i:nth-child(1) b { animation: u1 12s linear infinite; } .ph2 .row > i:nth-child(2) b { animation: u2 12s linear infinite; }
-.ph2 .row > i:nth-child(3) b { animation: u3 12s linear infinite; } .ph2 .row > i:nth-child(4) b { animation: u4 12s linear infinite; }
-.ph2 .row > i:nth-child(5) b { animation: u5 12s linear infinite; }
-.ph3 .dia { opacity: 0; animation: cpdrop 12s linear infinite; } .ph3 .bar i { animation: cpfill 12s linear infinite; }
-.ph4 .one { animation: wblk 12s linear infinite; } .ph4 .ring i { animation: wfill 12s linear infinite; }
-@keyframes p1 { 0%, 23% { opacity: 1; } 25%, 98% { opacity: .5; } 100% { opacity: 1; } }
-@keyframes p2 { 0%, 23% { opacity: .5; } 25%, 48% { opacity: 1; } 50%, 100% { opacity: .5; } }
-@keyframes p3 { 0%, 48% { opacity: .5; } 50%, 73% { opacity: 1; } 75%, 100% { opacity: .5; } }
-@keyframes p4 { 0%, 73% { opacity: .5; } 75%, 98% { opacity: 1; } 100% { opacity: .5; } }
-@keyframes r1 { 0% { transform: scaleX(0); } 23%, 100% { transform: scaleX(1); } }
-@keyframes r2 { 0%, 25% { transform: scaleX(0); } 48%, 100% { transform: scaleX(1); } }
-@keyframes r3 { 0%, 50% { transform: scaleX(0); } 73%, 100% { transform: scaleX(1); } }
-@keyframes r4 { 0%, 75% { transform: scaleX(0); } 98%, 100% { transform: scaleX(1); } }
-@keyframes depfill { 0%, 3% { transform: scaleX(0); } 14%, 100% { transform: scaleX(1); } }
-@keyframes depblk { 0%, 14% { opacity: 0; transform: scale(.6); } 18%, 100% { opacity: 1; transform: scale(1); } }
-@keyframes u1 { 0%, 27% { opacity: 0; } 28%, 100% { opacity: 1; } }
-@keyframes u2 { 0%, 31% { opacity: 0; } 32%, 100% { opacity: 1; } }
-@keyframes u3 { 0%, 35% { opacity: 0; } 36%, 100% { opacity: 1; } }
-@keyframes u4 { 0%, 39% { opacity: 0; } 40%, 100% { opacity: 1; } }
-@keyframes u5 { 0%, 43% { opacity: 0; } 44%, 100% { opacity: 1; } }
-@keyframes cpdrop { 0%, 52% { opacity: 0; transform: translateY(0) rotate(45deg); } 54% { opacity: 1; transform: translateY(0) rotate(45deg); } 61% { opacity: 1; transform: translateY(38px) rotate(45deg); } 64%, 100% { opacity: 0; transform: translateY(38px) rotate(45deg); } }
-@keyframes cpfill { 0%, 60% { transform: scaleX(0); } 72%, 100% { transform: scaleX(1); } }
-@keyframes wblk { 0%, 77% { opacity: 1; } 85%, 100% { opacity: .12; } }
-@keyframes wfill { 0%, 80% { opacity: 0; transform: scale(.4); } 90%, 100% { opacity: 1; transform: scale(1); } }
+/* Quickstart doc links */
 
-/* Who you trust, and how destroy ends a lane */
-.duo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin-top: 20px; }
-@media (max-width: 960px) { .duo { grid-template-columns: minmax(0, 1fr); } }
-.panel { border: 1px solid var(--rule); border-radius: 12px; padding: 20px 22px; min-width: 0; }
-.panel h3 { font-size: 1.125rem; }
-.trustlist { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px 16px; align-items: baseline; margin-top: 16px; font-size: .9375rem; color: var(--muted); }
-@media (max-width: 520px) { .trustlist { grid-template-columns: minmax(0, 1fr); gap: 6px; } .trustlist .pill:not(:first-child) { margin-top: 10px; } }
-.endlist { list-style: none; padding: 0; margin-top: 16px; display: grid; gap: 12px; font-size: .9375rem; }
-.endlist li { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 12px; align-items: center; }
-.endlist .n { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 4px; font-weight: 700; background: var(--raised); }
-.endlist .d { color: var(--muted); }
-.endlist li:nth-child(1) .n { animation: e1 10s linear infinite; } .endlist li:nth-child(2) .n { animation: e2 10s linear infinite; }
-.endlist li:nth-child(3) .n { animation: e3 10s linear infinite; } .endlist li:nth-child(4) .n { animation: e4 10s linear infinite; }
-@keyframes e1 { 0%, 24% { background: var(--lane); color: var(--on-lane); } 26%, 100% { background: var(--raised); color: var(--ink); } }
-@keyframes e2 { 0%, 24% { background: var(--raised); color: var(--ink); } 26%, 49% { background: var(--lane); color: var(--on-lane); } 51%, 100% { background: var(--raised); color: var(--ink); } }
-@keyframes e3 { 0%, 49% { background: var(--raised); color: var(--ink); } 51%, 74% { background: var(--harbor); color: var(--on-harbor); } 76%, 100% { background: var(--raised); color: var(--ink); } }
-@keyframes e4 { 0%, 74% { background: var(--raised); color: var(--ink); } 76%, 99% { background: var(--harbor); color: var(--on-harbor); } 100% { background: var(--raised); color: var(--ink); } }
-@media (prefers-reduced-motion: reduce) { .phase, .phase *, .endlist .n { animation: none !important; } }
-
-/* Templates and roadmap */
-.lanes { margin-top: 28px; }
-.track4 { position: relative; height: 4px; border-radius: 2px; background: var(--rule); margin-top: 36px; }
-.track4 i { position: absolute; left: 0; top: 0; bottom: 0; width: 37.5%; border-radius: 2px; background: var(--lane); }
-.road { list-style: none; padding: 0; margin-top: 14px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-@media (max-width: 760px) { .road { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; } }
-.road .when { font-size: .75rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
-.road b { display: block; margin-top: 2px; }
-.road .d { display: block; font-size: .875rem; color: var(--muted); }
 .doclinks { margin-top: 18px; font-size: .9375rem; color: var(--muted); }
 .doclinks a { color: var(--ink); text-underline-offset: 3px; }
 
 /* Logo fills */
 .lg-lane { fill: var(--lane); } .lg-harbor { fill: var(--harbor); } .lg-ink { fill: var(--ink); }
 
-/* One lane file: the file on the left, the four commands on the right. */
-.filegrid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); gap: 32px; margin-top: 32px; align-items: start; }
-@media (max-width: 900px) { .filegrid { grid-template-columns: minmax(0, 1fr); } }
+/* Code blocks: lane files and plan output. */
 .lanefile { margin: 0; background: var(--raised); border: 1px solid var(--rule); border-radius: 12px; padding: 22px 24px; overflow-x: auto; font: .875rem/1.65 var(--mono); color: var(--ink); tab-size: 2; }
 .lanefile .h { color: var(--lane); font-weight: 700; }
-.lanefile .s { color: var(--harbor-ink); }
+
 .lanefile .c { color: var(--muted); }
-.verbs { list-style: none; padding: 0; display: grid; gap: 22px; }
-.verb { border-top: 3px solid var(--lane); padding-top: 14px; }
-.verb.st { border-top-color: var(--harbor); }
-.verb code { font: 700 1.125rem var(--mono); }
-.verb p { margin-top: 6px; color: var(--muted); font-size: .9375rem; max-width: 52ch; }
 
 /* Plan: a change to the file on the left, what plan prints for it on the right */
-.tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 40px; }
+
 .tab { font: 700 .9375rem var(--font); color: var(--muted); background: none; border: 2px solid var(--rule); border-radius: 8px; min-height: 40px; padding: 6px 14px; cursor: pointer; transition: border-color .15s ease, color .15s ease, background-color .15s ease; }
 .tab:hover { color: var(--ink); border-color: var(--line); }
 .tab[aria-selected="true"] { color: var(--ink); border-color: var(--lane); background: var(--lane-soft); }
 @media (prefers-reduced-motion: reduce) { .tab { transition: none; } }
-.diffgrid { margin-top: 16px; }
-@media (min-width: 901px) { .diffgrid { grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); } }
+
 .lanefile .ln { display: block; margin-inline: -24px; padding-inline: 24px; }
 .lanefile .ln.add { background: var(--lane-soft); }
 .lanefile .ln.del { color: var(--muted); }
@@ -452,6 +280,7 @@ footer p { font-size: .875rem; color: var(--muted); }
 </style>
 </head>
 <body>
+<a class="skip" href="#top">Skip to content</a>
 <header class="top">
   <div class="wrap">
     <a class="brand" href="#top" aria-label="Caravel, back to top">
@@ -462,11 +291,10 @@ footer p { font-size: .875rem; color: var(--muted); }
       </svg>
     </a>
     <nav class="nav" aria-label="Sections">
-      <a href="#file">Lane file</a>
-      <a href="#plan">Plan</a>
-      <a href="#how">How it works</a>
-      <a href="#templates">Templates</a>
+      <a href="#who">Who it's for</a>
+      <a href="#rules">Your rules</a>
       <a href="#start">Quickstart</a>
+      <a href="https://caravel-docs.vercel.app" id="docs-link">Docs</a>
       <a class="btn btn-primary btn-sm" href="https://github.com/wmendes/caravel"><svg class="gh" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>GitHub</a>
     </nav>
   </div>
@@ -521,54 +349,32 @@ footer p { font-size: .875rem; color: var(--muted); }
     </div>
   </section>
 
-  <section class="band" id="file" aria-labelledby="file-h">
+  <section class="band who-for" id="who" aria-labelledby="who-h">
     <div class="wrap">
-      <div class="head">
-        <p class="eyebrow">One lane file</p>
-        <h2 id="file-h">Everything about a lane lives in one file.</h2>
-        <p class="lede">What the lane is, and where it runs. <code>plan</code> reads Stellar and your host, and <code>apply</code> changes only what differs from the file.</p>
+      <p class="eyebrow">Who it's for</p>
+      <h2 id="who-h">Run <span class="swap" id="whoSwap"><span class="on">a trading venue</span><span aria-hidden="true">a payment network</span><span aria-hidden="true">a game economy</span><span aria-hidden="true">an agent marketplace</span></span> with its own rules.</h2>
+      <div class="apps" role="tablist" aria-label="Kinds of app">
+        <button class="app" type="button" role="tab" aria-selected="true" aria-controls="whoRules" data-app="0">Trading venue</button>
+        <button class="app" type="button" role="tab" aria-selected="false" aria-controls="whoRules" data-app="1" tabindex="-1">Payment network</button>
+        <button class="app" type="button" role="tab" aria-selected="false" aria-controls="whoRules" data-app="2" tabindex="-1">Game economy</button>
+        <button class="app" type="button" role="tab" aria-selected="false" aria-controls="whoRules" data-app="3" tabindex="-1">Agent marketplace</button>
       </div>
-      <div class="filegrid">
-        <pre class="lanefile" aria-label="Lane #1's lane file, abridged"><span class="c"># lanes/perps/config/lane.caravel-perps.testnet.toml (abridged)</span>
-<span class="h">[lane]</span>
-name = <span class="s">"caravel-perps-testnet-0"</span>
-<span class="h">[app]</span>
-template = <span class="s">"perps"</span>
-<span class="h">[node]</span>
-block_time_ms = 1000
-checkpoint_every_blocks = 60
-
-<span class="h">[env.testnet]</span>
-network = <span class="s">"testnet"</span>
-admin = <span class="s">"caravel-admin"</span>  <span class="c"># a key in the keystore</span>
-token = <span class="s">"circle-usdc"</span>
-settlement = <span class="s">"CBIHBEUZ…PONWO"</span>
-threshold = 2
-
-<span class="h">[[env.testnet.validators]]</span>
-name = <span class="s">"1"</span>
-key = <span class="s">"caravel-validator-1"</span>  <span class="c"># and 2, 3</span>
-
-<span class="h">[env.testnet.host]</span>
-provider = <span class="s">"ssh"</span>
-transport = <span class="s">"gcloud-iap"</span>
-address = <span class="s">"caravel-1"</span></pre>
-        <ol class="verbs">
-          <li class="verb"><code>plan</code><p>Lists every change on Stellar and on your host, down to the settlement contract's address, before anything is sent.</p></li>
-          <li class="verb"><code>apply</code><p>Deploys the contract, installs the release and starts the nodes. Run it again and nothing changes. Interrupted, it finishes on the next run.</p></li>
-          <li class="verb"><code>status</code><p>Height, checkpoints on Stellar, when a freeze would become possible, and whether the lane still matches its file.</p></li>
-          <li class="verb st"><code>destroy</code><p>Drains the lane, writes every account's exit proof, and freezes the contract so users withdraw on Stellar.</p></li>
-        </ol>
-      </div>
+      <ol class="rules4" id="whoRules" role="tabpanel" aria-live="off">
+        <li><b>Zero maker fees</b><code>maker_fee_bps = 0</code></li>
+        <li><b>Up to 10x leverage</b><code>imf_bps = 1000</code></li>
+        <li><b>Its own price feed</b><code>[perps.oracle] keys = […]</code></li>
+        <li><b>Settles in Circle's USDC</b><code>token = "circle-usdc"</code></li>
+      </ol>
+      <p class="who-note"><span><span class="kind" id="whoKind">Template: Perps</span>, live on testnet</span><span>Deposits, withdrawals and exits stay on Stellar.</span></p>
     </div>
   </section>
 
-  <section class="band" id="plan" aria-labelledby="plan-h">
+  <section class="band" id="rules" aria-labelledby="rules-h">
     <div class="wrap">
       <div class="head">
-        <p class="eyebrow">Configure and plan</p>
-        <h2 id="plan-h">Every rule is a line. Every change gets a plan.</h2>
-        <p class="lede">Pick what you'd change. <code>plan</code> compares the file with the contract on Stellar and the nodes on your host, and says what <code>apply</code> would do.</p>
+        <p class="eyebrow">Your rules</p>
+        <h2 id="rules-h">Every rule is a line.<br>Every change gets a plan.</h2>
+        <p class="lede">On Stellar, every app shares the network's fees and rules. A lane sets its own in one file. Pick what you'd change: <code>plan</code> says what <code>apply</code> would do, before it does it.</p>
       </div>
       <div class="plangrid">
         <div class="groups" role="tablist" aria-label="What a change does">
@@ -598,91 +404,31 @@ address = <span class="s">"caravel-1"</span></pre>
     </div>
   </section>
 
-  <section class="band" id="how" aria-labelledby="how-h">
-    <div class="wrap">
-      <div class="head">
-        <p class="eyebrow">How it works</p>
-        <h2 id="how-h">Nodes on your host. Money on Stellar.</h2>
-        <p class="lede">The sequencer and every validator run the lane's Soroban Wasm. The token stays in the settlement contract, and every checkpoint is checked there.</p>
-      </div>
-      <div class="bandkey">
-        <span><i class="bk bk-lane"></i>Top band: your lane, on your host</span>
-        <span><i class="bk bk-harbor"></i>Bottom band: Stellar</span>
-      </div>
-      <ol class="phases">
-        <li class="phase st ph1"><i class="tick"></i><div class="pg" aria-hidden="true"><i class="bl"></i><i class="bs"></i><span class="bar"><i></i></span><i class="vdash"></i><i class="one" style="left:70%"></i></div><div class="pt"><span class="where harbor-t">Stellar → lane</span><b>1 Deposit</b><span>Lock the token in the settlement contract. The same amount appears on the lane.</span></div></li>
-        <li class="phase ph2"><i class="tick"></i><div class="pg" aria-hidden="true"><i class="bl"></i><i class="bs"></i><span class="row"><i><b></b></i><i><b></b></i><i><b></b></i><i><b></b></i><i><b></b></i></span></div><div class="pt"><span class="where lane-t">On the lane</span><b>2 Use it</b><span>Every block runs the app: an order book on Perps, transfers on Payments.</span></div></li>
-        <li class="phase ph3"><i class="tick"></i><div class="pg" aria-hidden="true"><i class="bl"></i><i class="bs"></i><span class="row"><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><i class="f"></i><span><i class="dia"></i></span></span><span class="bar"><i></i></span></div><div class="pt"><span class="where lane-t">Lane → Stellar</span><b>3 Checkpoint</b><span>Validators sign the new state. It goes to Stellar with its block data, and the contract checks the signatures.</span></div></li>
-        <li class="phase st ph4"><i class="tick"></i><div class="pg" aria-hidden="true"><i class="bl"></i><i class="bs"></i><i class="one" style="left:12px"></i><i class="paid"></i><i class="hdash"></i><span class="ring"><i></i></span></div><div class="pt"><span class="where harbor-t">On Stellar</span><b>4 Withdraw</b><span>The token goes back to your wallet, and only against an accepted checkpoint.</span></div></li>
-      </ol>
-      <div class="duo">
-        <div class="panel" id="trust">
-          <h3>Who you trust</h3>
-          <div class="trustlist">
-            <span class="pill l">Between checkpoints</span><span>The validators. They run every block again and sign only what they checked.</span>
-            <span class="pill h">At each checkpoint</span><span>Their threshold, checked on Stellar. Anyone can replay the lane from Stellar to check them.</span>
-            <span class="pill o">If the lane stops</span><span>No one. Anyone can freeze it, and every account withdraws its last checkpointed balance on Stellar.</span>
-          </div>
-        </div>
-        <div class="panel">
-          <h3>When it ends: <code>destroy</code></h3>
-          <ol class="endlist">
-            <li><span class="n">1</span><span><b>Drain</b> <span class="d">until the last checkpoint is accepted</span></span></li>
-            <li><span class="n">2</span><span><b>Export</b> <span class="d">every account's exit proof to</span> <code>exit.json</code></span></li>
-            <li><span class="n">3</span><span><b>Trigger, then wait</b> <span class="d">out the forced-withdrawal window, 1 h on Caravel Perps</span></span></li>
-            <li><span class="n">4</span><span><b>Freeze</b> <span class="d">so users withdraw on Stellar with their proofs</span></span></li>
-          </ol>
-        </div>
-      </div>
-      <p class="srcs">Testnet software, not audited. A lane's admin can still upgrade its contract and rotate its validators, and Caravel Perps' three validators run on one machine operated by the Caravel team. The token's own rules still apply: an issuer's freeze or clawback reaches the contract's balance too.</p>
-    </div>
-  </section>
-
-  <section class="band" id="templates" aria-labelledby="templates-h">
-    <div class="wrap">
-      <div class="head">
-        <p class="eyebrow">Templates and roadmap</p>
-        <h2 id="templates-h">Start from a template, or write your own.</h2>
-      </div>
-      <div class="lanes">
-        <article class="lanecard first"><span class="tag">Live on testnet</span><h3>Caravel Perps</h3><p>Perpetual futures on an order book, in Circle's testnet USDC. <a href="https://35-224-76-64.sslip.io">Open the app</a></p></article>
-        <article class="lanecard"><span class="tag">Template</span><h3>Payments</h3><p>Transfers with a flat fee or none, in the token you choose. Run end to end on testnet.</p></article>
-        <article class="lanecard"><span class="tag">Build your own</span><h3>The app SDK</h3><p>A <code>no_std</code> SDK for lane engines. Payments is built on it.</p></article>
-      </div>
-      <div class="track4" aria-hidden="true"><i></i></div>
-      <ol class="road" aria-label="Roadmap">
-        <li><span class="when lane-t">Now</span><b>Lanes from one file</b><span class="d">plan, apply, status, destroy</span></li>
-        <li><span class="when lane-t">Now</span><b>Signed checkpoints</b><span class="d">threshold signatures, exit path live</span></li>
-        <li><span class="when harbor-t">Next</span><b>Validity proofs</b><span class="d">a ZK proof replaces the signature check</span></li>
-        <li><span class="when harbor-t">Then</span><b>Bonded validators</b><span class="d">anyone can validate, with a bond</span></li>
-      </ol>
-    </div>
-  </section>
-
   <section class="band" id="start" aria-labelledby="start-h">
     <div class="wrap">
       <div class="join">
         <div>
           <p class="eyebrow">Open source</p>
-          <h2 id="start-h">Run a lane on your machine.</h2>
-          <p class="lede">A Payments lane on a local Stellar network: install the CLI, write the lane file with <code>caravel init</code>, apply it, and use the lane. You need Rust 1.93, the Stellar CLI 28.1.0, Node.js 22 and Docker.</p>
-          <div class="cta-row"><a class="btn btn-primary" href="https://github.com/wmendes/caravel"><svg class="gh" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>View on GitHub</a><a class="btn btn-ghost" href="https://github.com/wmendes/caravel#quickstart">Read the quickstart</a></div>
-          <p class="doclinks"><a href="https://github.com/wmendes/caravel/blob/main/docs/CARAVEL_SPEC.md">Spec</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/LANE_FILE.md">Lane file</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/RUNBOOK.md">Runbook</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/RESULTS.md">Results</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/SECURITY.md">Security review</a> · <a href="https://github.com/wmendes/caravel/blob/main/CONTRIBUTING.md">Contributing</a></p>
+          <h2 id="start-h">Start on your laptop.<br>Run it on your servers.</h2>
+          <p class="lede">The lane file you try locally is the one you deploy: over ssh, on one host or several, with validators on hosts of their own, against Stellar testnet. Same commands, same plan.</p>
+          <p class="small">Building from source today needs Rust 1.93, the Stellar CLI 28.1.0, Node.js 22, and Docker for the local network.</p>
+          <div class="cta-row"><a class="btn btn-primary" href="https://github.com/wmendes/caravel"><svg class="gh" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>View on GitHub</a><a class="btn btn-ghost" href="https://caravel-docs.vercel.app/getting-started/first-lane">Read the quickstart</a></div>
+          <p class="doclinks"><a href="https://github.com/wmendes/caravel/blob/main/docs/CARAVEL_SPEC.md">Spec</a> · <a href="https://caravel-docs.vercel.app">Docs</a> · <a href="https://caravel-docs.vercel.app/reference/lane-file">Lane file</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/RUNBOOK.md">Runbook</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/RESULTS.md">Results</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/SECURITY.md">Security review</a> · <a href="https://github.com/wmendes/caravel/blob/main/CONTRIBUTING.md">Contributing</a></p>
         </div>
-        <pre class="lanefile" aria-label="Quickstart commands"><span class="c"># install from a clone, into ~/.caravel</span>
+        <pre class="lanefile" aria-label="From a local lane to your servers"><span class="c"># install from a clone, into ~/.caravel</span>
 ./scripts/install.sh
 export PATH="$HOME/.caravel/bin:$PATH"
 
-<span class="c"># a lane, its users, its end</span>
+<span class="c"># a lane on this machine</span>
 caravel <span class="h">init</span> payments my-lane &amp;&amp; cd my-lane
+caravel <span class="h">plan</span>
 caravel <span class="h">apply</span>
-caravel account create alice --amount 100
-caravel account create bob --amount 10
-caravel deposit alice 50 &amp;&amp; caravel deposit bob 5
-caravel tx --from alice transfer --to @bob --amount 5
-caravel withdraw alice 10
-caravel <span class="h">destroy</span> --yes
-caravel escape alice</pre>
+
+<span class="c"># on your servers: add [env.testnet]</span>
+<span class="c"># with provider = "ssh", then</span>
+caravel <span class="h">plan</span> --env testnet
+caravel <span class="h">apply</span> --env testnet
+caravel status --env testnet</pre>
       </div>
     </div>
   </section>
@@ -808,13 +554,10 @@ const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       rows: [["!", "", "settlement_params.escape_timeout_secs: the contract has 30, the lane file gives 60. The constructor fixed it: destroy this lane, or give the lane a new name", "x"]],
       sum: "0 step(s), 1 problem(s). Apply refuses until they are fixed.", src: "From the tool's plan tests. Coral steps run on your host, teal ones on Stellar." },
   ];
-  const tabs = Array.from(document.querySelectorAll('#plan [role="tab"]'));
+  const tabs = Array.from(document.querySelectorAll('#rules [role="tab"]'));
   const pane = document.getElementById("diff"), A = document.getElementById("diffA"), B = document.getElementById("diffB"), SRC = document.getElementById("diffSrc");
   const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-  function show(i, focus) {
-    const c = CASES[i];
-    tabs.forEach((tb, j) => { tb.setAttribute("aria-selected", String(j === i)); tb.tabIndex = j === i ? 0 : -1; });
-    pane.setAttribute("aria-labelledby", tabs[i].id);
+  function render(c) {
     A.innerHTML = '<span class="ln c"># lane.toml</span>' + c.diff.map(([m, s]) => m === " "
       ? '<span class="ln">  <span class="h">' + esc(s) + "</span></span>"
       : '<span class="ln ' + (m === "+" ? "add" : "del") + '"><span class="m">' + m + "</span> " + esc(s) + "</span>").join("");
@@ -824,11 +567,38 @@ const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
         : "<li" + (k ? ' class="' + k + '"' : "") + '><span class="sg">' + sg + "</span><span>" + v + "</span><span>" + esc(o) + "</span></li>").join("")
       + '</ol><p class="sum">' + esc(c.sum) + "</p>";
     SRC.textContent = c.src;
+  }
+  // Every example fits the same boxes: each box keeps the tallest example's
+  // height, so switching never moves the page. Measured again on resize.
+  let cur = Math.max(0, tabs.findIndex((t) => t.getAttribute("aria-selected") === "true"));
+  function reserve() {
+    const boxes = [A, B, SRC];
+    boxes.forEach((b) => (b.style.minHeight = ""));
+    const tall = boxes.map(() => 0);
+    CASES.forEach((c) => {
+      render(c);
+      B.querySelectorAll(".pl li").forEach((li) => li.classList.add("in"));
+      boxes.forEach((b, k) => (tall[k] = Math.max(tall[k], b.getBoundingClientRect().height)));
+    });
+    boxes.forEach((b, k) => (b.style.minHeight = Math.ceil(tall[k]) + "px"));
+    render(CASES[cur]);
+    B.querySelectorAll(".pl li").forEach((li) => li.classList.add("in"));
+  }
+  function show(i, focus) {
+    const c = CASES[i];
+    cur = i;
+    tabs.forEach((tb, j) => { tb.setAttribute("aria-selected", String(j === i)); tb.tabIndex = j === i ? 0 : -1; });
+    pane.setAttribute("aria-labelledby", tabs[i].id);
+    render(c);
     const lis = B.querySelectorAll(".pl li");
     if (REDUCE) lis.forEach((li) => li.classList.add("in"));
-    else requestAnimationFrame(() => requestAnimationFrame(() => lis.forEach((li, j) => setTimeout(() => li.classList.add("in"), j * 70))));
+    else { void B.offsetWidth; lis.forEach((li, j) => setTimeout(() => li.classList.add("in"), j * 70)); }
     if (focus) tabs[i].focus();
   }
+  reserve();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(reserve);
+  let rt = null;
+  window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(reserve, 150); });
   tabs.forEach((tb, i) => {
     tb.addEventListener("click", () => { if (tb.getAttribute("aria-selected") !== "true") show(i); });
     tb.addEventListener("keydown", (e) => {
@@ -836,6 +606,61 @@ const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       if (j !== undefined) { e.preventDefault(); show(j, true); }
     });
   });
+})();
+
+/* Who it's for: the subject and its rules change every few seconds until someone picks one. */
+(() => {
+  const APPS = [
+    { name: "a trading venue", kind: "Template: Perps", tail: ", live on testnet", rules: [["Zero maker fees", "maker_fee_bps = 0"], ["Up to 10x leverage", "imf_bps = 1000"], ["Its own price feed", "[perps.oracle] keys = […]"], ["Settles in Circle's USDC", 'token = "circle-usdc"']] },
+    { name: "a payment network", kind: "Template: Payments", tail: "", rules: [["A flat fee per transfer", "transfer_fee = 100000"], ["Members only", 'mode = "allowlist"'], ["2-of-3 validators", "threshold = 2"], ["Settles in its own token", 'token = "usd"']] },
+    { name: "a game economy", kind: "Your engine", tail: ", on the app SDK", rules: [["200 ms blocks", "block_time_ms = 200"], ["Players only", 'mode = "allowlist"'], ["50 moves per block", "max_txs_per_account_per_block = 50"], ["Its own in-game token", 'token = "gold"']] },
+    { name: "an agent marketplace", kind: "Template: Payments", tail: "", rules: [["No fee between agents", "transfer_fee = 0"], ["Session keys per agent", "max_session_keys = 4"], ["Up to 256 agents", "max_accounts = 256"], ["Settles in USDC", 'token = "circle-usdc"']] },
+  ];
+  const swap = document.getElementById("whoSwap"), list = document.getElementById("whoRules"), kind = document.getElementById("whoKind");
+  const tabs = Array.from(document.querySelectorAll("#who .app"));
+  if (!swap || !list || !tabs.length) return;
+  swap.firstElementChild.removeAttribute("aria-hidden");
+  const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let cur = 0, timer = null, picked = false, seen = false;
+  const esc = (t) => t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  function show(i, focus) {
+    if (i === cur) return;
+    const a = APPS[i];
+    cur = i;
+    tabs.forEach((t, k) => { t.setAttribute("aria-selected", String(k === i)); t.tabIndex = k === i ? 0 : -1; });
+    if (focus) tabs[i].focus();
+    kind.textContent = a.kind;
+    kind.nextSibling.textContent = a.tail;
+    const fill = () => { list.innerHTML = a.rules.map(([b, c]) => `<li><b>${esc(b)}</b><code>${esc(c)}</code></li>`).join(""); };
+    const words = Array.from(swap.children);
+    words.forEach((w, k) => w.setAttribute("aria-hidden", String(k !== i)));
+    const old = words.find((w) => w.classList.contains("on")), nu = words[i];
+    if (still) { old.classList.remove("on"); nu.classList.add("on"); fill(); return; }
+    // The new subject rises from below while the old one leaves upwards.
+    nu.classList.add("snap"); nu.classList.remove("out"); void nu.offsetWidth; nu.classList.remove("snap");
+    old.classList.remove("on"); old.classList.add("out"); nu.classList.add("on");
+    setTimeout(() => { if (!old.classList.contains("on")) { old.classList.add("snap"); old.classList.remove("out"); void old.offsetWidth; old.classList.remove("snap"); } }, 600);
+    list.classList.add("fade");
+    setTimeout(() => { fill(); void list.offsetWidth; list.classList.remove("fade"); }, 260);
+  }
+  const stop = () => { clearInterval(timer); timer = null; };
+  const pick = () => { picked = true; stop(); };
+  tabs.forEach((t, k) => {
+    t.addEventListener("click", () => { pick(); show(k); });
+    t.addEventListener("keydown", (e) => {
+      const d = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+      if (d) { e.preventDefault(); pick(); show((cur + d + APPS.length) % APPS.length, true); }
+    });
+  });
+  if (!still) {
+    const sec = document.getElementById("who");
+    // It turns while in view, pauses under the pointer or focus, and stops once someone picks.
+    const go = () => { if (!timer && !picked && seen) timer = setInterval(() => show((cur + 1) % APPS.length), 3800); };
+    sec.addEventListener("mouseenter", stop); sec.addEventListener("mouseleave", go);
+    sec.addEventListener("focusin", stop);
+    if ("IntersectionObserver" in window) new IntersectionObserver((es) => es.forEach((e) => { seen = e.isIntersecting; seen ? go() : stop(); }), { threshold: 0.4 }).observe(sec);
+    else { seen = true; go(); }
+  }
 })();
 </script>
 </body>
