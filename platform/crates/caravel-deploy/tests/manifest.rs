@@ -493,3 +493,53 @@ key = \"${{local.prefix}}-v${{each.value}}\"
         "{e}"
     );
 }
+
+/// A rule broken in a deployment points at where its value is written,
+/// inherited or not.
+#[test]
+fn problems_point_at_the_lane_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("lane.toml");
+    let base = ENV
+        .replace("[env.testnet]", "[env.base]\nabstract = true")
+        .replace("[env.testnet.", "[env.base.")
+        .replace("[[env.testnet.", "[[env.base.");
+    let write = |extra: &str| {
+        std::fs::write(
+            &path,
+            format!("{LANE}{base}\n[env.testnet]\nextends = \"base\"\n{extra}"),
+        )
+        .unwrap();
+    };
+    write("threshold = 9\n");
+    let e = format!("{:#}", Manifest::load(&path, "testnet").unwrap_err());
+    assert!(e.contains("threshold") && e.contains("lane.toml:"), "{e}");
+    let line = |e: &str| -> usize {
+        let at = e.split("lane.toml:").nth(1).unwrap();
+        at.split(':').next().unwrap().parse().unwrap()
+    };
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert_eq!(text.lines().nth(line(&e) - 1).unwrap(), "threshold = 9");
+    // An inherited value says where it came from.
+    write("");
+    std::fs::write(
+        &path,
+        std::fs::read_to_string(&path).unwrap().replace(
+            "provider = \"ssh\"",
+            "provider = \"ssh\"\ntransport = \"gcloud-iap\"",
+        ),
+    )
+    .unwrap();
+    let e = format!("{:#}", Manifest::load(&path, "testnet").unwrap_err());
+    assert!(
+        e.contains("gcloud-iap") && e.contains("(from [env.base])"),
+        "{e}"
+    );
+    // A typo'd field too.
+    write("tresholdd = 2\n");
+    let e = format!("{:#}", Manifest::load(&path, "testnet").unwrap_err());
+    assert!(
+        e.contains("unknown field `tresholdd`") && e.contains("lane.toml:"),
+        "{e}"
+    );
+}

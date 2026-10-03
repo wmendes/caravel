@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # The whole lane on a local Stellar network (spec §19.5), driven by the deploy
-# tool (spec §20.3, P-14): one lane file with an [env.e2e] deployment.
+# tool (spec §20.3, P-14): the template's lane file, including the e2e's
+# [env.e2e] deployment (scripts/e2e/env.toml) with its vars in a --var-file.
 #
 #   ./scripts/e2e-local.sh                        # KEEP=1 leaves everything running
 #   E2E_TEMPLATE=payments ./scripts/e2e-local.sh  # the payments template instead of perps
@@ -11,7 +12,7 @@
 # demo lane's is never touched) and Circle's testnet USDC, bought with
 # friendbot XLM on the testnet DEX. E2E_WASM_DIR=<CI contracts-wasm artifact>
 # deploys the Wasm of record (DEC-033); without it (or E2E_RELEASE_DIR), the
-# lane file pins this machine's settlement build.
+# settlement_wasm var pins this machine's settlement build.
 #
 #   0. `caravel apply`: accounts, USDC, the settlement contract at its derived
 #      address, node configs, 3 validators, the sequencer, the relayer;
@@ -21,9 +22,9 @@
 #      payments: A sends B 100 USDC, and the fee reaches the treasury;
 #   3. a checkpoint is accepted on Stellar;
 #   4. A withdraws 100 USDC and claims it on Stellar;
-#   4b. validator 3 is replaced by validator 4 in the lane file, and `caravel
-#       apply` rotates the signers; a checkpoint signed by the old set but not
-#       yet submitted is signed again by the new set;
+#   4b. validator 3 is replaced by validator 4 (--var 'validators=["1","2","4"]'),
+#       and `caravel apply` rotates the signers; a checkpoint signed by the
+#       old set but not yet submitted is signed again by the new set;
 #   4c. B asks for a forced withdrawal on Stellar, the lane processes it, B claims it;
 #   5. `caravel destroy`: drain, stop, export every exit to exit.json, freeze;
 #      A and B escape pro rata from exit.json;
@@ -101,7 +102,9 @@ view() { local id="$1"; shift; sc contract invoke --id "$id" --source-account ad
 num() { tr -d '"'; }
 lane_get() { curl -sf "$SEQ$1"; }
 # The deploy tool runs from $WORK, so its state (.caravel/) stays there.
-caravel() { local cmd="$1"; shift; (cd "$WORK" && "$CARAVEL" "$cmd" "$LANE" --env e2e ${RELEASE[@]+"${RELEASE[@]}"} "$@"); }
+# VARS: the deployment's inputs (the var file, and later the rotation).
+VARS=(--var-file "$WORK/e2e.vars.toml")
+caravel() { local cmd="$1"; shift; (cd "$WORK" && "$CARAVEL" "$cmd" "$LANE" --env e2e ${RELEASE[@]+"${RELEASE[@]}"} "${VARS[@]}" "$@"); }
 status() { caravel status --json 2>> "$WORK/logs/caravel.log"; }
 
 log "tools"
@@ -133,61 +136,23 @@ node -e 'const {Keypair}=require(process.argv[1]);console.log(Keypair.fromRawEd2
 A="$(pk alice)"; B="$(pk bob)"
 
 log "lane file"
-# The template's lane file with an [env.e2e] deployment: short timeouts, so the
-# freeze in step 5 comes within a minute (spec §24's drill uses the same idea).
-PIN=""
-[[ "$E2E_NETWORK" == testnet && -z "${E2E_RELEASE_DIR:-}${E2E_WASM_DIR:-}" ]] && PIN="settlement_wasm = \"$(shasum -a 256 target/contracts/settlement.wasm | awk '{print $1}')\""
+# The template's lane file with the e2e's deployment included
+# (scripts/e2e/env.toml, [env.e2e]), and its vars in a file: no heredoc.
+{ echo 'include = ["e2e-env.toml"]'; cat "$LANE_SRC"; } > "$LANE"
+cp "$ROOT/scripts/e2e/env.toml" "$WORK/e2e-env.toml"
 {
-  cat "$LANE_SRC"
-  cat <<EOF
-
-[env.e2e]
-network = "$E2E_NETWORK"
-admin = "admin"
-token = $TOKEN
-threshold = 2
-$PIN
-
-[env.e2e.settlement_params]
-force_inclusion_window_secs = 20
-escape_timeout_secs = 30
-min_rotation_delay_secs = 3600
-signer_retention_epochs = 2
-
-[[env.e2e.validators]]
-name = "1"
-key = "validator-1"
-
-[[env.e2e.validators]]
-name = "2"
-key = "validator-2"
-
-[[env.e2e.validators]]
-name = "3"
-key = "validator-3"
-
-[env.e2e.sequencer]
-port = $SEQ_PORT
-
-[env.e2e.validator_polling]
-stellar_secs = 2
-
-[env.e2e.relayer]
-account = "relayer"
-intervals_ms = { inbox = 1000, checkpoints = 1000 }
-EOF
-  if [[ "$E2E_TEMPLATE" == perps ]]; then
-    cat <<'EOF'
-feed_keys = { CARAVEL_ORACLE_SECRET = "oracle" }
-feeds = [{ module = "relayer-feeds/perps/dist/index.js", intervalMs = 2000, options = { maxSourceAgeSecs = 900, markets = { "1" = [{ fixed = "65000" }], "2" = [{ fixed = "3500" }], "3" = [{ fixed = "0.40" }] } } }]
-EOF
+  echo "network = \"$E2E_NETWORK\""
+  echo "token = $TOKEN"
+  echo "port = $SEQ_PORT"
+  if [[ "$E2E_NETWORK" == testnet && -z "${E2E_RELEASE_DIR:-}${E2E_WASM_DIR:-}" ]]; then
+    echo "settlement_wasm = \"$(shasum -a 256 target/contracts/settlement.wasm | awk '{print $1}')\""
   fi
-  cat <<'EOF'
-
-[env.e2e.host]
-provider = "local"
-EOF
-} > "$LANE"
+  if [[ "$E2E_TEMPLATE" == perps ]]; then
+    echo 'feed_keys = { CARAVEL_ORACLE_SECRET = "oracle" }'
+    echo 'feeds = [{ module = "relayer-feeds/perps/dist/index.js", intervalMs = 2000, options = { maxSourceAgeSecs = 900, markets = { "1" = [{ fixed = "65000" }], "2" = [{ fixed = "3500" }], "3" = [{ fixed = "0.40" }] } } }]'
+  fi
+} > "$WORK/e2e.vars.toml"
+caravel render > "$WORK/logs/render.toml" 2>> "$WORK/logs/caravel.log" || fail "caravel render"
 
 log "0. caravel apply"
 caravel apply --yes > "$WORK/logs/apply.log" 2>&1 || { tail -30 "$WORK/logs/apply.log"; fail "caravel apply"; }
@@ -263,7 +228,7 @@ after="$(view "$USDC_ID" balance --id "$A" | num)"
 (( after - before == 100 * USDC )) || fail "A's USDC went from $before to $after"
 echo "A's USDC balance +$(( (after - before) / USDC )) USDC"
 
-log "4b. validator 3 replaced by validator 4 in the lane file; caravel apply rotates"
+log "4b. validator 3 replaced by validator 4 (a --var); caravel apply rotates"
 # Hold the relayer until a checkpoint is signed by the old set but not
 # submitted: after the rotation, the sequencer must have it signed again by the
 # new set (older epochs are invalid at once).
@@ -274,7 +239,7 @@ kill -INT "$RELAYER_PID"
 until_ok "the relayer to stop" sh -c "! kill -0 $RELAYER_PID"
 until_ok "a checkpoint signed but not submitted" sh -c "curl -sf $SEQ/v1/status | jq -e '(.checkpoints.signed // \"0\" | tonumber) > (.checkpoints.accepted // \"0\" | tonumber)'"
 stale="$(lane_get /v1/status | jq -r .checkpoints.signed)"
-sed -i.bak 's/^name = "3"$/name = "4"/; s/^key = "validator-3"$/key = "validator-4"/' "$LANE"
+VARS+=(--var 'validators=["1","2","4"]')
 caravel plan 2>/dev/null | grep -E '^\+|^~|^-' | sed 's/^/   /'
 caravel apply --yes > "$WORK/logs/apply-rotate.log" 2>&1 || { tail -30 "$WORK/logs/apply-rotate.log"; fail "caravel apply (rotation)"; }
 [[ "$(status | jq -r .epoch)" == 2 ]] || fail "the contract epoch after the rotation"
