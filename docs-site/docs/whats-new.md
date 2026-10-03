@@ -7,7 +7,7 @@ description: "Changes to Caravel, newest first."
 ## October 2026
 
 - **Docs.** This site.
-- **Prebuilt releases and a one-line install**, for x86_64 and arm64 Linux and arm64 macOS. No release is published yet.
+- **Caravel 0.1.0**, the first prebuilt release, with a one-line install for x86_64 and arm64 Linux and arm64 macOS.
 - **Topology.** Several hosts per deployment, validators run by others, signed requests to validators, several lanes on one host, and the web app's config from the lane file.
 - **Chain resources.** Declared accounts, tokens, contracts and local modules.
 - **The resource graph.** Every plan step has an address: `--target`, `--replace`, `caravel graph`, saved plans.

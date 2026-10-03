@@ -65,23 +65,20 @@ A Payments lane was also run through its whole life on testnet from a lane file:
 
 This brings up a Payments lane on your machine, against a local Stellar network, and uses it.
 
-**Requirements:**
-- Rust 1.93 with the `wasm32v1-none` target (both pinned in `rust-toolchain.toml`);
-- the Stellar CLI 28.1.0: `cargo install --locked stellar-cli@28.1.0`;
-- Node.js 22;
-- Docker, for the local Stellar network.
+**Requirements:** Docker, for the local Stellar network, and Node.js 22, for the lane's relayer.
 
-**Install** from a clone. This builds the CLI, the templates' nodes, the contracts and the relayer into `~/.caravel`:
+**Install** the latest release, on x86_64 or arm64 Linux and arm64 macOS. It needs no Rust, and it brings the pinned Stellar CLI (28.1.0) if yours isn't that version:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/wmendes/caravel/main/scripts/install.sh | bash
+export PATH="$HOME/.caravel/bin:$PATH"
+```
+
+Or build it from a clone, with Rust 1.93 and the `wasm32v1-none` target (both pinned in `rust-toolchain.toml`) and the Stellar CLI 28.1.0 (`cargo install --locked stellar-cli@28.1.0`):
 
 ```sh
 ./scripts/install.sh
 export PATH="$HOME/.caravel/bin:$PATH"
-```
-
-Once a release is published, the same script can install it prebuilt instead, on x86_64 or arm64 Linux and arm64 macOS. It needs no Rust, and it brings the pinned Stellar CLI if yours isn't 28.1.0. Docker and Node.js 22 are still needed to run a lane. There is no published release yet.
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/wmendes/caravel/main/scripts/install.sh | bash
 ```
 
 **Run a lane and use it:**

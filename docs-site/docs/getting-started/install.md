@@ -17,10 +17,6 @@ export PATH="$HOME/.caravel/bin:$PATH"
 
 The script downloads the release for your machine and checks it against the release's `SHA256SUMS`. It also brings the pinned Stellar CLI (28.1.0, checked against GitHub's published digest) unless the `stellar` on your PATH is already that version. `--version vX.Y.Z` picks a release; `--no-stellar-cli` skips the CLI.
 
-:::note
-There is no published release yet. Until there is, the one-liner says so and stops: build from a clone instead.
-:::
-
 ## From a clone
 
 You need Rust 1.93 with the `wasm32v1-none` target (both pinned in `rust-toolchain.toml`), the Stellar CLI 28.1.0 (`cargo install --locked stellar-cli@28.1.0`) and Node.js 22.
