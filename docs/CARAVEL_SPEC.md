@@ -2257,7 +2257,7 @@ Branches are `h-0x-short-name`. Gates: H1 (H-01), H2 (H-04), H3 (H-06, the Groun
 |---|---|---|---|
 | H-01 | **The landing page tells it straight** — **Gate H1**. Add "Who it's for", with the perps and just-in-time card payment cases. Describe block time as configurable. Move validity proofs and bonded validators into a section clearly labelled planned. Keep "testnet only, not audited" in the hero and the trust section. Deploy only with the human's OK | — | review |
 | H-02 | **Prebuilt binaries.** The CI release job builds `caravel` and each template's node binary for macOS (arm64) and Linux (x86_64, arm64), with the relayer, the web apps and the contracts of record, plus `SHA256SUMS`. A tag publishes them as a GitHub Release, the first public one, with the human's OK. Reuses `scripts/assemble-release.sh` and the platform guard (C-04) | H-01 | review |
-| H-03 | **One-line install.** `curl -fsSL <raw>/scripts/install.sh \| sh` fetches the release for this platform, checks its checksum, and installs into `~/.caravel`. `--from-source` keeps today's path. Covers the Stellar CLI the CLI needs (an install hint, or a pinned download), and `caravel doctor` says what's missing | H-02 | todo |
+| H-03 | **One-line install.** `curl -fsSL <raw>/scripts/install.sh \| sh` fetches the release for this platform, checks its checksum, and installs into `~/.caravel`. `--from-source` keeps today's path. Covers the Stellar CLI the CLI needs (an install hint, or a pinned download), and `caravel doctor` says what's missing | H-02 | review |
 | H-04 | **The 15-minute path, measured** — **Gate H2**. On a clean macOS machine and a clean Linux one, take the time from nothing to a lane in use (install, `init`, `apply`, deposit, `tx`, withdraw) and record it in RESULTS. Fix what blocks it (first start of the local network, keys, Docker). README and landing quickstart on the release path. `check-quickstart.sh` runs it from a release in CI | H-03 | todo |
 | H-05 | **Groundhog: find out.** What it is today (the Stanford parallel execution engine): status, interface, what contracts it runs, license, readiness for Meridian, and who mentors it (Tyler's note in the tracks doc). Record the facts with sources in `docs/SOURCES.md` and the open questions as an OQ. No code | H-01 | todo |
 | H-06 | **Groundhog: design** — **Gate H3**. A lane template that runs user-deployed contracts (deploy and invoke as lane transactions), with deposits, checkpoints and exits like any lane. Decide with the human:<br>- how Groundhog executes them, against DEC-002 (consensus runs the engine Wasm through `soroban-env-host`) and INV-P5 (native and Wasm match);<br>- what validators re-execute;<br>- what goes in a checkpoint;<br>- what the copy may claim | H-05 | todo |
@@ -3070,6 +3070,22 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 - **Test runs:** a pull request that touches the workflow or the release scripts builds and checks everything and publishes nothing.
 - **`install.sh --archive FILE`** installs a release archive without build tools. It checks the archive against its `.sha256` when present and every file against the release's `SHA256SUMS`, then installs as the source path does. Node.js 22 is still needed at run time, for a lane's relayer.
 - **Still separate:** the CI `release` job stays as the VM's artifact. | Building from source took a Rust toolchain and a long first build, too much for a hackathon's first hour | Intel macOS, Windows, signed and notarized macOS binaries |
+| DEC-099 | **M0.7 (H-03).** One-line install: `curl -fsSL https://raw.githubusercontent.com/wmendes/caravel/main/scripts/install.sh \| bash`. It's the same script as the source install, with new modes.
+- **Which mode:** piped, or with `--release` in a checkout, it downloads the release. In a checkout without flags it builds from source as before, so `check-quickstart.sh` and the docs' source path don't change. `--archive FILE` installs a local archive (H-02).
+- **Download:**
+  - picks the target from `uname` (x86_64 or arm64 Linux, arm64 macOS; anything else is told to build from a checkout);
+  - takes `--version vX.Y.Z` or the latest published release from the GitHub API;
+  - downloads the archive and the release's `SHA256SUMS`, and refuses an archive that isn't listed or doesn't match;
+  - then the archive path checks every file against the release's own `SHA256SUMS`.
+  - `CARAVEL_REPO` and `CARAVEL_DOWNLOAD_BASE` (a mirror laid out like GitHub's) are for forks and tests.
+- **Stellar CLI:** when the `stellar` on PATH isn't the pinned version, the installer downloads the pinned 28.1.0 for this platform into the prefix and checks it against GitHub's published digest (SOURCES, 2026-10-03). `--no-stellar-cli` skips this. `check-versions.mjs` now holds the installer's, CI's and the release workflow's pins to `versions.json`.
+- **What's still needed:** Docker for the local network and Node.js 22 for a lane's relayer. The installer says so, and `caravel doctor` checks both.
+- **Checked:**
+  - piped with no release published (a clear refusal);
+  - piped against a local mirror (installed);
+  - a tampered `SHA256SUMS` (refused);
+  - an archive install with no `stellar` on PATH (the pinned CLI downloaded, checked and run).
+  - The release workflow installs from its own archives on every platform. | Hackers should be one command from a working `caravel`, without Rust or a matching Stellar CLI | Bundling Node.js; a Homebrew formula; Windows |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 
