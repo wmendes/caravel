@@ -16,6 +16,7 @@ on:
       - .github/workflows/release.yml
       - scripts/assemble-release.sh
       - scripts/install.sh
+      - scripts/check-quickstart.sh
   workflow_dispatch:
 
 permissions:
@@ -123,10 +124,32 @@ jobs:
             dist/${{ env.NAME }}.tar.gz
             dist/${{ env.NAME }}.tar.gz.sha256
 
+  # The README quickstart on a fresh runner, from the x86_64 Linux archive
+  # alone: no Rust, no Stellar CLI (the installer brings it), the local
+  # network in Docker. Its TIMING line is the H-04 number for Linux.
+  quickstart:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: caravel-*-x86_64-linux
+          path: dist
+          merge-multiple: true
+      - name: The quickstart, from the archive
+        run: |
+          ARCHIVE="$(ls dist/caravel-*-x86_64-linux.tar.gz)" ./scripts/check-quickstart.sh | tee quickstart.out
+          grep '^TIMING' quickstart.out >> "$GITHUB_STEP_SUMMARY"
+
   # A tag opens a draft release; a person reads it and publishes it.
   draft:
     if: github.ref_type == 'tag'
-    needs: build
+    needs: [build, quickstart]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
