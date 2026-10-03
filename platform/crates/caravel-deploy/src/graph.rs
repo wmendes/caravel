@@ -285,11 +285,17 @@ fn nodes(d: &Desired) -> Vec<String> {
 }
 
 /// The graph of `d`, with the nodes `host` runs that `d` doesn't name.
-pub fn build(d: &Desired, host: &Host) -> Graph {
+/// `Err` when a `depends_on` names nothing.
+pub fn build(d: &Desired, host: &Host) -> Result<Graph, String> {
     use EdgeKind::{Order, Restart};
     let mut g = Graph::default();
     let admin = g.add("account.admin", Kind::Account);
     let relayer_account = g.add("account.relayer", Kind::Account);
+    let account_ids: Vec<usize> = d
+        .accounts
+        .iter()
+        .map(|a| g.add(format!("account.{}", a.name), Kind::Account))
+        .collect();
     let token = g.add("token.settlement", Kind::Token);
     let wasm = g.add("wasm.settlement", Kind::Wasm);
     let contract = g.add("contract.settlement", Kind::Contract);
@@ -352,7 +358,24 @@ pub fn build(d: &Desired, host: &Host) -> Graph {
     }
     g.edge(signers, node["sequencer"], Order);
     g.edge(relayer_account, node["relayer"], Order);
-    g
+    // A declared account that trusts the settlement token, or is topped up
+    // with it, follows the token (and the admin, who mints).
+    for (a, &i) in d.accounts.iter().zip(&account_ids) {
+        let settlement = d.settlement_asset.as_ref();
+        if a.balance.is_some() || a.trustlines.iter().any(|t| Some(t) == settlement) {
+            g.edge(token, i, Order);
+        }
+        if a.balance.is_some() {
+            g.edge(admin, i, Order);
+        }
+    }
+    for a in &d.accounts {
+        for on in &a.depends_on {
+            g.depends_on(&format!("account.{}", a.name), on)
+                .map_err(|e| format!("accounts.{}.depends_on: {e}", a.name))?;
+        }
+    }
+    Ok(g)
 }
 
 /// What one resource's comparison gave.
@@ -366,6 +389,65 @@ impl Outcome {
     fn changes(&self) -> bool {
         !self.steps.is_empty()
     }
+}
+
+/// A declared account against the chain: funded, trusting its assets, and
+/// holding at least its balance of the settlement token (minted by the
+/// admin, who must issue it). An issuer needs no trustline to its own asset.
+fn declared_outcome(d: &Desired, chain: &Chain, a: &crate::plan::DeclaredAccount) -> Outcome {
+    let mut o = Outcome::default();
+    if !chain.accounts.contains(&a.key) {
+        if a.fund {
+            o.steps.push(Step::Fund {
+                who: a.name.clone(),
+                key: a.key,
+            });
+        } else {
+            o.problems.push(Problem::AccountMissing {
+                who: a.name.clone(),
+            });
+        }
+    }
+    for (code, issuer) in &a.trustlines {
+        if *issuer != a.key
+            && !chain
+                .trustlines
+                .contains_key(&(a.key, code.clone(), *issuer))
+        {
+            o.steps.push(Step::Trust {
+                who: a.name.clone(),
+                code: code.clone(),
+                issuer: *issuer,
+            });
+        }
+    }
+    if let (Some(want), Some((code, issuer))) = (a.balance, &d.settlement_asset) {
+        if *issuer != a.key {
+            let have = chain
+                .trustlines
+                .get(&(a.key, code.clone(), *issuer))
+                .copied()
+                .unwrap_or(0);
+            if have < want {
+                if *issuer == d.admin {
+                    o.steps.push(Step::Mint {
+                        who: a.name.clone(),
+                        key: a.key,
+                        code: code.clone(),
+                        amount: want - have,
+                    });
+                } else {
+                    o.problems.push(Problem::CannotMint {
+                        who: a.name.clone(),
+                        code: code.clone(),
+                        have,
+                        want,
+                    });
+                }
+            }
+        }
+    }
+    o
 }
 
 /// The settlement contract against the lane file: a new one to deploy, or
@@ -472,7 +554,7 @@ fn unreplaceable(kind: Kind) -> Option<&'static str> {
 /// resource compared, the steps in the graph's order. `opts` narrows it to
 /// targets and what they depend on, or forces replacements.
 pub fn diff(d: &Desired, chain: &Chain, host: &Host, opts: &Options) -> Result<Plan, String> {
-    let g = build(d, host);
+    let g = build(d, host)?;
     let order = g.order().map_err(|cycle| {
         format!(
             "the deployment's resources depend on each other in a cycle: {}",
@@ -503,13 +585,22 @@ pub fn diff(d: &Desired, chain: &Chain, host: &Host, opts: &Options) -> Result<P
         let r = &g.resources[i];
         let mut o = Outcome::default();
         match (r.kind, r.addr.as_str()) {
-            (Kind::Account, addr) => {
-                let (who, key) = match addr {
+            (Kind::Account, "account.admin" | "account.relayer") => {
+                let (who, key) = match r.addr.as_str() {
                     "account.admin" => ("admin", d.admin),
                     _ => ("relayer", d.relayer),
                 };
                 if !chain.accounts.contains(&key) {
-                    o.steps.push(Step::Fund { who, key });
+                    o.steps.push(Step::Fund {
+                        who: who.into(),
+                        key,
+                    });
+                }
+            }
+            (Kind::Account, addr) => {
+                let name = addr.trim_start_matches("account.");
+                if let Some(a) = d.accounts.iter().find(|a| a.name == name) {
+                    o = declared_outcome(d, chain, a);
                 }
             }
             (Kind::Token, _) => {
@@ -754,6 +845,7 @@ mod tests {
             relayer: key(0xA1),
             token: key(0xB0),
             token_asset: r.yes().then(|| ("USDC".to_string(), key(0xA0))),
+            settlement_asset: Some(("USDC".to_string(), key(0xA0))),
             settlement: key(0xC0),
             settlement_pinned: r.rarely(),
             settlement_wasm: key(0xD0),
@@ -772,6 +864,7 @@ mod tests {
                 files,
             },
             vars: String::new(),
+            accounts: vec![],
         };
 
         let mut accounts = BTreeSet::new();
@@ -812,6 +905,7 @@ mod tests {
         });
         let chain = Chain {
             accounts,
+            trustlines: BTreeMap::new(),
             token_exists: r.yes(),
             settlement_wasm_uploaded: r.yes(),
             settlement,
@@ -908,7 +1002,7 @@ mod tests {
     fn addresses_and_order() {
         let (d, chain, mut host) = scenario(&[0; 96]);
         host.nodes.clear();
-        let g = build(&d, &host);
+        let g = build(&d, &host).unwrap();
         let order: Vec<&str> = g
             .order()
             .unwrap()
@@ -954,7 +1048,7 @@ mod tests {
     fn depends_on_reorders_and_a_cycle_is_named() {
         let (d, _, mut host) = scenario(&[0; 96]);
         host.nodes.clear();
-        let mut g = build(&d, &host);
+        let mut g = build(&d, &host).unwrap();
         let at = |g: &Graph, a: &str| {
             let order = g.order().unwrap();
             order

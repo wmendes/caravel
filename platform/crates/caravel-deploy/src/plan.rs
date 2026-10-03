@@ -33,6 +33,22 @@ pub struct SignerSet {
     pub threshold: u32,
 }
 
+/// A declared account (`[env.<name>.accounts.<n>]`, C-18), resolved.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeclaredAccount {
+    pub name: String,
+    pub identity: String,
+    pub key: Key,
+    /// Friendbot funds it when it is missing.
+    pub fund: bool,
+    /// Assets it trusts, `(code, issuer)`, in file order.
+    pub trustlines: Vec<(String, Key)>,
+    /// The settlement token's balance to top up to, in base units.
+    pub balance: Option<i128>,
+    /// Addresses applied before it.
+    pub depends_on: Vec<String>,
+}
+
 /// The lane file's deployment, resolved: identities to keys, addresses derived.
 #[derive(Clone, Debug)]
 pub struct Desired {
@@ -50,6 +66,9 @@ pub struct Desired {
     /// The Stellar asset behind it (code, issuer), when it is a Stellar Asset
     /// Contract that `apply` may deploy.
     pub token_asset: Option<(String, Key)>,
+    /// The Stellar asset behind the settlement token, whoever deploys its
+    /// contract (Circle's USDC too); none for a SEP-41 contract.
+    pub settlement_asset: Option<(String, Key)>,
     pub settlement: Key,
     /// Named in the lane file (deployed before this tool), not derived.
     pub settlement_pinned: bool,
@@ -62,6 +81,8 @@ pub struct Desired {
     /// The lane file's vars and values (sensitive ones masked), shown in
     /// the plan; empty when it declares none.
     pub vars: String,
+    /// Declared accounts, in name order.
+    pub accounts: Vec<DeclaredAccount>,
 }
 
 #[derive(Clone, Debug)]
@@ -81,6 +102,9 @@ pub struct DesiredHost {
 pub struct Chain {
     /// Accounts that exist.
     pub accounts: BTreeSet<Key>,
+    /// Trustlines that exist, `(account, code, issuer)` → balance in base
+    /// units (declared accounts' only).
+    pub trustlines: BTreeMap<(Key, String, Key), i128>,
     pub token_exists: bool,
     pub settlement_wasm_uploaded: bool,
     pub settlement: Option<OnChain>,
@@ -156,8 +180,22 @@ pub struct NodeReport {
 pub enum Step {
     /// Friendbot funds a new account.
     Fund {
-        who: &'static str,
+        who: String,
         key: Key,
+    },
+    /// A declared account trusts an asset.
+    Trust {
+        who: String,
+        code: String,
+        issuer: Key,
+    },
+    /// The admin mints the settlement token to a declared account, up to its
+    /// balance.
+    Mint {
+        who: String,
+        key: Key,
+        code: String,
+        amount: i128,
     },
     /// The Stellar Asset Contract of the settlement token's asset.
     DeployToken {
@@ -239,6 +277,18 @@ pub enum Problem {
         node: String,
         field: &'static str,
     },
+    /// A declared account isn't on the network, and `fund = false`.
+    AccountMissing {
+        who: String,
+    },
+    /// A declared account's balance needs a top-up the lane file can't
+    /// mint: the admin doesn't issue the token.
+    CannotMint {
+        who: String,
+        code: String,
+        have: i128,
+        want: i128,
+    },
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -275,7 +325,9 @@ pub struct Options {
 /// The resource a step changes (its address in the graph, [`crate::graph`]).
 pub fn step_addr(s: &Step) -> String {
     match s {
-        Step::Fund { who, .. } => format!("account.{who}"),
+        Step::Fund { who, .. } | Step::Trust { who, .. } | Step::Mint { who, .. } => {
+            format!("account.{who}")
+        }
         Step::DeployToken { .. } => "token.settlement".into(),
         Step::UploadWasm { .. } => "wasm.settlement".into(),
         Step::DeploySettlement { .. } => "contract.settlement".into(),
@@ -301,6 +353,9 @@ pub fn problem_addr(p: &Problem) -> String {
         Problem::SignersReused { .. } => "signers.settlement".into(),
         Problem::HostNotReady { .. } | Problem::WrongPlatform { .. } => "host".into(),
         Problem::NodeMismatch { node, .. } => format!("node.{node}"),
+        Problem::AccountMissing { who } | Problem::CannotMint { who, .. } => {
+            format!("account.{who}")
+        }
     }
 }
 
@@ -378,7 +433,10 @@ pub(crate) fn legacy_diff(d: &Desired, chain: &Chain, host: &Host) -> Plan {
     // --- Stellar ---------------------------------------------------------------
     for (who, key) in [("admin", d.admin), ("relayer", d.relayer)] {
         if !chain.accounts.contains(&key) {
-            steps.push(Step::Fund { who, key });
+            steps.push(Step::Fund {
+                who: who.into(),
+                key,
+            });
         }
     }
     if !chain.token_exists {
@@ -733,6 +791,15 @@ const ADDR_COLUMN: usize = 42;
 pub fn step_line(s: &Step) -> String {
     match s {
         Step::Fund { who, key } => format!("+ fund      {who} {} (friendbot)", g_short(key)),
+        Step::Trust { who, code, issuer } => {
+            format!("+ trust     {who} {code}:{}", g_short(issuer))
+        }
+        Step::Mint {
+            who, code, amount, ..
+        } => format!(
+            "+ mint      {} {code} to {who} (the admin issues it)",
+            crate::flows::format_units(*amount, 7)
+        ),
         Step::DeployToken {
             contract,
             code,
@@ -806,6 +873,19 @@ pub fn problem_line(p: &Problem) -> String {
         ),
         Problem::NodeMismatch { node, field } => format!(
             "! {node} reports another {field} than its files give"
+        ),
+        Problem::AccountMissing { who } => format!(
+            "! account {who} isn't on the network, and its fund = false: fund it, or let friendbot (fund = true)"
+        ),
+        Problem::CannotMint {
+            who,
+            code,
+            have,
+            want,
+        } => format!(
+            "! {who} holds {} {code}, less than its balance of {}, and the admin doesn't issue {code}: send it some, or lower the balance",
+            crate::flows::format_units(*have, 7),
+            crate::flows::format_units(*want, 7)
         ),
     }
 }

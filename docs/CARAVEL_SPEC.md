@@ -2213,7 +2213,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-15 | The resource graph, with identical plans (goldens byte for byte) (DEC-087) | C-14 | review |
 | C-16 | Addresses in plans; `plan --json`; `graph`; `depends_on`, `--target`, `--replace` (DEC-088) | C-15 | review |
 | C-17 | Saved plans: `plan --out`, `apply <planfile>` refused when anything moved — **Gate G4** (DEC-089) | C-16 | review |
-| C-18 | Accounts: funding, trustlines, balances topped up | C-17 | todo |
+| C-18 | Accounts: funding, trustlines, balances topped up (DEC-090) | C-17 | review |
 | C-19 | Tokens: issued assets and their contracts; a declared token as the settlement token | C-18 | todo |
 | C-20 | Contracts: any Wasm, constructor arguments, derived addresses, `prevent_destroy` | C-19 | todo |
 | C-21 | Local modules with inputs and outputs — **Gate G5** | C-20 | todo |
@@ -2868,6 +2868,31 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - no identity's secret in the file.
 
   Unit tests cover each refusal, the salted hash, the version and format checks, and the applied mark | Review a plan, then apply exactly what was reviewed, for CI and team review, still with no state file | Remote or signed plan files |
+| DEC-090 | **M0.6 (C-18).** Declared accounts: `[env.<name>.accounts.<n>]`.
+- **Fields:**
+  - `identity` (the name when not given);
+  - `fund` (default true: friendbot when missing);
+  - `trustlines`: `"settlement"` for the settlement token's asset, or `"CODE:G…"`;
+  - `balances = { settlement = "<units>" }`, a minimum to top up to, as a decimal string;
+  - `depends_on`, a list of addresses.
+
+  Checks: a name isn't `admin` or `relayer`; an identity is not a key; amounts parse; a balance needs the settlement trustline; a contract token can't be trusted or topped up, because it's no Stellar asset and its balances aren't readable.
+- **Each account is a resource, `account.<n>`.** Its steps are `fund`, `trust` and `mint`; its problems are `AccountMissing` (missing, with `fund = false`) and `CannotMint`.
+  - A top-up mints `want − have` through the token's contract, and only when the admin issues the settlement asset; otherwise it is `CannotMint`, with both amounts.
+  - An issuer needs no trustline to its own asset.
+  - An account that trusts or holds the settlement token follows `token.settlement` (and the admin, when it mints). `depends_on` adds `Order` edges, and an unknown address is an error naming the account. This is the lane-file `depends_on` that DEC-088 deferred.
+- **`Desired`** gains `accounts` and `settlement_asset`, the Stellar asset behind the settlement token, Circle's USDC included. **`Chain`** gains `trustlines` (account, code, issuer → balance).
+- **The chain reader** reads the declared accounts and their trustlines in batched `getLedgerEntries` (nothing to read when none are declared, so lane #1's reads are unchanged). `address::trustline_key` builds the keys.
+- **`account.<n>.identity` and `.public_key`** are attributes. Declared identities join `keys list` and `ensure`, and a local `apply` creates them.
+- **The admin and relayer** stay the implicit `account.admin` and `account.relayer`. `Step::Fund` names its account by a string now.
+- **Checked:**
+  - a golden plan with accounts;
+  - a top-up of only the difference, and nothing once enough is held;
+  - `CannotMint` and `AccountMissing`, in text and JSON;
+  - `depends_on` order and unknown addresses;
+  - manifest checks;
+  - the property test, unchanged;
+  - on a local lane: apply funds, trusts and mints (100); "No changes." after; raising the balance to 150 mints 50; an output reads `account.alice.public_key` | Test users, market makers and treasuries were shell steps after `apply`; declaring them makes them part of the deployment | Balances in other tokens (C-19), and taking a balance back down |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

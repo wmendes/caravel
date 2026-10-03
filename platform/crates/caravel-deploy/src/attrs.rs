@@ -170,13 +170,22 @@ pub fn attributes(
                 ("rpc_url", s(m.rpc_url())),
             ]),
         ),
-        (
-            "account".to_string(),
-            map([
-                ("admin", account(&m.env.admin, &keys.admin)),
-                ("relayer", account(&m.env.relayer.account, &keys.relayer)),
-            ]),
-        ),
+        ("account".to_string(), {
+            let mut accounts = BTreeMap::from([
+                ("admin".to_string(), account(&m.env.admin, &keys.admin)),
+                (
+                    "relayer".to_string(),
+                    account(&m.env.relayer.account, &keys.relayer),
+                ),
+            ]);
+            // Declared accounts (C-18).
+            for (name, spec) in &m.env.accounts {
+                if let Some(k) = keys.accounts.get(name) {
+                    accounts.insert(name.clone(), account(spec.identity_of(name), k));
+                }
+            }
+            Value::Map(accounts)
+        }),
         (
             "token".to_string(),
             map([(
