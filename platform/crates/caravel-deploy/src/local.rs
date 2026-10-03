@@ -164,7 +164,21 @@ impl Local {
         for name in names {
             let running = self.pid(&name).is_some_and(alive);
             let mut report = None;
-            if running {
+            // Not ours running, yet something answers on its port (C-24).
+            let port = ports.get(&name).copied();
+            let listening = !running
+                && port.is_some_and(|p| {
+                    std::net::TcpStream::connect_timeout(
+                        &std::net::SocketAddr::from(([127, 0, 0, 1], p)),
+                        Duration::from_millis(300),
+                    )
+                    .is_ok()
+                });
+            if listening {
+                host.listening
+                    .insert(name.clone(), port.unwrap_or_default());
+            }
+            if running || listening {
                 if let Some(port) = ports.get(&name) {
                     if let Ok(r) = http
                         .get(format!("http://127.0.0.1:{port}/v1/status"))

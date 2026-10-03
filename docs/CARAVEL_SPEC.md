@@ -2220,7 +2220,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-21 | Local modules with inputs and outputs — **Gate G5** (DEC-093) | C-20 | review |
 | C-22 | Several hosts per deployment and node placement (DEC-094) | C-21 | review |
 | C-23 | Networking across hosts: signed `/v1/sign` requests, private or public addresses, validators run elsewhere (DEC-095) | C-22 | review |
-| C-24 | Lane namespaces: several lanes on one host | C-23 | todo |
+| C-24 | Lane namespaces: several lanes on one host (DEC-096) | C-23 | review |
 | C-25 | The web app as a resource, configured from outputs — **Gate G6** | C-24 | todo |
 
 ---
@@ -2985,6 +2985,25 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - lane #1 split over two hosts, with and without private addresses: the sequencer key in the configs, and `/v1/sign` open on b's proxy only through its public URL;
   - lane #1's pins are unchanged;
   - on a local lane with two `local` hosts, a sequencer key and a validator run by hand outside the deployment, with the threshold at 4 of 4: checkpoints accepted (so the outside validator answered the signed requests), unsigned requests to it and to validator 3 refused with 401, "No changes.", and destroy | A validator on another machine, or run by someone else, must not be asked to sign by anyone who can reach it | mTLS, or keys rotated without a restart; a relayer on its own host (it would need `/internal/*` across hosts) |
+| DEC-096 | **M0.6 (C-24).** Several lanes on one ssh host: `namespace = "<ns>"` in a host table (up to 32 lowercase letters, digits and `-`; refused on `local` hosts, whose lanes are already apart under `.caravel/<lane>/<env>`).
+- **What a namespace sets apart:**
+  - its units, `caravel-<ns>-sequencer`, `caravel-<ns>-relayer` and `caravel-<ns>-validator@`, each depending on its own sequencer;
+  - its Caddy site, a snippet at `/etc/caddy/caravel.d/<ns>.caddy` (the host's Caddyfile must `import /etc/caddy/caravel.d/*.caddy`, or the host lacks it);
+  - its root, `/opt/caravel-<ns>` unless `root` is given. The first release creates it, so a namespace needs no provisioning beyond the host's.
+- **Without a namespace,** the names are a single lane's (`caravel-*`, `/etc/caddy/Caddyfile`, `/opt/caravel`). Lane #1's files and plan are unchanged.
+- **Sharing is checked, never assumed:** reading an ssh host now also reports:
+  - the lane and deployment named by its root's `lane.toml` header;
+  - the root its units run, from the `--config` path in the first unit found;
+  - which nodes' ports something listens on (`ss`).
+  The local provider probes the ports of nodes it doesn't run.
+- **New problems:**
+  - `HostTaken`: another lane's root or unit names, at `host`. The plan names the other lane or root and suggests a namespace.
+  - `PortInUse`: a node that isn't running and whose port answers for something other than this lane, at `node.<name>`.
+  Both refuse apply. The read on the ssh side lists only the lane's own unit files and Caddy site, so other lanes' files never show up as its own. `nodes_of` maps `systemd/caravel-[<ns>-]<role>.service` to the nodes each unit runs.
+- **Checked:**
+  - unit and golden tests: namespaced names, roots and refusals; lane #1's lane file in a namespace renders `caravel-perps-*` units and a `caravel.d` snippet; `HostTaken`, `PortInUse` (golden `plan-port-in-use`), a namespaced unit restarting its node, and the header parser;
+  - live: a local lane whose validator port another program held planned `PortInUse`;
+  - read-only against lane #1's VM: lane #1 still plans "No changes.", and a copy of its file with another root and no namespace planned `HostTaken` ("the units caravel-* run the lane at /opt/caravel") | Lanes had to have a host each, and a second lane on the same host would have overwritten the first one's units and Caddyfile | Lane #1's Caddyfile importing `caravel.d`, so a namespaced lane can join its VM (a change to lane #1's files, so a VM release for the human) |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

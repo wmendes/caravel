@@ -14,7 +14,7 @@ use crate::ssh::Ssh;
 
 pub enum HostProvider {
     Local(Local),
-    Ssh(Ssh),
+    Ssh(Box<Ssh>),
 }
 
 impl HostProvider {
@@ -29,7 +29,9 @@ impl HostProvider {
             crate::manifest::Provider::Local => {
                 Self::Local(Local::named(m, template, state_root, host)?)
             }
-            crate::manifest::Provider::Ssh => Self::Ssh(Ssh::named(m, template, state_root, host)?),
+            crate::manifest::Provider::Ssh => {
+                Self::Ssh(Box::new(Ssh::named(m, template, state_root, host)?))
+            }
         })
     }
 

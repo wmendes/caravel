@@ -403,6 +403,8 @@ fn lane_1_plans_no_changes() {
         nodes,
         has_data: true,
         others: Default::default(),
+        taken: None,
+        listening: Default::default(),
     };
     let plan = diff(&d, &chain, &host);
     assert!(plan.is_empty(), "{}", plan.render(&d));
@@ -414,4 +416,52 @@ fn lane_1_plans_no_changes() {
     let mut rotated = d.clone();
     rotated.signers.threshold = 3;
     assert!(!diff(&rotated, &chain, &host).is_empty());
+}
+
+/// Lane #1's lane file in a namespace (C-24): its units and Caddy site
+/// are its own, so another lane can share the host.
+#[test]
+fn files_in_a_namespace() {
+    let text =
+        std::fs::read_to_string(root().join("lanes/perps/config/lane.caravel-perps.testnet.toml"))
+            .unwrap()
+            .replace(
+                "[env.testnet.host]\n",
+                "[env.testnet.host]\nnamespace = \"perps\"\n",
+            );
+    let m = Manifest::parse(&text, "testnet").unwrap();
+    let r = Resolved {
+        template: "perps".into(),
+        engine_wasm_hash: m.lane.engine_wasm_hash().unwrap().unwrap(),
+        settlement: [9; 32],
+        validator_keys: vec![[1; 32], [2; 32], [3; 32]],
+        web: true,
+        sequencer_key: None,
+    };
+    let f = render(&m, &r, &m.env.host.root, 1).unwrap();
+    let names: Vec<&str> = f
+        .keys()
+        .filter(|k| k.starts_with("systemd/") || k.starts_with("caddy/"))
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "caddy/caravel.d/perps.caddy",
+            "systemd/caravel-perps-relayer.service",
+            "systemd/caravel-perps-sequencer.service",
+            "systemd/caravel-perps-validator@.service",
+        ]
+    );
+    let v = &f["systemd/caravel-perps-validator@.service"];
+    assert!(
+        v.contains("After=network-online.target caravel-perps-sequencer.service"),
+        "{v}"
+    );
+    assert!(
+        v.contains("/opt/caravel-perps/config/validator-%i.toml"),
+        "{v}"
+    );
+    assert!(f["sequencer.toml"].contains("/opt/caravel-perps/data/sequencer.sqlite"));
+    assert!(f["caddy/caravel.d/perps.caddy"].contains("root * /opt/caravel-perps/web"));
 }

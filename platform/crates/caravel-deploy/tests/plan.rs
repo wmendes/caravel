@@ -159,6 +159,8 @@ fn running(d: &Desired) -> Host {
         nodes,
         has_data: true,
         others: BTreeMap::new(),
+        taken: None,
+        listening: BTreeMap::new(),
     }
 }
 
@@ -1151,5 +1153,56 @@ fn a_lane_on_two_hosts() {
     assert_eq!(
         lines(&t),
         ["host.b.file.validator-3.toml", "node.validator-3"]
+    );
+}
+
+/// Sharing a host (C-24): another lane's root or units, a port something
+/// else holds, and a namespace's units restarting their nodes.
+#[test]
+fn a_host_another_lane_holds() {
+    let d = desired();
+    let chain = deployed(&d);
+    let mut host = running(&d);
+    host.taken = Some("/opt/caravel holds lane \"other\" [env.testnet]".into());
+    let plan = diff(&d, &chain, &host);
+    assert!(plan.problems.contains(&Problem::HostTaken {
+        on: None,
+        by: "/opt/caravel holds lane \"other\" [env.testnet]".into(),
+    }));
+    let v = plan.to_json(&d);
+    assert!(v["problems"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|p| p["address"] == "host"));
+
+    // A stopped node whose port answers for something else.
+    let mut host = running(&d);
+    host.nodes.get_mut("validator-2").unwrap().running = false;
+    host.nodes.get_mut("validator-2").unwrap().report = None;
+    host.listening.insert("validator-2".into(), 18082);
+    let plan = diff(&d, &chain, &host);
+    assert!(plan.problems.contains(&Problem::PortInUse {
+        node: "validator-2".into(),
+        port: 18082,
+    }));
+    check("port-in-use", &d, &plan);
+    // Its own lane answering there (a node left over) isn't a problem.
+    host.nodes.get_mut("validator-2").unwrap().report = Some(report(&d));
+    assert!(diff(&d, &chain, &host).problems.is_empty());
+
+    // A namespace's unit file restarts the nodes it runs.
+    let mut ns = d.clone();
+    ns.host
+        .files
+        .insert("systemd/caravel-pay-sequencer.service".into(), key(0x51));
+    let host = running(&d);
+    let addrs = lines(&diff(&ns, &chain, &host));
+    assert_eq!(
+        addrs,
+        [
+            "file.systemd/caravel-pay-sequencer.service",
+            "node.sequencer"
+        ]
     );
 }

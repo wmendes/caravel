@@ -257,10 +257,35 @@ pub struct HostSpec {
     /// (a VPC or VPN address). Nodes another host calls bind it (C-22).
     #[serde(default)]
     pub private_address: Option<String>,
+    /// Sets this lane apart from others on the same ssh host (C-24): its
+    /// units are `caravel-<ns>-*`, its Caddy site a snippet in
+    /// `/etc/caddy/caravel.d/`, its root `/opt/caravel-<ns>` unless given.
+    /// None keeps the names of a host with one lane.
+    #[serde(default)]
+    pub namespace: Option<String>,
 }
 
 fn default_root() -> String {
     "/opt/caravel".into()
+}
+
+impl HostSpec {
+    /// Its systemd units' prefix: `caravel-`, or `caravel-<ns>-`.
+    pub fn unit_prefix(&self) -> String {
+        match &self.namespace {
+            Some(ns) => format!("caravel-{ns}-"),
+            None => "caravel-".into(),
+        }
+    }
+
+    /// Its Caddy site, as a rendered file's name: the whole Caddyfile, or
+    /// its namespace's snippet.
+    pub fn caddy_file(&self) -> String {
+        match &self.namespace {
+            Some(ns) => format!("caddy/caravel.d/{ns}.caddy"),
+            None => "caddy/Caddyfile".into(),
+        }
+    }
 }
 
 /// A declared account, `[env.<name>.accounts.<n>]` (M0.6, C-18): a
@@ -658,6 +683,21 @@ impl Manifest {
         }
         let mut spec = spec;
         spec.desugar_token();
+        // A namespace's root, unless the table gives one (C-24).
+        let own_root = |raw: Option<&toml::Value>| raw.and_then(|h| h.get("root")).is_some();
+        if let Some(ns) = spec.host.namespace.clone() {
+            if !own_root(table.get("host")) {
+                spec.host.root = format!("/opt/caravel-{ns}");
+            }
+        }
+        let raw_hosts = table.get("hosts").cloned();
+        for (name, h) in spec.hosts.iter_mut() {
+            if let Some(ns) = h.namespace.clone() {
+                if !own_root(raw_hosts.as_ref().and_then(|r| r.get(name))) {
+                    h.root = format!("/opt/caravel-{ns}");
+                }
+            }
+        }
         // The deployment's [node] over the lane file's: not consensus.
         let lane = match &spec.node {
             None => lane,
@@ -1369,6 +1409,26 @@ fn host_problems(at: &str, h: &HostSpec) -> Vec<String> {
         if let Some(a) = &h.private_address {
             if a.parse::<std::net::IpAddr>().is_err() {
                 p.push(format!("{at}.private_address = {a:?}: an IP address"));
+            }
+        }
+        if let Some(ns) = &h.namespace {
+            // It names units, a Caddy snippet and a directory.
+            if ns.is_empty()
+                || ns.len() > 32
+                || !ns
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+                || ns.starts_with('-')
+                || ns.ends_with('-')
+            {
+                p.push(format!(
+                    "{at}.namespace = {ns:?}: up to 32 lowercase letters, digits and '-'"
+                ));
+            }
+            if h.provider == Provider::Local {
+                p.push(format!(
+                    "{at}.namespace: the local provider keeps each lane apart already (.caravel/<lane>/<env>)"
+                ));
             }
         }
     }

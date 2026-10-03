@@ -1,0 +1,10 @@
+Lane demo-pay-0 · env local · network local
+  lane_id 01010101…  config_hash 02020202…  engine 04040404…
+  settlement CC3UKZIZZ2LOLG6ZXQ3UNAEAP5JSCTWSSU4X33RU3VIAJMYUDZCSC6D4 (derived from the admin and the lane), admin GCQK…AGP5, token CADF…T54G
+  signers: 2 of 3 at epoch 1
+
++ start     validator-2  node.validator-2
+
+! port 18082 of validator-2 is taken by something else (another lane or program): choose other ports
+
+1 step(s), 1 problem(s). Apply refuses until they are fixed.
