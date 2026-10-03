@@ -287,6 +287,15 @@ Edges say what comes first (the contract before the nodes, the validators before
 
 Both are repeatable and work with `plan` and `apply`. After a targeted apply, the check that follows is targeted too: the rest of the deployment may still differ.
 
+**Saved plans.** `caravel plan --out plan.json` saves the plan; `caravel apply plan.json` applies exactly it, or refuses and says what moved:
+- a file the lane file loaded, or a var file;
+- a var's value (the plan's vars come back by themselves; a sensitive one must be given again, as when planning);
+- what the lane file resolves to (a setting, a key, an address or the release);
+- Stellar, or the host, since the plan;
+- the steps a plan computed now would take.
+
+A saved plan holds hashes and public data only: no key, no file's content, and a sensitive var only as a salted hash. It keeps its `--target` and `--replace`, records the caravel version that made it (another version refuses it), and is marked applied once it is, so it can't run twice.
+
 ## A worked example
 
 One lane, a local deployment and a testnet one, sharing everything they can:

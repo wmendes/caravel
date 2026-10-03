@@ -32,6 +32,7 @@ pub mod ops;
 pub mod plan;
 pub mod release;
 pub mod render;
+pub mod saved;
 pub mod ssh;
 pub mod stellar;
 pub mod template;

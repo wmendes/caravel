@@ -103,7 +103,7 @@ Each command finds `lane.toml` in the current directory (or `-f`) and uses its d
 | For | Commands |
 |---|---|
 | A lane file | `init`, `validate`, `render`, `env list`, `keys list\|ensure\|show`, `output` |
-| Running a lane | `plan`, `apply` (both with `--target` and `--replace`), `graph`, `status`, `destroy`, `stop`, `start`, `restart`, `logs`, `wait`, `api`, `replay`, `doctor` |
+| Running a lane | `plan`, `apply` (both with `--target` and `--replace`; `plan --out FILE`, then `apply FILE`), `graph`, `status`, `destroy`, `stop`, `start`, `restart`, `logs`, `wait`, `api`, `replay`, `doctor` |
 | Using a lane | `account create\|fund`, `balance`, `deposit`, `tx`, `withdraw`, `claim`, `force-withdraw`, `escape` |
 
 Lane transactions are signed through the Stellar CLI's keystore (SEP-53 message signing), so no key is ever written out.

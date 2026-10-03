@@ -128,11 +128,16 @@ pub enum Cmd {
         exit_code: bool,
         #[command(flatten)]
         scope: Scope,
+        /// Save the plan here, for `caravel apply FILE` to apply exactly it
+        /// (it refuses if anything moved meanwhile). Holds no secret.
+        #[arg(long, value_name = "FILE")]
+        out: Option<PathBuf>,
     },
     /// Make Stellar and the host match the deployment. Shows the plan and
-    /// asks first, unless --yes. Running it again changes nothing.
+    /// asks first, unless --yes. Running it again changes nothing. Given a
+    /// saved plan (`caravel plan --out FILE`), applies exactly that plan.
     Apply {
-        /// The lane file (the same as -f).
+        /// A saved plan, or the lane file (the same as -f).
         lane: Option<PathBuf>,
         /// Apply without asking (also CARAVEL_YES=1).
         #[arg(short = 'y', long)]
@@ -608,6 +613,7 @@ fn dispatch(cli: Cli) -> Result<u8> {
             diff,
             exit_code,
             scope,
+            out,
         } => {
             let ctx = context(g, lane.as_deref())?;
             let m = ctx.manifest()?;
@@ -637,6 +643,29 @@ fn dispatch(cli: Cli) -> Result<u8> {
             runtime()?.block_on(async {
                 let p = ctx.prepare(false).await?;
                 let plan = p.plan_with(&scope.options())?;
+                if let Some(out) = &out {
+                    let origin = caravel_deploy::saved::Origin {
+                        lane_file: std::fs::canonicalize(&ctx.lane_path)
+                            .unwrap_or_else(|_| ctx.lane_path.clone()),
+                        env: ctx.env.clone(),
+                        release_dir: ctx.release.release_dir.clone(),
+                        wasm_dir: ctx.release.wasm_dir.clone(),
+                    };
+                    let doc = caravel_deploy::saved::save(
+                        &p,
+                        &plan,
+                        &scope.options(),
+                        &origin,
+                        &caravel_version(),
+                    )?;
+                    std::fs::write(out, serde_json::to_string_pretty(&doc)? + "\n")
+                        .with_context(|| format!("writing {}", out.display()))?;
+                    eprintln!(
+                        "Saved to {}: `caravel apply {}` applies exactly this plan.",
+                        out.display(),
+                        out.display()
+                    );
+                }
                 if g.json {
                     let mut v = plan.to_json(&p.desired);
                     if diff {
@@ -660,6 +689,14 @@ fn dispatch(cli: Cli) -> Result<u8> {
         }
         Cmd::Apply { lane, yes, scope } => {
             let yes = yes || assume_yes();
+            if let Some(path) = lane.as_deref().filter(|p| {
+                std::fs::read_to_string(p).is_ok_and(|t| caravel_deploy::saved::is_saved_plan(&t))
+            }) {
+                if !scope.target.is_empty() || !scope.replace.is_empty() {
+                    bail!("a saved plan keeps the --target and --replace it was made with");
+                }
+                return apply_saved(g, path, yes);
+            }
             let ctx = context(g, lane.as_deref())?;
             let m = ctx.manifest()?;
             let missing = init::missing_identities(&m);
@@ -2011,6 +2048,118 @@ fn release_check(ctx: &Ctx, t: Option<&Plugin>) -> Result<String> {
         );
     }
     Ok(format!("{} (engine {}…)", r.commit, &hex(&want)[..16]))
+}
+
+/// This caravel's version, as saved plans record it.
+fn caravel_version() -> String {
+    match option_env!("CARAVEL_COMMIT").filter(|c| !c.is_empty()) {
+        Some(c) => format!("{} ({c})", env!("CARGO_PKG_VERSION")),
+        None => env!("CARGO_PKG_VERSION").to_string(),
+    }
+}
+
+/// `apply plan.json`: the saved plan's lane file, deployment, release and
+/// vars (unless given here), everything it was made from checked again, then
+/// exactly its steps.
+fn apply_saved(g: &Global, path: &Path, yes: bool) -> Result<u8> {
+    use caravel_deploy::saved;
+    let s = saved::read(path, &caravel_version())?;
+    let mut g2 = g.clone();
+    if g2.file.is_none() {
+        g2.file = Some(s.context.lane_file.clone());
+    }
+    match &g2.env {
+        Some(e) if *e != s.context.env => bail!(
+            "{} is a plan for [env.{}], not [env.{e}]",
+            path.display(),
+            s.context.env
+        ),
+        _ => g2.env = Some(s.context.env.clone()),
+    }
+    if g2.release_dir.is_none() {
+        g2.release_dir = s.context.release_dir.clone();
+    }
+    if g2.wasm_dir.is_none() {
+        g2.wasm_dir = s.context.wasm_dir.clone();
+    }
+    // The plan's vars first; any given here come after, and the check below
+    // says if they change one.
+    let mut vars = s.var_args();
+    vars.extend(g.vars.iter().cloned());
+    g2.vars = vars;
+    let ctx = context(&g2, None)?;
+    let m = ctx.manifest()?;
+    let missing = init::missing_identities(&m);
+    if !missing.is_empty() {
+        bail!(
+            "the keystore lacks {}, which the plan's keys came from",
+            missing.join(", ")
+        );
+    }
+    runtime()?.block_on(async {
+        let p = ctx.prepare(true).await?;
+        let now = saved::Basis::of(&p)?;
+        let plan = p.plan_with(&s.options)?;
+        let why = s.moved(&now, &plan, &p.desired.host.release);
+        if !why.is_empty() {
+            let msg = format!(
+                "{} no longer applies:\n  - {}\nPlan again: `caravel plan --out {}`",
+                path.display(),
+                why.join("\n  - "),
+                path.display()
+            );
+            if g.json {
+                // One document on stdout, the reason on stderr.
+                print_json(&json!({ "ok": false, "applied": 0, "moved": why }))?;
+                eprintln!("error: {msg}");
+                return Ok(exit::ERROR);
+            }
+            bail!(msg);
+        }
+        if !g.json {
+            print!("{}", plan.render(&p.desired));
+        }
+        if plan.steps.is_empty() {
+            if g.json {
+                print_json(&json!({ "ok": true, "applied": 0, "plan": plan.to_json(&p.desired) }))?;
+            }
+            return Ok(exit::OK);
+        }
+        if g.json && !yes {
+            bail!("apply --json runs without a prompt: pass --yes");
+        }
+        if !deploy::confirm(plan.steps.len(), yes)? {
+            println!("Nothing applied.");
+            return Ok(exit::OK);
+        }
+        p.apply(&plan).await?;
+        saved::mark_applied(path)?;
+        let again = ctx.prepare(true).await?;
+        let left = again.plan_with(&caravel_deploy::plan::Options {
+            target: s.options.target.clone(),
+            replace: vec![],
+        })?;
+        if g.json {
+            print_json(&json!({
+                "ok": left.is_empty(),
+                "applied": plan.steps.len(),
+                "plan": plan.to_json(&p.desired),
+                "remaining": left.to_json(&again.desired),
+            }))?;
+        } else if left.is_empty() {
+            println!("\nApplied the saved plan. The lane matches the lane file.");
+        } else {
+            print!(
+                "\nApplied the saved plan, but the deployment still differs:\n{}",
+                left.render(&again.desired)
+            );
+        }
+        Ok(if left.is_empty() {
+            exit::OK
+        } else {
+            exit::CHANGES
+        })
+    })
 }
 
 /// `CARAVEL_YES=1` (or `true`): every command that asks first runs as with
