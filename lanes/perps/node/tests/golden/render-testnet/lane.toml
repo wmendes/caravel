@@ -23,8 +23,8 @@ min_deposit = 10000000
 min_withdrawal = 10000000
 
 [node]
-block_time_ms = 1000
-checkpoint_every_blocks = 60
+block_time_ms = 500
+checkpoint_every_blocks = 120
 max_batch_bytes = 96000
 
 [perps.accounts]

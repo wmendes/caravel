@@ -106,7 +106,9 @@ fn rejects_bad_files() {
             "{path}"
         );
         assert!(
-            bad(&t.replace("block_time_ms = 1000", "block_time_ms = 100")),
+            bad(&t
+                .replace("block_time_ms = 1000", "block_time_ms = 100")
+                .replace("block_time_ms = 500 ", "block_time_ms = 100 ")),
             "{path}"
         );
         assert!(
