@@ -1,0 +1,9 @@
+Lane demo-pay-0 · env local · network local
+  lane_id 01010101…  config_hash 02020202…  engine 04040404…
+  settlement CC3UKZIZZ2LOLG6ZXQ3UNAEAP5JSCTWSSU4X33RU3VIAJMYUDZCSC6D4 (derived from the admin and the lane), admin GCQK…AGP5, token CADF…T54G
+  signers: 2 of 3 at epoch 1
+
++ start     validator-3         node.validator-3
+- stop      validator-3 (on a)  node.validator-3@a
+
+2 step(s), 0 problem(s).

@@ -777,3 +777,94 @@ fn declared_contracts_are_checked() {
     .unwrap();
     assert_eq!(m.env.contracts["c"].wasm_hash(), Some([0xab; 32]));
 }
+
+/// Several hosts (C-22): the sequencer's host and the validators placed
+/// on others, each reachable from the other.
+#[test]
+fn several_hosts() {
+    let hosts = ENV.replace(
+        "[env.testnet.host]\nprovider = \"ssh\"\naddress = \"ops@lane.example\"\npublic_url = \"https://lane.example\"\n",
+        "[env.testnet.sequencer]\nhost = \"a\"\n\n[env.testnet.hosts.a]\nprovider = \"ssh\"\naddress = \"ops@a.example\"\npublic_url = \"https://lane.example\"\nprivate_address = \"10.0.0.2\"\n\n[env.testnet.hosts.b]\nprovider = \"ssh\"\naddress = \"ops@b.example\"\nprivate_address = \"10.0.0.3\"\n",
+    );
+    let placed = hosts.replace(
+        "name = \"3\"\nkey = \"demo-v3\"",
+        "name = \"3\"\nkey = \"demo-v3\"\nhost = \"b\"",
+    );
+    let m = Manifest::parse(&file(&placed), "testnet").unwrap();
+    let e = &m.env;
+    // `host` is the sequencer's; the others are by name.
+    assert_eq!(e.primary_host(), "a");
+    assert_eq!(e.host.address.as_deref(), Some("ops@a.example"));
+    let others: Vec<_> = e.other_hosts().into_iter().map(|(n, _)| n).collect();
+    assert_eq!(others, ["b"]);
+    assert_eq!(e.host_of("sequencer"), "a");
+    assert_eq!(e.host_of("validator-1"), "a");
+    assert_eq!(e.host_of("validator-3"), "b");
+    // Across hosts, a node is reached at its host's private address and
+    // listens there; on one host, at loopback.
+    assert_eq!(e.reach("b", "a").as_deref(), Some("10.0.0.2"));
+    assert_eq!(e.reach("a", "b").as_deref(), Some("10.0.0.3"));
+    assert_eq!(e.reach("a", "a").as_deref(), Some("127.0.0.1"));
+    assert_eq!(e.listen_on("a", "sequencer"), "10.0.0.2");
+    assert_eq!(e.listen_on("b", "validator-3"), "10.0.0.3");
+    assert_eq!(e.listen_on("a", "validator-1"), "127.0.0.1");
+    // Unplaced, the sequencer has no caller elsewhere: loopback.
+    let m = Manifest::parse(&file(&hosts), "testnet").unwrap();
+    assert_eq!(m.env.listen_on("a", "sequencer"), "127.0.0.1");
+
+    // Two local hosts reach each other at loopback.
+    let local = placed
+        .replace("network = \"testnet\"", "network = \"local\"")
+        .replace("token = \"circle-usdc\"", "token = { local = \"USDC\" }")
+        .replace(
+            "provider = \"ssh\"\naddress = \"ops@a.example\"",
+            "provider = \"local\"",
+        )
+        .replace(
+            "provider = \"ssh\"\naddress = \"ops@b.example\"",
+            "provider = \"local\"",
+        )
+        .replace("private_address = \"10.0.0.2\"\n", "")
+        .replace("private_address = \"10.0.0.3\"\n", "")
+        .replace("public_url = \"https://lane.example\"\n", "");
+    let m = Manifest::parse(&file(&local), "testnet").unwrap();
+    assert_eq!(m.env.reach("b", "a").as_deref(), Some("127.0.0.1"));
+    assert_eq!(m.env.listen_on("b", "validator-3"), "127.0.0.1");
+
+    // A host one validator's peer can't reach, one undeclared, one named
+    // like a resource, and `host` with `hosts`.
+    let e = err(&placed.replace("private_address = \"10.0.0.3\"\n", ""));
+    assert!(
+        e.contains("validator \"3\" on host \"b\"")
+            && e.contains("give [hosts.b] a private_address"),
+        "{e}"
+    );
+    let e = err(&placed.replace("host = \"b\"", "host = \"c\""));
+    assert!(
+        e.contains("host = \"c\", but the deployment has [hosts.a], [hosts.b]"),
+        "{e}"
+    );
+    let e = err(&ENV.replace(
+        "name = \"3\"\nkey = \"demo-v3\"",
+        "name = \"3\"\nkey = \"demo-v3\"\nhost = \"b\"",
+    ));
+    assert!(
+        e.contains("one host (declare [hosts.<name>] for several)"),
+        "{e}"
+    );
+    let e = err(&hosts.replace("hosts.b]", "hosts.data]"));
+    assert!(e.contains("not data, release or file"), "{e}");
+    let e = err(&hosts.replace(
+        "private_address = \"10.0.0.3\"",
+        "private_address = \"b.internal\"",
+    ));
+    assert!(e.contains("an IP address"), "{e}");
+    let e = err(&format!(
+        "{hosts}\n[env.testnet.host]\nprovider = \"local\"\n"
+    ));
+    assert!(e.contains("not both"), "{e}");
+    let e = err(&hosts.replace("[env.testnet.sequencer]\nhost = \"a\"\n", ""));
+    assert!(e.contains("say which runs the sequencer"), "{e}");
+    let e = err(&hosts.replace("host = \"a\"", "host = \"z\""));
+    assert!(e.contains("no [hosts.z]"), "{e}");
+}

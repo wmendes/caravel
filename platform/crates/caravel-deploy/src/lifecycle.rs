@@ -69,7 +69,7 @@ impl Prepared {
     pub fn stop_nodes_named(&self, nodes: &[String]) -> Result<()> {
         for n in nodes {
             eprintln!("→ stop {n}");
-            self.host_provider.stop(n)?;
+            self.provider_of(n).stop(n)?;
         }
         Ok(())
     }
@@ -322,12 +322,16 @@ impl Prepared {
                     .flatten()
                     .is_some_and(|v| api_matches(&v, pointer, value.as_deref())),
                 Wait::Healthy => {
-                    let host = self.host_provider.read(&self.m).await?;
-                    self.all_nodes().iter().all(|n| {
-                        host.nodes
-                            .get(n)
-                            .is_some_and(|s| s.running && (n == "relayer" || s.report.is_some()))
-                    })
+                    // Each node on its own host (C-22).
+                    let mut ok = true;
+                    for n in self.all_nodes() {
+                        let host = self.provider_of(&n).read(&self.m).await?;
+                        ok &= host
+                            .nodes
+                            .get(&n)
+                            .is_some_and(|s| s.running && (n == "relayer" || s.report.is_some()));
+                    }
+                    ok
                 }
                 Wait::Frozen => {
                     let rpc = caravel_node::stellar_rpc::Rpc::new(self.m.rpc_url())?;

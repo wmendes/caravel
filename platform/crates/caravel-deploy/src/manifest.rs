@@ -107,6 +107,9 @@ pub struct ValidatorSpec {
     /// replacement never takes the port of the one it replaces.
     #[serde(default)]
     pub port: Option<u16>,
+    /// The host it runs on (`[hosts.<name>]`); the sequencer's when not given.
+    #[serde(default)]
+    pub host: Option<String>,
 }
 
 impl ValidatorSpec {
@@ -133,6 +136,9 @@ pub struct SequencerSpec {
     pub cors_origins: Vec<String>,
     #[serde(default)]
     pub production: bool,
+    /// The host it (and the relayer) runs on, with several hosts.
+    #[serde(default)]
+    pub host: Option<String>,
 }
 
 fn default_port() -> u16 {
@@ -145,6 +151,7 @@ impl Default for SequencerSpec {
             port: default_port(),
             cors_origins: Vec::new(),
             production: false,
+            host: None,
         }
     }
 }
@@ -231,6 +238,10 @@ pub struct HostSpec {
     pub public_url: Option<String>,
     #[serde(default = "default_root")]
     pub root: String,
+    /// The address other hosts of the deployment reach this one's nodes at
+    /// (a VPC or VPN address). Nodes another host calls bind it (C-22).
+    #[serde(default)]
+    pub private_address: Option<String>,
 }
 
 fn default_root() -> String {
@@ -397,6 +408,10 @@ pub struct EnvSpec {
     /// `prevent_destroy`: `caravel destroy` refuses this deployment.
     #[serde(default)]
     pub lifecycle: Lifecycle,
+    /// Several hosts, by name (C-22). `host` is the sequencer's (and
+    /// shorthand for one host named `default`).
+    #[serde(default)]
+    pub hosts: BTreeMap<String, HostSpec>,
 }
 
 /// A lane file and one of its deployments.
@@ -582,6 +597,39 @@ impl Manifest {
             if matches!(n, "mainnet" | "pubnet" | "public") {
                 bail!("network {n:?}: Caravel runs on testnet only (spec §0)");
             }
+        }
+        // With `hosts`, `host` is the sequencer's (C-22): filled in from it.
+        let mut table = table.clone();
+        if let Some(hosts) = table.get("hosts").and_then(|h| h.as_table()).cloned() {
+            if table.contains_key("host") {
+                bail!(
+                    "{}",
+                    at("give `host` (one host) or `hosts` (several), not both".into())
+                );
+            }
+            let named = table
+                .get("sequencer")
+                .and_then(|s| s.get("host"))
+                .and_then(|h| h.as_str())
+                .map(String::from);
+            let primary = match (named, hosts.len()) {
+                (Some(n), _) => n,
+                (None, 1) => hosts.keys().next().cloned().unwrap_or_default(),
+                (None, _) => bail!(
+                    "{}",
+                    at("with several hosts, say which runs the sequencer and the relayer: [sequencer] host = \"<name>\"".into())
+                ),
+            };
+            let Some(spec) = hosts.get(&primary) else {
+                bail!(
+                    "{}",
+                    at(format!(
+                        "sequencer.host = {primary:?}: no [hosts.{primary}] (there are {})",
+                        hosts.keys().cloned().collect::<Vec<_>>().join(", ")
+                    ))
+                );
+            };
+            table.insert("host".into(), spec.clone());
         }
         let spec: EnvSpec = toml::Value::Table(table.clone())
             .try_into()
@@ -824,6 +872,71 @@ fn secrets_in(table: &toml::Table, path: &str) -> Vec<String> {
 }
 
 impl EnvSpec {
+    /// The sequencer's host: it runs the sequencer and the relayer, and its
+    /// resources keep their one-host addresses (`release`, `file.<path>`).
+    pub fn primary_host(&self) -> String {
+        match (&self.sequencer.host, self.hosts.len()) {
+            (Some(h), _) => h.clone(),
+            (None, 1) => self.hosts.keys().next().cloned().unwrap_or_default(),
+            _ => "default".into(),
+        }
+    }
+
+    /// Every other host, by name.
+    pub fn other_hosts(&self) -> Vec<(String, HostSpec)> {
+        let primary = self.primary_host();
+        self.hosts
+            .iter()
+            .filter(|(n, _)| **n != primary)
+            .map(|(n, h)| (n.clone(), h.clone()))
+            .collect()
+    }
+
+    /// The host `node` runs on: a validator's own, else the sequencer's.
+    pub fn host_of(&self, node: &str) -> String {
+        node.strip_prefix("validator-")
+            .and_then(|name| self.validators.iter().find(|v| v.name == name))
+            .and_then(|v| v.host.clone())
+            .unwrap_or_else(|| self.primary_host())
+    }
+
+    /// A host's spec by name.
+    pub fn host_spec(&self, name: &str) -> &HostSpec {
+        if name == self.primary_host() {
+            &self.host
+        } else {
+            &self.hosts[name]
+        }
+    }
+
+    /// The address the nodes on `to` are reached at from `from`'s nodes:
+    /// loopback on one host (or between two hosts that are both this
+    /// machine), else `to`'s private address.
+    pub fn reach(&self, from: &str, to: &str) -> Option<String> {
+        let (f, t) = (self.host_spec(from), self.host_spec(to));
+        if from == to || (f.provider == Provider::Local && t.provider == Provider::Local) {
+            return Some("127.0.0.1".into());
+        }
+        t.private_address.clone()
+    }
+
+    /// The address a node on `host` listens on: its private address when
+    /// another host reaches it there, else loopback.
+    pub fn listen_on(&self, host: &str, node: &str) -> String {
+        let reached_from_elsewhere = if node == "sequencer" {
+            self.validators
+                .iter()
+                .any(|v| self.host_of(&format!("validator-{}", v.name)) != host)
+        } else {
+            self.primary_host() != host
+        };
+        let spec = self.host_spec(host);
+        match (&spec.private_address, spec.provider) {
+            (Some(a), Provider::Ssh) if reached_from_elsewhere => a.clone(),
+            _ => "127.0.0.1".into(),
+        }
+    }
+
     /// `token = "<declared>"` as the form it stands for: issued by the admin,
     /// `{ local = CODE }` (`CODE:<admin>`, on any network); by a `G…`
     /// address, `{ asset = "CODE:G…" }`. Runs after [`EnvSpec::check`].
@@ -1057,18 +1170,80 @@ impl EnvSpec {
                 Some(_) => {}
             }
         }
+        // Several hosts (C-22): each node on a declared one, each host valid,
+        // and a node another host calls reachable from it.
+        let known: Vec<String> = if self.hosts.is_empty() {
+            vec![self.primary_host()]
+        } else {
+            self.hosts.keys().cloned().collect()
+        };
+        for v in &self.validators {
+            if let Some(h) = &v.host {
+                if !known.contains(h) {
+                    p.push(format!(
+                        "validator {:?}: host = {h:?}, but the deployment has {}",
+                        v.name,
+                        if self.hosts.is_empty() {
+                            "one host (declare [hosts.<name>] for several)".to_string()
+                        } else {
+                            known
+                                .iter()
+                                .map(|k| format!("[hosts.{k}]"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        }
+                    ));
+                    continue;
+                }
+                let primary = self.primary_host();
+                for (from, to, what) in [
+                    (h.as_str(), primary.as_str(), "the sequencer"),
+                    (primary.as_str(), h.as_str(), "its signing endpoint"),
+                ] {
+                    if self.reach(from, to).is_none() {
+                        p.push(format!(
+                            "validator {:?} on host {h:?} needs {what} on host {to:?} reached from {from:?}: give [hosts.{to}] a private_address",
+                            v.name
+                        ));
+                    }
+                }
+            }
+        }
+        for name in self.hosts.keys() {
+            // Its addresses are `host.<name>…`.
+            if !identity_ok(name)
+                || name.contains('.')
+                || matches!(name.as_str(), "data" | "release" | "file")
+            {
+                p.push(format!(
+                    "hosts.{name}: a host's name is letters, digits, '-', '_', and not data, release or file"
+                ));
+            }
+        }
+        for (name, h) in self.other_hosts() {
+            p.extend(host_problems(&format!("hosts.{name}"), &h));
+        }
         let h = &self.host;
+        p.extend(host_problems("host", h));
+        p
+    }
+}
+
+/// What a host table gets wrong.
+fn host_problems(at: &str, h: &HostSpec) -> Vec<String> {
+    let mut p = Vec::new();
+    {
         match (h.provider, h.transport) {
-            (Provider::Local, _) if h.address.is_some() => {
-                p.push("host.address: the local provider runs on this machine".into())
-            }
-            (Provider::Ssh, _) if h.address.is_none() => p.push(
-                "host.address: the ssh provider needs user@host (or the VM name for gcloud-iap)"
-                    .into(),
-            ),
-            (Provider::Ssh, Transport::GcloudIap) if h.project.is_none() || h.zone.is_none() => {
-                p.push("host: transport = \"gcloud-iap\" needs project and zone".into())
-            }
+            (Provider::Local, _) if h.address.is_some() => p.push(format!(
+                "{at}.address: the local provider runs on this machine"
+            )),
+            (Provider::Ssh, _) if h.address.is_none() => p.push(format!(
+                "{at}.address: the ssh provider needs user@host (or the VM name for gcloud-iap)"
+            )),
+            (Provider::Ssh, Transport::GcloudIap) if h.project.is_none() || h.zone.is_none() => p
+                .push(format!(
+                    "{at}: transport = \"gcloud-iap\" needs project and zone"
+                )),
             _ => {}
         }
         // The root goes into shell commands on the host (`rm -rf <root>/data/*`
@@ -1082,10 +1257,15 @@ impl EnvSpec {
             && !h.root.split('/').any(|seg| seg == "..");
         if !plain {
             p.push(format!(
-                "host.root = {:?}: an absolute path of letters, digits, '/', '_', '-', '.', not / itself",
+                "{at}.root = {:?}: an absolute path of letters, digits, '/', '_', '-', '.', not / itself",
                 h.root
             ));
         }
-        p
+        if let Some(a) = &h.private_address {
+            if a.parse::<std::net::IpAddr>().is_err() {
+                p.push(format!("{at}.private_address = {a:?}: an IP address"));
+            }
+        }
     }
+    p
 }

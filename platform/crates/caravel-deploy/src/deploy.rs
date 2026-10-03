@@ -41,6 +41,15 @@ pub struct Prepared {
     pub extra: Extra,
     pub host: Host,
     pub notes: Vec<String>,
+    /// The deployment's other hosts (C-22): their providers and files.
+    pub others: Vec<OtherRun>,
+}
+
+/// Another host of a deployment, ready to change.
+pub struct OtherRun {
+    pub name: String,
+    pub provider: HostProvider,
+    pub files: BTreeMap<String, String>,
 }
 
 fn parse_hex(h: &str, what: &str) -> Result<Key> {
@@ -369,6 +378,28 @@ pub fn desired(
         accounts,
         tokens,
         contracts,
+        others: m
+            .env
+            .other_hosts()
+            .into_iter()
+            .map(|(name, spec)| crate::plan::OtherHost {
+                nodes: m
+                    .env
+                    .validators
+                    .iter()
+                    .map(|v| validator_node(&v.name))
+                    .filter(|n| m.env.host_of(n) == name)
+                    .collect(),
+                host: DesiredHost {
+                    provider: spec.provider,
+                    release: release.to_string(),
+                    platform: None,
+                    files: BTreeMap::new(),
+                },
+                name,
+            })
+            .collect(),
+        primary_host: m.env.primary_host(),
     })
 }
 
@@ -400,6 +431,16 @@ pub fn host_provider(m: &Manifest, template: &str, state_root: &Path) -> Result<
         Provider::Local => HostProvider::Local(Local::new(m, template, state_root)?),
         Provider::Ssh => HostProvider::Ssh(crate::ssh::Ssh::new(m, template, state_root)?),
     })
+}
+
+/// The host `node` runs on (C-22), without reading it.
+pub fn node_host_provider(
+    m: &Manifest,
+    template: &str,
+    state_root: &Path,
+    node: &str,
+) -> Result<HostProvider> {
+    HostProvider::named(m, template, state_root, &m.env.host_of(node))
 }
 
 /// Resolves the deployment and reads what Stellar and the host have.
@@ -490,6 +531,18 @@ pub async fn prepare(
         Provider::Local => HostProvider::Local(Local::new(&m, &template, state_root)?),
         Provider::Ssh => HostProvider::Ssh(crate::ssh::Ssh::new(&m, &template, state_root)?),
     };
+    let mut others: Vec<OtherRun> = m
+        .env
+        .other_hosts()
+        .into_iter()
+        .map(|(name, _)| {
+            Ok(OtherRun {
+                provider: HostProvider::named(&m, &template, state_root, &name)?,
+                name,
+                files: BTreeMap::new(),
+            })
+        })
+        .collect::<Result<_>>()?;
     let mut desired = desired(
         &m,
         &genesis,
@@ -537,7 +590,25 @@ pub async fn prepare(
         .iter()
         .map(|(k, v)| (k.clone(), sha256(v.as_bytes())))
         .collect();
-    let host = host_provider.read(&m).await?;
+    let mut host = host_provider.read(&m).await?;
+    // Each other host: its own files, and what it has (C-22).
+    let platform = desired.host.platform.clone();
+    for o in &mut others {
+        o.files = render::render_for(&m, &resolved, &o.name, &o.provider.root_str(), epoch)?;
+        let want = desired
+            .others
+            .iter_mut()
+            .find(|d| d.name == o.name)
+            .expect("each other host is desired");
+        want.host.files = o
+            .files
+            .iter()
+            .map(|(k, v)| (k.clone(), sha256(v.as_bytes())))
+            .collect();
+        want.host.platform = platform.clone();
+        host.others
+            .insert(o.name.clone(), o.provider.read(&m).await?);
+    }
     let cli = Cli::new(&m);
     let validator_keys = m
         .env
@@ -559,6 +630,7 @@ pub async fn prepare(
         extra,
         host,
         notes,
+        others,
     })
 }
 
@@ -627,37 +699,93 @@ impl Prepared {
     }
 
     /// Exports the keys the host's nodes hold, from the user's keystore.
-    fn write_keys(&self) -> Result<()> {
+    /// Host `host`'s provider: `None` (or its own name) is the sequencer's.
+    pub fn provider(&self, host: Option<&str>) -> &HostProvider {
+        match host {
+            Some(h) if h != self.desired.primary_host => self
+                .others
+                .iter()
+                .find(|o| o.name == h)
+                .map_or(&self.host_provider, |o| &o.provider),
+            _ => &self.host_provider,
+        }
+    }
+
+    /// The provider of the host `node` runs on.
+    pub fn provider_of(&self, node: &str) -> &HostProvider {
+        self.provider(self.desired.host_of(node))
+    }
+
+    /// Host `host`'s rendered files.
+    fn files_of(&self, host: Option<&str>) -> &BTreeMap<String, String> {
+        match host {
+            Some(h) if h != self.desired.primary_host => self
+                .others
+                .iter()
+                .find(|o| o.name == h)
+                .map_or(&self.files, |o| &o.files),
+            _ => &self.files,
+        }
+    }
+
+    /// The keys host `host` needs: its validators' only, and on the
+    /// sequencer's host the relayer's and the feed modules' too.
+    fn write_keys(&self, host: Option<&str>) -> Result<()> {
         let validators = self
             .m
             .env
             .validators
             .iter()
+            .filter(|v| self.desired.host_of(&validator_node(&v.name)) == host)
             .map(|v| Ok((validator_node(&v.name), Cli::secret(&v.key)?)))
             .collect::<Result<Vec<_>>>()?;
-        let mut env = vec![(
-            "CARAVEL_RELAYER_SECRET".to_string(),
-            Cli::secret(&self.m.env.relayer.account)?,
-        )];
-        for (var, id) in &self.m.env.relayer.feed_keys {
-            env.push((var.clone(), Cli::secret(id)?));
+        let mut env = Vec::new();
+        if host.is_none() {
+            env.push((
+                "CARAVEL_RELAYER_SECRET".to_string(),
+                Cli::secret(&self.m.env.relayer.account)?,
+            ));
+            for (var, id) in &self.m.env.relayer.feed_keys {
+                env.push((var.clone(), Cli::secret(id)?));
+            }
         }
-        self.host_provider.write_keys(&validators, &env)
+        self.provider(host).write_keys(&validators, &env)
     }
 
     async fn start(&self, node: &str) -> Result<()> {
-        let fingerprint = plan::fingerprint(&self.desired.host.files, node);
-        self.host_provider.start(node, &fingerprint)?;
+        let on = self.desired.host_of(node);
+        let files = match on {
+            None => &self.desired.host.files,
+            Some(h) => {
+                &self
+                    .desired
+                    .others
+                    .iter()
+                    .find(|o| o.name == h)
+                    .expect("a host")
+                    .host
+                    .files
+            }
+        };
+        let fingerprint = plan::fingerprint(files, node);
+        let provider = self.provider(on);
+        provider.start(node, &fingerprint)?;
+        let host_name = self.m.env.host_of(node);
+        let addr = self.m.env.listen_on(&host_name, node);
         let result = match self.port_of(node) {
             Some(port) => {
-                self.host_provider
-                    .wait_healthy(port, &self.want_report(node), Duration::from_secs(90))
+                provider
+                    .wait_healthy(
+                        &addr,
+                        port,
+                        &self.want_report(node),
+                        Duration::from_secs(90),
+                    )
                     .await
             }
             None => {
                 tokio::time::sleep(Duration::from_secs(3)).await;
-                if self
-                    .host_provider
+                if provider
                     .read(&self.m)
                     .await?
                     .nodes
@@ -670,12 +798,7 @@ impl Prepared {
                 }
             }
         };
-        result.map_err(|e| {
-            anyhow!(
-                "{e:#}\n--- {node} log\n{}",
-                self.host_provider.log_tail(node)
-            )
-        })
+        result.map_err(|e| anyhow!("{e:#}\n--- {node} log\n{}", provider.log_tail(node)))
     }
 
     /// Carries out `plan`'s steps in order. Each Stellar step is checked
@@ -686,7 +809,8 @@ impl Prepared {
         }
         let d = &self.desired;
         let admin = self.m.env.admin.as_str();
-        let mut keys_written = false;
+        // Each host's keys, once, before the first node it starts.
+        let mut keys_written: std::collections::BTreeSet<Option<String>> = Default::default();
         for step in &plan.steps {
             eprintln!("→ {}", step_line(step));
             match step {
@@ -761,20 +885,41 @@ impl Prepared {
                         );
                     }
                 }
-                Step::WipeHostData => self.host_provider.wipe(&self.all_nodes())?,
-                Step::InstallRelease { .. } => self.host_provider.install_release(&self.release)?,
-                Step::WriteFile { path } => {
-                    self.host_provider.write_file(path, &self.files[path])?
+                Step::WipeHostData { host } => {
+                    let nodes: Vec<String> = self
+                        .all_nodes()
+                        .into_iter()
+                        .filter(|n| self.desired.host_of(n) == host.as_deref())
+                        .collect();
+                    self.provider(host.as_deref()).wipe(&nodes)?
+                }
+                Step::InstallRelease { host, .. } => self
+                    .provider(host.as_deref())
+                    .install_release(&self.release)?,
+                Step::WriteFile { host, path } => {
+                    let files = self.files_of(host.as_deref());
+                    self.provider(host.as_deref())
+                        .write_file(path, &files[path])?
                 }
                 Step::Start { node } | Step::Restart { node } => {
-                    if !keys_written {
-                        self.write_keys()?;
-                        keys_written = true;
+                    let on = self.desired.host_of(node).map(String::from);
+                    if keys_written.insert(on.clone()) {
+                        self.write_keys(on.as_deref())?;
                     }
-                    self.host_provider.stop(node)?;
+                    self.provider_of(node).stop(node)?;
                     self.start(node).await?;
                 }
-                Step::Stop { node } => self.host_provider.stop(node)?,
+                Step::Stop { node, host } => match host {
+                    // Moved: stopped where it ran, and its key goes with it.
+                    Some(h) => {
+                        self.provider(Some(h)).stop(node)?;
+                        let on = (*h != self.desired.primary_host).then(|| h.clone());
+                        if keys_written.insert(on.clone()) {
+                            self.write_keys(on.as_deref())?;
+                        }
+                    }
+                    None => self.provider_of(node).stop(node)?,
+                },
                 Step::RotateSigners { .. } => {
                     self.cli.rotate_signers(admin, &d.settlement, &d.signers)?
                 }
@@ -792,13 +937,13 @@ impl Prepared {
         std::fs::create_dir_all(&dir)?;
         let mut out = String::new();
         for step in &plan.steps {
-            let Step::WriteFile { path } = step else {
+            let Step::WriteFile { host, path } = step else {
                 continue;
             };
-            let old = self.host_provider.read_file(path)?;
+            let old = self.provider(host.as_deref()).read_file(path)?;
             let (a, b) = (dir.join("host"), dir.join("file"));
             std::fs::write(&a, old.as_deref().unwrap_or(""))?;
-            std::fs::write(&b, &self.files[path])?;
+            std::fs::write(&b, &self.files_of(host.as_deref())[path])?;
             let d = std::process::Command::new("diff")
                 .args(["-u", "--label"])
                 .arg(if old.is_some() {
@@ -815,6 +960,12 @@ impl Prepared {
         let _ = std::fs::remove_dir_all(&dir);
         Ok(out)
     }
+}
+
+fn on(host: &Option<String>) -> String {
+    host.as_deref()
+        .map(|h| format!(" on {h}"))
+        .unwrap_or_default()
 }
 
 /// One step as `apply` prints it.
@@ -836,12 +987,16 @@ fn step_line(s: &Step) -> String {
             format!("deploy {name} {}", strkey(contract))
         }
         Step::DeploySettlement { contract } => format!("deploy settlement {}", strkey(contract)),
-        Step::WipeHostData => "wipe the host's lane data".into(),
-        Step::InstallRelease { to, .. } => format!("install release {to}"),
-        Step::WriteFile { path } => format!("write {path}"),
+        Step::WipeHostData { host } => format!(
+            "wipe {}'s lane data",
+            host.as_deref()
+                .map_or("the host".into(), |h| format!("host {h}"))
+        ),
+        Step::InstallRelease { host, to, .. } => format!("install release {to}{}", on(host)),
+        Step::WriteFile { host, path } => format!("write {path}{}", on(host)),
         Step::Start { node } => format!("start {node}"),
         Step::Restart { node } => format!("restart {node}"),
-        Step::Stop { node } => format!("stop {node}"),
+        Step::Stop { node, host } => format!("stop {node}{}", on(host)),
         Step::RotateSigners { to_epoch, .. } => format!("rotate signers to epoch {to_epoch}"),
     }
 }

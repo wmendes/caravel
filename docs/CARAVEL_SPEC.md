@@ -2217,7 +2217,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-19 | Tokens: issued assets and their contracts; a declared token as the settlement token (DEC-091) | C-18 | review |
 | C-20 | Contracts: any Wasm, constructor arguments, derived addresses, `prevent_destroy` (DEC-092) | C-19 | review |
 | C-21 | Local modules with inputs and outputs — **Gate G5** (DEC-093) | C-20 | review |
-| C-22 | Several hosts per deployment and node placement | C-21 | todo |
+| C-22 | Several hosts per deployment and node placement (DEC-094) | C-21 | review |
 | C-23 | Networking across hosts (private addresses) | C-22 | todo |
 | C-24 | Lane namespaces: several lanes on one host | C-23 | todo |
 | C-25 | The web app as a resource, configured from outputs — **Gate G6** | C-24 | todo |
@@ -2950,6 +2950,16 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - unit tests: resources joining, qualification, Wasm paths, deferred args, the second stage with own names, outputs, `for_each` instances, and every refusal;
   - a plan test of an issuer holding its own token;
   - on a local lane: one module file used twice (`for_each` btc and eth). Each instance's feeder was funded and issued its token, and each instance's contract (a settlement Wasm, args from the module's own names and the lane's hashes) was deployed by its feeder at the planned address. Then "No changes.", outputs through `module.<instance>`, and `--target 'module.oracle-eth.*'` | Repeated groups of resources (one oracle per market, one vault per asset) were copy-paste in the lane file | Remote module sources, and module outputs read elsewhere than `[outputs]` |
+| DEC-094 | **M0.6 (C-22).** Several hosts per deployment: `[env.<name>.hosts.<h>]`, each a `host` table as before, plus an optional `private_address` (an IP).
+- **Placement:** `[sequencer] host = "<h>"` names the sequencer's host, which also runs the relayer (it calls the sequencer's `/internal/*` on loopback). It may be left out when there is only one host. Each validator takes `host = "<h>"`, defaulting to the sequencer's. `host` and `hosts` together are refused. A single `host` is still one host, and its output is byte for byte what it was (lane #1's pins pass unchanged).
+- **The sequencer's host stays primary:** its resources keep their one-host addresses (`host`, `host.data`, `release`, `file.<path>`, `node.<name>`). Another host's are `host.<h>`, `host.<h>.data`, `host.<h>.release` and `host.<h>.file.<path>`. A host can't be named `data`, `release` or `file`, or contain a `.`.
+- **Each host gets only what it runs:** another host gets `lane.toml`, its validators' configs and unit, and, with a `public_url`, a Caddyfile serving their public API (`/v1/sign` closed). A validator's key goes only to its own host, and the env secrets (relayer, feeds) only to the sequencer's. When a validator moves or is rotated out, its key file is removed from the host it left.
+- **Reaching across hosts:** a node another host calls listens on its host's `private_address`; everything else stays on 127.0.0.1. Two `local` hosts are the same machine and use loopback. A validator on another host must be reachable both ways (it follows the sequencer, and the sequencer calls its `/v1/sign`), or the manifest says which `private_address` is missing. Until C-23 signs those calls (OQ-009), the private network is the only thing between `/v1/sign` and other machines on it, so a cross-host deployment on testnet should wait for C-23.
+- **Moves without a state file:** a host reports the nodes it runs. A node running on a host the file doesn't place it on is `node.<name>@<h>`, and the plan starts it on its new host before stopping it on the old one. A host removed from the file is no longer read: move its nodes off first.
+- **Local state:** another `local` host's root is `.caravel/<lane>/<env>@<h>`.
+- **Checked:**
+  - unit tests: parsing, placement, `reach`/`listen_on`, and every refusal; lane #1's lane file split across two hosts renders the right files for each; a plan golden for two hosts and for a moved validator; host-qualified steps, problems and targets;
+  - on a local lane with two `local` hosts (validator 3 on `b`): apply, "No changes.", checkpoints accepted, validator 3 moved to `a` and back (start, then stop on the old host, its key following it), and destroy, which froze the lane and stopped and wiped both hosts | One host was a single point of failure, and every validator's key sat next to the sequencer's | Validators operated by others (C-23), traffic over `public_url` without a private network (C-23), the relayer on its own host |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

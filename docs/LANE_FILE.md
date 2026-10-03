@@ -9,6 +9,7 @@ Decisions behind it: DEC-066 to DEC-068 (deployments), DEC-078 to DEC-082 (the l
 - [Two halves: genesis and deployments](#two-halves-genesis-and-deployments)
 - [Finding the file and the deployment](#finding-the-file-and-the-deployment)
 - [A deployment](#a-deployment)
+- [Several hosts](#several-hosts)
 - [Declared accounts](#declared-accounts)
 - [Declared tokens](#declared-tokens)
 - [Declared contracts](#declared-contracts)
@@ -90,7 +91,7 @@ provider = "local"                 # or "ssh"
 - `validator_polling = { sequencer_ms, stellar_secs }`.
 - `sequencer = { port, cors_origins, production }`.
 - `relayer = { account, feed_keys, feeds, intervals_ms }`. `feeds` are the template's feed modules; `feed_keys` maps an env var to an identity whose secret a feed reads.
-- `host = { provider, address, transport, project, zone, public_url, root }`:
+- `host = { provider, address, transport, project, zone, public_url, root }` (or `hosts`, [below](#several-hosts)):
   - `address` is `user@host` for ssh, or the VM name with `transport = "gcloud-iap"`;
   - `public_url` is where the lane's API is served, and the user commands use it.
 
@@ -105,6 +106,45 @@ provider = "local"                 # or "ssh"
 | `"usd"` | A token the deployment declares (`[env.<name>.tokens.usd]`), issued by the admin or a `G…` address |
 
 **What a change does:** a validator swap becomes a signer rotation, and a `[node]` change becomes a restart. Anything the settlement contract fixed at deploy is refused: the lane's rules, the engine, the admin, the token and the settlement params.
+
+## Several hosts
+
+A deployment can spread its nodes over several hosts. Declare each one under `hosts` instead of a single `host`, and say where each node runs:
+
+```toml
+[env.testnet.sequencer]
+host = "a"                         # the sequencer's host also runs the relayer
+
+[[env.testnet.validators]]
+name = "3"
+key = "acme-v3"
+host = "b"                         # default: the sequencer's host
+
+[env.testnet.hosts.a]
+provider = "ssh"
+address = "ops@a.example"
+public_url = "https://lane.example"
+private_address = "10.0.0.2"       # where the other hosts reach this one's nodes
+
+[env.testnet.hosts.b]
+provider = "ssh"
+address = "ops@b.example"
+public_url = "https://b.example"   # optional: validator 3's public API
+private_address = "10.0.0.3"
+```
+
+- **What each host gets:**
+  - The sequencer's host runs the sequencer, the relayer and the validators placed there.
+  - Every other host gets `lane.toml` and its validators' configs and unit. With a `public_url`, it also gets a Caddyfile serving their public API.
+  - A validator's key goes only to its own host.
+- **Reaching across hosts:**
+  - A node that another host calls listens on its host's `private_address`. Everything else stays on 127.0.0.1.
+  - A validator on another host must reach the sequencer, and the sequencer must reach it. If an address is missing, `caravel validate` says which one.
+  - Two `local` hosts are the same machine, so they need no address. Their state is under `.caravel/<lane>/<env>` and `.caravel/<lane>/<env>@<host>`.
+  - Until C-23 signs the sequencer's calls to `/v1/sign`, only the private network protects them. Keep cross-host deployments to networks you control.
+- **Addresses:** the sequencer's host keeps the one-host addresses (`release`, `file.<path>`). Another host's resources are `host.<h>.release`, `host.<h>.file.<path>` and `host.<h>.data`.
+- **Moving a node:** change its `host` and apply. The plan starts it on its new host, then stops it where it ran (`node.validator-3@a`), and its key leaves that host. Take a host out of the file only after moving its nodes off, because a host that isn't in the file isn't read.
+- **One host:** `host = { … }` is still one host. Nothing about it changes.
 
 ## Declared accounts
 

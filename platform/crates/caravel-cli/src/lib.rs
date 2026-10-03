@@ -974,8 +974,12 @@ fn dispatch(cli: Cli) -> Result<u8> {
             );
             let n =
                 caravel_deploy::lifecycle::node_name(node.as_deref().unwrap_or("sequencer"), &all)?;
-            let host =
-                caravel_deploy::deploy::host_provider(&m, &ctx.template_name()?, &ctx.state_root)?;
+            let host = caravel_deploy::deploy::node_host_provider(
+                &m,
+                &ctx.template_name()?,
+                &ctx.state_root,
+                &n,
+            )?;
             host.logs(&n, lines, follow)?;
             Ok(exit::OK)
         }

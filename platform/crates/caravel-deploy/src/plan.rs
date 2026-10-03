@@ -135,6 +135,30 @@ pub struct Desired {
     pub tokens: Vec<DeclaredToken>,
     /// Declared contracts, in name order.
     pub contracts: Vec<DeclaredContract>,
+    /// Hosts besides the sequencer's (C-22), in name order: the nodes each
+    /// runs, and its files and release. `host` is the sequencer's.
+    pub others: Vec<OtherHost>,
+    /// The sequencer's host's name (`default` with one `host`).
+    pub primary_host: String,
+}
+
+/// A host besides the sequencer's, as the lane file wants it.
+#[derive(Clone, Debug)]
+pub struct OtherHost {
+    pub name: String,
+    pub host: DesiredHost,
+    /// `validator-<name>` for each validator it runs.
+    pub nodes: Vec<String>,
+}
+
+impl Desired {
+    /// The host `node` runs on: `None` for the sequencer's.
+    pub fn host_of(&self, node: &str) -> Option<&str> {
+        self.others
+            .iter()
+            .find(|o| o.nodes.iter().any(|n| n == node))
+            .map(|o| o.name.as_str())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -199,6 +223,9 @@ pub struct Host {
     pub nodes: BTreeMap<String, NodeState>,
     /// The lane's stores exist on the host.
     pub has_data: bool,
+    /// What the deployment's other hosts have, by name (C-22; only on the
+    /// sequencer's host's `Host`).
+    pub others: BTreeMap<String, Host>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -286,12 +313,17 @@ pub enum Step {
         contract: Key,
     },
     /// Stop every node and remove its store: they belong to a contract that is gone.
-    WipeHostData,
+    /// `host`: another host than the sequencer's (C-22).
+    WipeHostData {
+        host: Option<String>,
+    },
     InstallRelease {
+        host: Option<String>,
         from: Option<String>,
         to: String,
     },
     WriteFile {
+        host: Option<String>,
         path: String,
     },
     Start {
@@ -300,8 +332,10 @@ pub enum Step {
     Restart {
         node: String,
     },
+    /// `host`: where it runs and no longer should (moved, C-22).
     Stop {
         node: String,
+        host: Option<String>,
     },
     /// `admin_rotate_signers`, a testnet-only admin power.
     RotateSigners {
@@ -341,11 +375,12 @@ pub enum Problem {
         epoch: u64,
     },
     HostNotReady {
+        on: Option<String>,
         missing: Vec<String>,
     },
-    /// A node runs something its files don't say.
     /// The release's node binary can't run on the host.
     WrongPlatform {
+        on: Option<String>,
         release: String,
         host: String,
     },
@@ -435,10 +470,20 @@ pub fn step_addr(s: &Step) -> String {
         }
         Step::DeploySettlement { .. } => "contract.settlement".into(),
         Step::RotateSigners { .. } => "signers.settlement".into(),
-        Step::WipeHostData => "host.data".into(),
-        Step::InstallRelease { .. } => "release".into(),
-        Step::WriteFile { path } => format!("file.{path}"),
-        Step::Start { node } | Step::Restart { node } | Step::Stop { node } => {
+        Step::WipeHostData { host: None } => "host.data".into(),
+        Step::WipeHostData { host: Some(h) } => format!("host.{h}.data"),
+        Step::InstallRelease { host: None, .. } => "release".into(),
+        Step::InstallRelease { host: Some(h), .. } => format!("host.{h}.release"),
+        Step::WriteFile { host: None, path } => format!("file.{path}"),
+        Step::WriteFile {
+            host: Some(h),
+            path,
+        } => format!("host.{h}.file.{path}"),
+        Step::Stop {
+            node,
+            host: Some(h),
+        } => format!("node.{node}@{h}"),
+        Step::Start { node } | Step::Restart { node } | Step::Stop { node, .. } => {
             format!("node.{node}")
         }
     }
@@ -454,6 +499,9 @@ pub fn problem_addr(p: &Problem) -> String {
         | Problem::SettlementMissing { .. } => "contract.settlement".into(),
         Problem::TokenMissing { .. } => "token.settlement".into(),
         Problem::SignersReused { .. } => "signers.settlement".into(),
+        Problem::HostNotReady { on: Some(h), .. } | Problem::WrongPlatform { on: Some(h), .. } => {
+            format!("host.{h}")
+        }
         Problem::HostNotReady { .. } | Problem::WrongPlatform { .. } => "host".into(),
         Problem::NodeMismatch { node, .. } => format!("node.{node}"),
         Problem::AccountMissing { who } | Problem::CannotMint { who, .. } => {
@@ -663,6 +711,7 @@ pub(crate) fn legacy_diff(d: &Desired, chain: &Chain, host: &Host) -> Plan {
     // --- Host --------------------------------------------------------------------
     if !host.missing.is_empty() {
         problems.push(Problem::HostNotReady {
+            on: None,
             missing: host.missing.clone(),
         });
     }
@@ -671,6 +720,7 @@ pub(crate) fn legacy_diff(d: &Desired, chain: &Chain, host: &Host) -> Plan {
     if let (Some(want), Some(have)) = (&d.host.platform, &host.platform) {
         if want != have && host.release.as_deref() != Some(d.host.release.as_str()) {
             problems.push(Problem::WrongPlatform {
+                on: None,
                 release: want.clone(),
                 host: have.clone(),
             });
@@ -682,11 +732,12 @@ pub(crate) fn legacy_diff(d: &Desired, chain: &Chain, host: &Host) -> Plan {
     let mut restart: BTreeSet<String> = BTreeSet::new();
     let wipe = fresh && host.has_data;
     if wipe {
-        steps.push(Step::WipeHostData);
+        steps.push(Step::WipeHostData { host: None });
         restart.extend(all.iter().cloned());
     }
     if host.release.as_deref() != Some(d.host.release.as_str()) {
         steps.push(Step::InstallRelease {
+            host: None,
             from: host.release.clone(),
             to: d.host.release.clone(),
         });
@@ -694,7 +745,10 @@ pub(crate) fn legacy_diff(d: &Desired, chain: &Chain, host: &Host) -> Plan {
     }
     for (path, hash) in &d.host.files {
         if host.files.get(path) != Some(hash) {
-            steps.push(Step::WriteFile { path: path.clone() });
+            steps.push(Step::WriteFile {
+                host: None,
+                path: path.clone(),
+            });
             restart.extend(nodes_of(path, &all));
         }
     }
@@ -747,7 +801,10 @@ pub(crate) fn legacy_diff(d: &Desired, chain: &Chain, host: &Host) -> Plan {
     start_or_restart("relayer", &mut steps, &mut problems);
     for (node, state) in &host.nodes {
         if state.running && !all.contains(node) {
-            steps.push(Step::Stop { node: node.clone() });
+            steps.push(Step::Stop {
+                node: node.clone(),
+                host: None,
+            });
         }
     }
     Plan {
@@ -899,6 +956,13 @@ impl Plan {
 /// Where a plan's address column starts, at most.
 const ADDR_COLUMN: usize = 42;
 
+/// ` (on <host>)` for another host than the sequencer's.
+fn on(host: &Option<String>) -> String {
+    host.as_deref()
+        .map(|h| format!(" (on {h})"))
+        .unwrap_or_default()
+}
+
 /// One step, as `plan` prints it.
 pub fn step_line(s: &Step) -> String {
     match s {
@@ -948,17 +1012,21 @@ pub fn step_line(s: &Step) -> String {
         Step::DeploySettlement { contract } => {
             format!("+ deploy    settlement {}", strkey(contract))
         }
-        Step::WipeHostData => {
-            "- wipe      the host's lane data (it belongs to a contract that is gone)".into()
+        Step::WipeHostData { host } => format!(
+            "- wipe      {}'s lane data (it belongs to a contract that is gone)",
+            host.as_deref().map_or("the host".into(), |h| format!("host {h}"))
+        ),
+        Step::InstallRelease { host, from, to } => {
+            let on = on(host);
+            match from {
+                Some(f) => format!("~ release   {f} → {to}{on}"),
+                None => format!("+ release   {to}{on}"),
+            }
         }
-        Step::InstallRelease { from, to } => match from {
-            Some(f) => format!("~ release   {f} → {to}"),
-            None => format!("+ release   {to}"),
-        },
-        Step::WriteFile { path } => format!("~ write     {path}"),
+        Step::WriteFile { host, path } => format!("~ write     {path}{}", on(host)),
         Step::Start { node } => format!("+ start     {node}"),
         Step::Restart { node } => format!("~ restart   {node}"),
-        Step::Stop { node } => format!("- stop      {node}"),
+        Step::Stop { node, host } => format!("- stop      {node}{}", on(host)),
         Step::RotateSigners {
             from_epoch,
             to_epoch,
@@ -1000,11 +1068,14 @@ pub fn problem_line(p: &Problem) -> String {
         Problem::SignersReused { epoch } => format!(
             "! this signer set was installed at epoch {epoch}; a set can be installed only once, so change a key"
         ),
-        Problem::HostNotReady { missing } => {
-            format!("! the host lacks: {}", missing.join(", "))
-        }
-        Problem::WrongPlatform { release, host } => format!(
-            "! the release's node binary is built for {release}, and the host is {host}: install the CI release (--release-dir) or build on the host's platform"
+        Problem::HostNotReady { on, missing } => format!(
+            "! {} lacks: {}",
+            on.as_deref().map_or("the host".into(), |h| format!("host {h}")),
+            missing.join(", ")
+        ),
+        Problem::WrongPlatform { on, release, host } => format!(
+            "! the release's node binary is built for {release}, and {} is {host}: install the CI release (--release-dir) or build on the host's platform",
+            on.as_deref().map_or("the host".into(), |h| format!("host {h}"))
         ),
         Problem::NodeMismatch { node, field } => format!(
             "! {node} reports another {field} than its files give"
