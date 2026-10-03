@@ -5,12 +5,12 @@ Lane demo-pay-0 · env local · network local
 
 + fund      admin GCQK…AGP5 (friendbot)     account.admin
 + fund      relayer GCQ2…DJX7 (friendbot)   account.relayer
++ fund      treasury GDU6…THSF (friendbot)  account.treasury
 + create    token contract CADF…T54G (the Stellar Asset Contract of USDC:GCQK…AGP5)  token.settlement
++ create    token contract CBAE…6MBL (the Stellar Asset Contract of EUR:GDU6…THSF)  token.eur
 + fund      alice GDQ6…CZSQ (friendbot)     account.alice
-+ trust     alice USDC:GCQK…AGP5            account.alice
-+ mint      100 USDC to alice (by its issuer, demo-admin)  account.alice
-+ fund      bob GDRO…FJ2X (friendbot)       account.bob
-+ trust     bob USDC:GCQK…AGP5              account.bob
++ trust     alice EUR:GDU6…THSF             account.alice
++ mint      2 EUR to alice (by its issuer, demo-treasury)  account.alice
 + upload    settlement Wasm fb68ee32…       wasm.settlement
 + deploy    settlement CC3UKZIZZ2LOLG6ZXQ3UNAEAP5JSCTWSSU4X33RU3VIAJMYUDZCSC6D4  contract.settlement
 + release   0a1b2c3d                        release

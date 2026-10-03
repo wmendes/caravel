@@ -67,9 +67,20 @@ fn contract_data(e: &Option<Entry>) -> Option<&ScVal> {
     }
 }
 
-/// The declared accounts (C-18): which exist, and their trustlines with
-/// balances, in one batched read.
+/// The declared tokens (C-19) and accounts (C-18): which contracts and
+/// accounts exist, and the accounts' trustlines with balances, in batched
+/// reads.
 async fn read_declared(rpc: &Rpc, d: &Desired, chain: &mut Chain) -> Result<()> {
+    // Declared tokens' contracts first.
+    if !d.tokens.is_empty() {
+        let keys: Vec<_> = d.tokens.iter().map(|t| instance_key(&t.contract)).collect();
+        let (entries, _) = rpc.ledger_entries(&keys).await?;
+        for (t, e) in d.tokens.iter().zip(entries) {
+            if e.is_some() {
+                chain.tokens.insert(t.contract);
+            }
+        }
+    }
     let mut keys = Vec::new();
     let mut what: Vec<(Key, Option<(String, Key)>)> = Vec::new();
     for a in &d.accounts {

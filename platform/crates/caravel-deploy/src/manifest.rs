@@ -269,6 +269,19 @@ impl AccountSpec {
     }
 }
 
+/// A declared token, `[env.<name>.tokens.<n>]` (M0.6, C-19): a Stellar
+/// asset and its Stellar Asset Contract, which `apply` deploys when the
+/// network has none.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TokenSpec {
+    /// The asset code, 1–12 letters or digits.
+    pub code: String,
+    /// Who issues it: `"admin"`, a declared account's name, or a `G…`
+    /// address (then nothing in the file can mint it).
+    pub issuer: String,
+}
+
 /// One `[env.<name>]` table.
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -306,6 +319,9 @@ pub struct EnvSpec {
     /// Declared accounts, by name (`account.<name>`).
     #[serde(default)]
     pub accounts: BTreeMap<String, AccountSpec>,
+    /// Declared tokens, by name (`token.<name>`).
+    #[serde(default)]
+    pub tokens: BTreeMap<String, TokenSpec>,
 }
 
 /// A lane file and one of its deployments.
@@ -502,6 +518,8 @@ impl Manifest {
                 problems.into_iter().map(at).collect::<Vec<_>>().join("\n")
             );
         }
+        let mut spec = spec;
+        spec.desugar_token();
         // The deployment's [node] over the lane file's: not consensus.
         let lane = match &spec.node {
             None => lane,
@@ -720,6 +738,25 @@ fn secrets_in(table: &toml::Table, path: &str) -> Vec<String> {
 }
 
 impl EnvSpec {
+    /// `token = "<declared>"` as the form it stands for: issued by the admin,
+    /// `{ local = CODE }` (`CODE:<admin>`, on any network); by a `G…`
+    /// address, `{ asset = "CODE:G…" }`. Runs after [`EnvSpec::check`].
+    pub fn desugar_token(&mut self) {
+        if let Token::Named(n) = &self.token {
+            if let Some(t) = self.tokens.get(n) {
+                self.token = if t.issuer == "admin" {
+                    Token::Local {
+                        local: t.code.clone(),
+                    }
+                } else {
+                    Token::Asset {
+                        asset: format!("{}:{}", t.code, t.issuer),
+                    }
+                };
+            }
+        }
+    }
+
     /// Every rule the table breaks, so one run lists them all.
     pub fn check(&self) -> Vec<String> {
         let mut p = Vec::new();
@@ -737,8 +774,16 @@ impl EnvSpec {
             p.extend(key_problem(&format!("relayer.feed_keys.{var}"), id));
         }
         match (&self.token, self.network) {
+            (Token::Named(n), _) if self.tokens.contains_key(n) => {
+                let issuer = &self.tokens[n].issuer;
+                if issuer != "admin" && !issuer.starts_with('G') {
+                    p.push(format!(
+                        "token = {n:?}: a settlement token declared here is issued by the admin or a G… address, not {issuer:?}"
+                    ));
+                }
+            }
             (Token::Named(n), _) if n != CIRCLE_USDC => p.push(format!(
-                "token = {n:?}: a known token is \"{CIRCLE_USDC}\"; otherwise use {{ asset = \"CODE:ISSUER\" }} or {{ contract = \"C…\" }}"
+                "token = {n:?}: a known token is \"{CIRCLE_USDC}\", or a token this deployment declares ([tokens.{n}]); otherwise use {{ asset = \"CODE:ISSUER\" }} or {{ contract = \"C…\" }}"
             )),
             (Token::Named(_), Network::Local) => p.push(format!(
                 "token = \"{CIRCLE_USDC}\" is on testnet; a local network uses {{ local = \"USDC\" }}"
@@ -770,6 +815,26 @@ impl EnvSpec {
         if self.validators.is_empty() {
             p.push("[[validators]]: a lane needs at least one validator".into());
         }
+        for (name, t) in &self.tokens {
+            let at = format!("tokens.{name}");
+            if !identity_ok(name) || name == "settlement" {
+                p.push(format!(
+                    "{at}: a token's name is letters, digits, '-', '_', '.', and not `settlement`"
+                ));
+            }
+            if !asset_code_ok(&t.code) {
+                p.push(format!("{at}.code = {:?}: 1–12 letters or digits", t.code));
+            }
+            let issuer_ok = t.issuer == "admin"
+                || self.accounts.contains_key(&t.issuer)
+                || stellar_strkey::ed25519::PublicKey::from_string(&t.issuer).is_ok();
+            if !issuer_ok {
+                p.push(format!(
+                    "{at}.issuer = {:?}: \"admin\", a declared account's name, or a G… address",
+                    t.issuer
+                ));
+            }
+        }
         for (name, a) in &self.accounts {
             let at = format!("accounts.{name}");
             if !identity_ok(name) {
@@ -789,16 +854,16 @@ impl EnvSpec {
                         "{at}.trustlines: the settlement token is a contract, not a Stellar asset, so there is no trustline to it"
                     ));
                 }
-                if t != "settlement" && parse_asset(t).is_none() {
+                if t != "settlement" && !self.tokens.contains_key(t) && parse_asset(t).is_none() {
                     p.push(format!(
-                        "{at}.trustlines: {t:?} is \"settlement\" or CODE:ISSUER (a G… issuer)"
+                        "{at}.trustlines: {t:?} is \"settlement\", a declared token's name, or CODE:ISSUER (a G… issuer)"
                     ));
                 }
             }
             for (token, amount) in &a.balances {
-                if token != "settlement" {
+                if token != "settlement" && !self.tokens.contains_key(token) {
                     p.push(format!(
-                        "{at}.balances.{token}: only the settlement token can be topped up (`settlement = \"100\"`)"
+                        "{at}.balances.{token}: \"settlement\" or a declared token's name"
                     ));
                 }
                 if caravel_node::plugin::parse_amount(amount, Some(7)).is_err() {
@@ -806,14 +871,14 @@ impl EnvSpec {
                         "{at}.balances.{token} = {amount:?}: an amount in token units, e.g. \"100\" or \"12.5\""
                     ));
                 }
-                if matches!(self.token, Token::Contract { .. }) {
+                if token == "settlement" && matches!(self.token, Token::Contract { .. }) {
                     p.push(format!(
                         "{at}.balances: the settlement token is a contract this tool can't read balances of; top it up by hand"
                     ));
                 }
-                if !a.trustlines.iter().any(|t| t == "settlement") {
+                if !a.trustlines.iter().any(|t| t == token) {
                     p.push(format!(
-                        "{at}.balances.{token}: add \"settlement\" to its trustlines, which a balance needs"
+                        "{at}.balances.{token}: add \"{token}\" to its trustlines, which a balance needs"
                     ));
                 }
             }

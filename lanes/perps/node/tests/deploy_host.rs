@@ -237,6 +237,7 @@ fn lane_1_plans_no_changes() {
     let chain = Chain {
         accounts: BTreeSet::from([d.admin, d.relayer]),
         trustlines: Default::default(),
+        tokens: Default::default(),
         token_exists: true,
         settlement_wasm_uploaded: true,
         settlement: Some(OnChain {

@@ -182,44 +182,102 @@ pub fn desired(
         Token::Contract { .. } => None,
         _ => a.token_asset.clone(),
     };
+    // Declared tokens: each issuer as a key, and the identity that mints
+    // when the lane file has it.
+    let passphrase = m.env.network.passphrase();
+    let mut declared_tokens = BTreeMap::new();
+    for (name, t) in &m.env.tokens {
+        let (issuer, minter) = if t.issuer == "admin" {
+            (keys.admin, Some(m.env.admin.clone()))
+        } else if let Some(a) = m.env.accounts.get(&t.issuer) {
+            (
+                *keys
+                    .accounts
+                    .get(&t.issuer)
+                    .ok_or_else(|| anyhow!("no key for account {}", t.issuer))?,
+                Some(a.identity_of(&t.issuer).to_string()),
+            )
+        } else {
+            (
+                stellar_strkey::ed25519::PublicKey::from_string(&t.issuer)
+                    .map_err(|_| anyhow!("tokens.{name}.issuer {:?}", t.issuer))?
+                    .0,
+                None,
+            )
+        };
+        declared_tokens.insert(
+            name.clone(),
+            crate::plan::DeclaredToken {
+                name: name.clone(),
+                code: t.code.clone(),
+                issuer,
+                minter,
+                contract: asset_contract_id(passphrase, &t.code, &issuer),
+            },
+        );
+    }
+    // The settlement token as a holding's source: minted by the admin when
+    // it issues it.
+    let settlement_minter = settlement_asset
+        .as_ref()
+        .filter(|(_, issuer)| *issuer == keys.admin)
+        .map(|_| m.env.admin.clone());
     let mut accounts = Vec::new();
     for (name, spec) in &m.env.accounts {
         let key = *keys
             .accounts
             .get(name)
             .ok_or_else(|| anyhow!("no key for account {name}"))?;
+        let asset_of = |t: &str| -> Result<(String, Key)> {
+            if t == "settlement" {
+                settlement_asset.clone().ok_or_else(|| {
+                    anyhow!("accounts.{name}: the settlement token is no Stellar asset to trust")
+                })
+            } else if let Some(d) = declared_tokens.get(t) {
+                Ok((d.code.clone(), d.issuer))
+            } else {
+                crate::manifest::parse_asset(t)
+                    .ok_or_else(|| anyhow!("accounts.{name}.trustlines: {t:?}"))
+            }
+        };
         let trustlines = spec
             .trustlines
             .iter()
-            .map(|t| {
-                if t == "settlement" {
-                    settlement_asset.clone().ok_or_else(|| {
-                        anyhow!(
-                            "accounts.{name}: the settlement token is no Stellar asset to trust"
-                        )
-                    })
-                } else {
-                    crate::manifest::parse_asset(t)
-                        .ok_or_else(|| anyhow!("accounts.{name}.trustlines: {t:?}"))
-                }
-            })
+            .map(|t| asset_of(t))
             .collect::<Result<Vec<_>>>()?;
-        let balance = spec
-            .balances
-            .get("settlement")
-            .map(|v| caravel_node::plugin::parse_amount(v, Some(7)))
-            .transpose()
-            .with_context(|| format!("accounts.{name}.balances.settlement"))?;
+        let mut balances = Vec::new();
+        for (token, amount) in &spec.balances {
+            let want = caravel_node::plugin::parse_amount(amount, Some(7))
+                .with_context(|| format!("accounts.{name}.balances.{token}"))?;
+            let (code, issuer) = asset_of(token)?;
+            let (contract, minter) = match declared_tokens.get(token) {
+                Some(d) => (d.contract, d.minter.clone()),
+                None => (a.token, settlement_minter.clone()),
+            };
+            balances.push(crate::plan::Holding {
+                token: token.clone(),
+                code,
+                issuer,
+                contract,
+                minter,
+                want,
+            });
+        }
         accounts.push(crate::plan::DeclaredAccount {
             name: name.clone(),
             identity: spec.identity_of(name).to_string(),
             key,
             fund: spec.fund.unwrap_or(true),
             trustlines,
-            balance,
+            balances,
             depends_on: spec.depends_on.clone(),
         });
     }
+    // A declared token that is the settlement token is `token.settlement`.
+    let tokens: Vec<crate::plan::DeclaredToken> = declared_tokens
+        .into_values()
+        .filter(|t| t.contract != a.token)
+        .collect();
     Ok(Desired {
         lane_name: m.lane.lane.name.clone(),
         env: m.env_name.clone(),
@@ -261,6 +319,7 @@ pub fn desired(
         },
         vars: m.vars.clone(),
         accounts,
+        tokens,
     })
 }
 
@@ -580,7 +639,13 @@ impl Prepared {
                 Step::Trust { who, code, issuer } => {
                     self.cli.change_trust(self.identity_of(who), code, issuer)?
                 }
-                Step::Mint { key, amount, .. } => self.cli.mint(admin, &d.token, key, *amount)?,
+                Step::Mint {
+                    key,
+                    amount,
+                    contract,
+                    minter,
+                    ..
+                } => self.cli.mint(minter, contract, key, *amount)?,
                 Step::DeployToken { code, issuer, .. } => {
                     self.cli.deploy_asset(admin, code, issuer)?
                 }

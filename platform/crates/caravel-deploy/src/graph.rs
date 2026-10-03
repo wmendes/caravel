@@ -21,8 +21,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::plan::{
-    c_short, fingerprint, g_short, hex, short, target_epoch, Chain, Desired, Host, Options, Plan,
-    Problem, Step,
+    c_short, fingerprint, g_short, hex, short, target_epoch, Chain, Desired, Host, Key, Options,
+    Plan, Problem, Step,
 };
 
 /// What a resource is.
@@ -297,6 +297,11 @@ pub fn build(d: &Desired, host: &Host) -> Result<Graph, String> {
         .map(|a| g.add(format!("account.{}", a.name), Kind::Account))
         .collect();
     let token = g.add("token.settlement", Kind::Token);
+    let token_ids: Vec<usize> = d
+        .tokens
+        .iter()
+        .map(|t| g.add(format!("token.{}", t.name), Kind::Token))
+        .collect();
     let wasm = g.add("wasm.settlement", Kind::Wasm);
     let contract = g.add("contract.settlement", Kind::Contract);
     let signers = g.add("signers.settlement", Kind::Signers);
@@ -358,15 +363,51 @@ pub fn build(d: &Desired, host: &Host) -> Result<Graph, String> {
     }
     g.edge(signers, node["sequencer"], Order);
     g.edge(relayer_account, node["relayer"], Order);
-    // A declared account that trusts the settlement token, or is topped up
-    // with it, follows the token (and the admin, who mints).
-    for (a, &i) in d.accounts.iter().zip(&account_ids) {
-        let settlement = d.settlement_asset.as_ref();
-        if a.balance.is_some() || a.trustlines.iter().any(|t| Some(t) == settlement) {
-            g.edge(token, i, Order);
+    // The account that issues a token follows nothing of it; the admin
+    // deploys its contract, and an issuer the file declares comes first.
+    let account_of = |key: &Key| -> Option<usize> {
+        if *key == d.admin {
+            return Some(admin);
         }
-        if a.balance.is_some() {
-            g.edge(admin, i, Order);
+        d.accounts
+            .iter()
+            .zip(&account_ids)
+            .find(|(a, _)| a.key == *key)
+            .map(|(_, &i)| i)
+    };
+    for (t, &i) in d.tokens.iter().zip(&token_ids) {
+        g.edge(admin, i, Order);
+        if let Some(issuer) = account_of(&t.issuer) {
+            g.edge(issuer, i, Order);
+        }
+    }
+    // An account that trusts or holds a token follows it, and the account
+    // that mints it for a top-up.
+    let token_of = |asset: &(String, Key)| -> Option<usize> {
+        if d.settlement_asset.as_ref() == Some(asset) {
+            return Some(token);
+        }
+        d.tokens
+            .iter()
+            .zip(&token_ids)
+            .find(|(t, _)| (&t.code, &t.issuer) == (&asset.0, &asset.1))
+            .map(|(_, &i)| i)
+    };
+    for (a, &i) in d.accounts.iter().zip(&account_ids) {
+        for line in &a.trustlines {
+            if let Some(t) = token_of(line) {
+                g.edge(t, i, Order);
+            }
+        }
+        for h in &a.balances {
+            if let Some(t) = token_of(&(h.code.clone(), h.issuer)) {
+                g.edge(t, i, Order);
+            }
+            if h.minter.is_some() {
+                if let Some(m) = account_of(&h.issuer) {
+                    g.edge(m, i, Order);
+                }
+            }
         }
     }
     for a in &d.accounts {
@@ -392,9 +433,9 @@ impl Outcome {
 }
 
 /// A declared account against the chain: funded, trusting its assets, and
-/// holding at least its balance of the settlement token (minted by the
-/// admin, who must issue it). An issuer needs no trustline to its own asset.
-fn declared_outcome(d: &Desired, chain: &Chain, a: &crate::plan::DeclaredAccount) -> Outcome {
+/// holding at least its balances (minted by each token's issuer, when the
+/// lane file has it). An issuer needs no trustline to its own asset.
+fn declared_outcome(chain: &Chain, a: &crate::plan::DeclaredAccount) -> Outcome {
     let mut o = Outcome::default();
     if !chain.accounts.contains(&a.key) {
         if a.fund {
@@ -421,30 +462,33 @@ fn declared_outcome(d: &Desired, chain: &Chain, a: &crate::plan::DeclaredAccount
             });
         }
     }
-    if let (Some(want), Some((code, issuer))) = (a.balance, &d.settlement_asset) {
-        if *issuer != a.key {
-            let have = chain
-                .trustlines
-                .get(&(a.key, code.clone(), *issuer))
-                .copied()
-                .unwrap_or(0);
-            if have < want {
-                if *issuer == d.admin {
-                    o.steps.push(Step::Mint {
-                        who: a.name.clone(),
-                        key: a.key,
-                        code: code.clone(),
-                        amount: want - have,
-                    });
-                } else {
-                    o.problems.push(Problem::CannotMint {
-                        who: a.name.clone(),
-                        code: code.clone(),
-                        have,
-                        want,
-                    });
-                }
-            }
+    for h in &a.balances {
+        if h.issuer == a.key {
+            continue;
+        }
+        let have = chain
+            .trustlines
+            .get(&(a.key, h.code.clone(), h.issuer))
+            .copied()
+            .unwrap_or(0);
+        if have >= h.want {
+            continue;
+        }
+        match &h.minter {
+            Some(minter) => o.steps.push(Step::Mint {
+                who: a.name.clone(),
+                key: a.key,
+                code: h.code.clone(),
+                amount: h.want - have,
+                contract: h.contract,
+                minter: minter.clone(),
+            }),
+            None => o.problems.push(Problem::CannotMint {
+                who: a.name.clone(),
+                code: h.code.clone(),
+                have,
+                want: h.want,
+            }),
         }
     }
     o
@@ -600,13 +644,27 @@ pub fn diff(d: &Desired, chain: &Chain, host: &Host, opts: &Options) -> Result<P
             (Kind::Account, addr) => {
                 let name = addr.trim_start_matches("account.");
                 if let Some(a) = d.accounts.iter().find(|a| a.name == name) {
-                    o = declared_outcome(d, chain, a);
+                    o = declared_outcome(chain, a);
+                }
+            }
+            (Kind::Token, addr) if addr != "token.settlement" => {
+                let name = addr.trim_start_matches("token.");
+                if let Some(t) = d.tokens.iter().find(|t| t.name == name) {
+                    if !chain.tokens.contains(&t.contract) {
+                        o.steps.push(Step::DeployToken {
+                            name: t.name.clone(),
+                            contract: t.contract,
+                            code: t.code.clone(),
+                            issuer: t.issuer,
+                        });
+                    }
                 }
             }
             (Kind::Token, _) => {
                 if !chain.token_exists {
                     match &d.token_asset {
                         Some((code, issuer)) => o.steps.push(Step::DeployToken {
+                            name: "settlement".into(),
                             contract: d.token,
                             code: code.clone(),
                             issuer: *issuer,
@@ -865,6 +923,7 @@ mod tests {
             },
             vars: String::new(),
             accounts: vec![],
+            tokens: vec![],
         };
 
         let mut accounts = BTreeSet::new();
@@ -906,6 +965,7 @@ mod tests {
         let chain = Chain {
             accounts,
             trustlines: BTreeMap::new(),
+            tokens: BTreeSet::new(),
             token_exists: r.yes(),
             settlement_wasm_uploaded: r.yes(),
             settlement,
