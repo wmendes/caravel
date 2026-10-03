@@ -2266,6 +2266,7 @@ Branches are `h-0x-short-name`. Gates: H1 (H-01), H2 (H-04), H3 (H-06, the Groun
 | H-09 | **The Frankenstack starter kit.** A lane file and a one-page guide for each recipe, built on the Payments or contracts template:<br>- a lane with x402 or agent payments (many small payments, settled in USDC);<br>- a lane with a passkey or smart wallet (payments that feel instant);<br>- a lane with an oracle (trading, as Caravel Perps does).<br>Each recipe runs end to end with `caravel` alone | H-04 | todo |
 | H-10 | **The first outside run.** Someone outside the team goes from the README to a working lane and one recipe, with the human watching. Record the friction and fix what blocks. This is the first external run, and it happens before HackMeridian | H-09 | todo |
 | H-11 | **Mentor kit** — **Gate H5**. A 5-minute lightning talk, a FAQ (what it is, who it's for, the tradeoffs, what isn't built yet), a troubleshooting page, and how mentors help a team pick it up. Nothing goes to the organisers without the human | H-10 | todo |
+| H-12 | **The docs site** (DEC-100). Docusaurus in `docs-site/`, its own Vercel project. It has Getting started, Concepts, Guides and Reference. The lane-file reference moves there from `docs/LANE_FILE.md`, and the CLI reference is generated from `caravel help` and checked in CI. Local search, the landing page's palette, copy checks. Deploy only with the human's OK | H-01 | review |
 
 ---
 
@@ -3086,6 +3087,24 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - a tampered `SHA256SUMS` (refused);
   - an archive install with no `stellar` on PATH (the pinned CLI downloaded, checked and run).
   - The release workflow installs from its own archives on every platform. | Hackers should be one command from a working `caravel`, without Rust or a matching Stellar CLI | Bundling Node.js; a Homebrew formula; Windows |
+| DEC-100 | **M0.7 (H-12).** Caravel's documentation is a Docusaurus 3.10.2 site in `docs-site/`, its own Vercel project (`caravel-docs.vercel.app`).
+- **Why Docusaurus:** developers.stellar.org runs Docusaurus 3.10.1 (checked 2026-10-03), so Stellar developers find the navigation familiar. It is mature and versioned, with MDX and Algolia DocSearch when we want it. The human chose it, its own project, local search now, and all four sections in the first release.
+- **Layout:**
+  - `docs-site/docs/` holds the user's docs: Get started, Concepts, Guides, Reference, What's new.
+  - `docs/` stays the internal record: the spec, SOURCES, RESULTS, BENCHMARKS, SECURITY, and lane #1's RUNBOOK.
+  - The docs are the site (`routeBasePath: '/'`).
+  - `.md` pages are CommonMark (`markdown.format: 'detect'`), so a lane file's `${...}` and `<name>` stay text.
+- **One source per fact:**
+  - the lane-file reference moved from `docs/LANE_FILE.md`, which is now a pointer, into `reference/lane-file/` (ten pages, split by section);
+  - the CLI reference (39 pages, one per command and subcommand) is generated from `caravel help` by `scripts/gen-cli-docs.mjs`;
+  - CI fails when the pages differ from the binary (`scripts/check-cli-docs.sh`).
+- **Checks:**
+  - the build fails on any broken link or anchor;
+  - `scripts/check-docs.sh` holds the copy to spec §2 (no "trustless", "audited" only as "not audited", "mainnet" only as refused, no production-ready claims, the IaC tool never named, no em dashes);
+  - `check-versions.mjs` covers the docs site's exact pins and npm 10 lock;
+  - CI's apps job runs typecheck and build.
+- **Look:** a quieter palette than the landing page's, by the human's call: white and a near-black charcoal with neutral greys. The landing page's coral (links, the active page, cautions) and teal (notes, markers) appear only as accents, with self-hosted Schibsted Grotesk. Admonitions have even borders, never a side stripe. There is a docs share image, and an announcement bar that can't be dismissed: testnet software, not audited.
+- **Search:** `@easyops-cn/docusaurus-search-local` 0.55.3 (lunr, built at build time; its `open-ask-ai` peer is optional and not installed). Algolia DocSearch can replace it later. | The landing page's job became attracting visitors; the docs were team-facing Markdown with no navigation or search, and the lane-file reference lived in one 30 KB file | Versioned docs (after the first tagged release), DocSearch, a custom domain |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

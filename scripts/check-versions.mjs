@@ -92,8 +92,8 @@ for (const [file, re] of [
 }
 
 // --- npm: exact pins in package.json and package-lock.json ------------------
-// npm apps: the platform relayer, the perps feed module and web app (M0.5 layout).
-const apps = ["platform/relayer", "lanes/perps/relayer-feeds", "lanes/perps/web"].filter((d) => existsSync(join(root, d, "package.json")));
+// npm apps: the platform relayer, the perps feed module and web app (M0.5 layout), and the docs site (H-12).
+const apps = ["platform/relayer", "lanes/perps/relayer-feeds", "lanes/perps/web", "docs-site"].filter((d) => existsSync(join(root, d, "package.json")));
 for (const app of apps) {
   const pkgPath = join(app, "package.json");
   if (!existsSync(join(root, pkgPath))) continue;

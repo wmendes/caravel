@@ -1,0 +1,128 @@
+/*
+ * Caravel docs: neutral, readable surfaces in light and dark, with the
+ * landing page's coral (the lane: links, the active page, cautions) and teal
+ * (Stellar: notes, markers) only as accents. The type is the landing page's.
+ */
+@font-face { font-family: "Schibsted Grotesk"; font-style: normal; font-weight: 400 700; font-display: swap; src: url("/fonts/schibsted-grotesk-latin-ext.woff2") format("woff2"); unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF; }
+@font-face { font-family: "Schibsted Grotesk"; font-style: normal; font-weight: 400 700; font-display: swap; src: url("/fonts/schibsted-grotesk-latin.woff2") format("woff2"); unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
+
+:root {
+  /* Light: white paper, cool neutral greys; coral and teal only as accents. */
+  --cv-ground: #FFFFFF; --cv-raised: #F5F6F7; --cv-rule: #E2E5E8; --cv-ink: #15191C; --cv-muted: #5A646A;
+  --cv-lane: #B23328; --cv-lane-soft: #FBEDEA; --cv-harbor: #0E5E63; --cv-harbor-soft: #ECF4F4;
+
+  --ifm-color-primary: #B23328;
+  --ifm-color-primary-dark: #A02E24;
+  --ifm-color-primary-darker: #972B22;
+  --ifm-color-primary-darkest: #7C241C;
+  --ifm-color-primary-light: #C4382C;
+  --ifm-color-primary-lighter: #CA3E31;
+  --ifm-color-primary-lightest: #D55447;
+
+  --ifm-background-color: var(--cv-ground);
+  --ifm-background-surface-color: var(--cv-ground);
+  --ifm-navbar-background-color: var(--cv-ground);
+  --ifm-footer-background-color: var(--cv-raised);
+  --ifm-font-color-base: var(--cv-ink);
+  --ifm-heading-color: var(--cv-ink);
+  --ifm-color-emphasis-600: var(--cv-muted);
+  --ifm-menu-color: #3A4348;
+  --ifm-menu-color-background-active: var(--cv-raised);
+  --ifm-menu-color-background-hover: var(--cv-raised);
+  --ifm-toc-border-color: var(--cv-rule);
+  --ifm-hr-border-color: var(--cv-rule);
+  --ifm-table-border-color: var(--cv-rule);
+  --ifm-code-background: var(--cv-raised);
+
+  --ifm-font-family-base: "Schibsted Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --ifm-heading-font-family: var(--ifm-font-family-base);
+  --ifm-font-family-monospace: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --ifm-heading-font-weight: 700;
+  --ifm-font-size-base: 106.25%;
+  --ifm-line-height-base: 1.6;
+  --ifm-code-font-size: 88%;
+  --ifm-global-radius: 8px;
+  --ifm-code-border-radius: 5px;
+  --ifm-navbar-height: 64px;
+  --docusaurus-highlighted-code-line-bg: rgba(14, 94, 99, .08);
+}
+
+html[data-theme="dark"] {
+  /* Dark: near-black charcoal with a trace of the harbor hue; accents stay. */
+  --cv-ground: #101315; --cv-raised: #171B1E; --cv-rule: #262C30; --cv-ink: #E7E9EA; --cv-muted: #98A2A7;
+  --cv-lane: #FF8C7C; --cv-lane-soft: #2A1C1A; --cv-harbor: #45B5AE; --cv-harbor-soft: #15211F;
+
+  --ifm-color-primary: #FF8C7C;
+  --ifm-color-primary-dark: #FF715E;
+  --ifm-color-primary-darker: #FF634F;
+  --ifm-color-primary-darkest: #FF3A20;
+  --ifm-color-primary-light: #FFA79A;
+  --ifm-color-primary-lighter: #FFB5A9;
+  --ifm-color-primary-lightest: #FFDCD7;
+
+  --ifm-background-color: var(--cv-ground);
+  --ifm-background-surface-color: var(--cv-ground);
+  --ifm-navbar-background-color: var(--cv-ground);
+  --ifm-footer-background-color: #0C0E10;
+  --ifm-font-color-base: var(--cv-ink);
+  --ifm-heading-color: #F2F3F3;
+  --ifm-menu-color: #B9C1C5;
+  --ifm-menu-color-background-active: var(--cv-raised);
+  --ifm-menu-color-background-hover: var(--cv-raised);
+  --ifm-code-background: var(--cv-raised);
+  --docusaurus-highlighted-code-line-bg: rgba(69, 181, 174, .1);
+}
+
+h1, h2, h3 { letter-spacing: -.02em; text-wrap: balance; }
+.markdown h1:first-child { font-size: clamp(2rem, 4vw, 2.75rem); line-height: 1.08; }
+.markdown > p, .markdown li { text-wrap: pretty; }
+.markdown { --ifm-h2-font-size: 1.6rem; --ifm-h3-font-size: 1.2rem; }
+
+/* The navbar sits on the page's ground, with a rule under it. */
+.navbar { box-shadow: none; border-bottom: 1px solid var(--cv-rule); background: var(--cv-ground); }
+.navbar__link { font-weight: 700; }
+
+/* The announcement: quiet, with a teal marker. */
+div[class*="announcementBar"] { background: var(--cv-raised); color: var(--cv-muted); font-weight: 400; font-size: .875rem; border-bottom: 1px solid var(--cv-rule); }
+div[class*="announcementBar"] div[class*="announcementBarContent"]::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--cv-harbor); margin-right: 10px; vertical-align: middle; }
+
+/* Code: the lane file's look. */
+.theme-code-block { border: 1px solid var(--cv-rule); }
+code { border: 0; }
+.markdown table { display: table; width: 100%; }
+.markdown table code { white-space: nowrap; }
+
+/* Admonitions: a faint tint, a neutral border; the title carries the accent (note = teal, caution = coral). */
+.alert--info, .alert--success, .alert--secondary { --ifm-alert-background-color: var(--cv-harbor-soft); --ifm-alert-border-color: var(--cv-rule); --ifm-alert-foreground-color: var(--cv-ink); }
+.alert--warning, .alert--caution, .alert--danger { --ifm-alert-background-color: var(--cv-lane-soft); --ifm-alert-border-color: var(--cv-rule); --ifm-alert-foreground-color: var(--cv-ink); }
+.alert--info [class*="admonitionHeading"], .alert--success [class*="admonitionHeading"] { color: var(--cv-harbor); }
+.alert--warning [class*="admonitionHeading"], .alert--caution [class*="admonitionHeading"], .alert--danger [class*="admonitionHeading"] { color: var(--cv-lane); }
+.alert--info svg, .alert--success svg { fill: var(--cv-harbor); }
+.alert--warning svg, .alert--caution svg, .alert--danger svg { fill: var(--cv-lane); }
+
+.menu__link--active:not(.menu__link--sublist) { font-weight: 700; color: var(--ifm-color-primary); }
+.menu__link { font-size: .9375rem; }
+.breadcrumbs__item--active .breadcrumbs__link { background: var(--cv-raised); color: var(--cv-ink); }
+.table-of-contents__link--active { color: var(--ifm-color-primary); }
+.markdown a { text-underline-offset: 2px; }
+.footer { border-top: 1px solid var(--cv-rule); }
+
+/* Admonitions: an even border, no side stripe. */
+.theme-admonition { border: 1px solid var(--ifm-alert-border-color); border-left-width: 1px; box-shadow: none; }
+
+/* Tables in the palette: a raised head, no zebra, rules between rows. */
+.markdown table { --ifm-table-head-background: var(--cv-raised); --ifm-table-stripe-background: transparent; --ifm-table-background: transparent; --ifm-table-border-color: var(--cv-rule); --ifm-table-cell-padding: .6rem .85rem; font-size: .9375rem; }
+.markdown table th { text-align: left; }
+.markdown table tr { background: transparent; }
+:not(pre) > code { background: var(--cv-raised); border: 1px solid var(--cv-rule); }
+html[data-theme="dark"] .menu, html[data-theme="dark"] .theme-doc-sidebar-container { background: var(--cv-ground); }
+
+/* Code blocks on the page's raised surface, not the editor theme's grey. */
+.prism-code { background-color: var(--cv-raised) !important; }
+
+/* The search box, visible on both grounds. */
+.navbar__search-input { background: var(--cv-raised) !important; border: 1px solid var(--cv-rule); color: var(--cv-ink); }
+.footer { background: var(--ifm-footer-background-color); color: var(--cv-muted); }
+.footer__title { color: var(--cv-ink); }
+.footer__link-item { color: var(--cv-muted); }
+.footer__link-item:hover { color: var(--ifm-color-primary); }
