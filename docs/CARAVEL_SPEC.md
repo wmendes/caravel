@@ -2211,7 +2211,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-13 | Lane transactions: `tx`, `withdraw`, `claim`, `force-withdraw`, `escape` (DEC-085) | C-12 | review |
 | C-14 | The e2e on the CLI only; README, landing quickstart, RUNBOOK, `docs/LANE_FILE.md` — **Gate G3** (DEC-086) | C-13 | review |
 | C-15 | The resource graph, with identical plans (goldens byte for byte) (DEC-087) | C-14 | review |
-| C-16 | Addresses in plans; `plan --json`; `graph`; `depends_on`, `--target`, `--replace` | C-15 | todo |
+| C-16 | Addresses in plans; `plan --json`; `graph`; `depends_on`, `--target`, `--replace` (DEC-088) | C-15 | review |
 | C-17 | Saved plans: `plan --out`, `apply <planfile>` refused when anything moved — **Gate G4** | C-16 | todo |
 | C-18 | Accounts: funding, trustlines, balances topped up | C-17 | todo |
 | C-19 | Tokens: issued assets and their contracts; a declared token as the settlement token | C-18 | todo |
@@ -2818,6 +2818,26 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - a property test compares the graph's plan with the old fixed-order `diff` (kept under `cfg(test)` until C-16) on 2,000 random states of the deployment, Stellar and the host per run, and mutating the code makes it fail;
   - lane #1's read-only plan is still "No changes.".
 - **Still no state file:** every resource is read back from the lane file, Stellar and the host. `Graph::dot` is there for `caravel graph` (C-16) | Accounts, tokens, contracts, modules and several hosts (C-16 to C-25) are new kinds of resources with their own edges, and a fixed step order can't take them | — |
+| DEC-088 | **M0.6 (C-16).** Addresses in plans, `caravel graph`, `--target` and `--replace`.
+- **Every step and problem names its resource.** A step or problem maps to its resource's address deterministically (`plan::step_addr`, `plan::problem_addr`), so `Plan` keeps its shape and filters like `start`'s can't drift from the addresses.
+  - `plan` prints each step's address in a column (it starts at most 42 characters in; a longer line just takes two spaces).
+  - The 10 goldens changed only by that column: stripping it gives back the old files byte for byte (checked).
+- **`plan --json` is `caravel-plan/1`.** It has `format`, `targets`, `replaced`, steps `{address, change, action, line}` and problems `{address, message}`; problems used to be strings.
+- **`caravel graph`** prints the deployment's graph as Graphviz DOT, with restart edges dashed, or `--json` (`resources`, `edges`).
+- **`--target ADDR`** (on `plan` and `apply`, repeatable) keeps the targets and everything upstream of them through edges of both kinds.
+  - Targeting the relayer includes its account, the contract and what it needs, the release, and the files it reads, but no validator.
+  - Targeting the sequencer includes every validator, because the rotation follows them.
+  - Patterns use `*` for any characters (`node.validator-*`, `*.settlement`). An address that names nothing gets a did-you-mean from the graph.
+  - The plan's header says `target: …`. After a targeted apply, the check that follows is targeted too.
+- **`--replace ADDR`** forces a change on a node (restart, or start), a file (written again, so its nodes restart) or the release (installed again, so every node restarts). Every other kind is refused with the reason:
+  - a settlement contract's address derives from the admin and the lane's name, so a new one is a new lane;
+  - the signer set changes through a rotation;
+  - accounts, the token, the Wasm, the host and its data each have their own reason.
+
+  The check after `apply --replace` doesn't replace again.
+- **`depends_on`:** the graph takes extra `Order` edges (`Graph::depends_on`), and a cycle is an error that names it. No lane-file table is a free-standing resource yet, so the lane-file syntax comes with declared accounts, tokens and contracts (C-18 to C-20).
+- **The old fixed-order diff** stays under `cfg(test)`: the property test still checks the graph's untargeted plans against it.
+- **Lane #1's plan** is still "No changes." (no lines, so no column) | Operators need to act on one part of a lane and to read plans as data; addresses are what `--target`, `--replace` and saved plans (C-17) refer to | `depends_on` in the lane file (C-18) |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

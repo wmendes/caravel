@@ -21,8 +21,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::plan::{
-    c_short, fingerprint, g_short, hex, short, target_epoch, Chain, Desired, Host, Plan, Problem,
-    Step,
+    c_short, fingerprint, g_short, hex, short, target_epoch, Chain, Desired, Host, Options, Plan,
+    Problem, Step,
 };
 
 /// What a resource is.
@@ -121,6 +121,61 @@ impl Graph {
         self.index.get(addr).copied()
     }
 
+    /// `of` runs after `on` (an `Order` edge), whatever their kinds' ranks
+    /// say. A cycle shows up in [`Graph::order`].
+    pub fn depends_on(&mut self, of: &str, on: &str) -> Result<(), String> {
+        let of_i = self.resolve_one(of)?;
+        let on_i = self.resolve_one(on)?;
+        self.edge(on_i, of_i, EdgeKind::Order);
+        Ok(())
+    }
+
+    fn resolve_one(&self, addr: &str) -> Result<usize, String> {
+        self.get(addr).ok_or_else(|| self.unknown(addr))
+    }
+
+    fn unknown(&self, addr: &str) -> String {
+        let hint =
+            caravel_lanefile::did_you_mean(addr, self.resources.iter().map(|r| r.addr.as_str()))
+                .map(|m| format!(": did you mean {m}?"))
+                .unwrap_or_else(|| ": `caravel graph` lists them".into());
+        format!("no resource {addr:?} in this deployment{hint}")
+    }
+
+    /// The resources `pattern` names: an address, or a pattern where `*`
+    /// stands for any characters (`node.*`, `node.validator-*`,
+    /// `*.settlement`).
+    pub fn resolve(&self, pattern: &str) -> Result<Vec<usize>, String> {
+        let found: Vec<usize> = if pattern.contains('*') {
+            self.resources
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| glob(pattern, &r.addr))
+                .map(|(i, _)| i)
+                .collect()
+        } else {
+            self.get(pattern).into_iter().collect()
+        };
+        if found.is_empty() {
+            return Err(self.unknown(pattern));
+        }
+        Ok(found)
+    }
+
+    /// `targets` and everything they depend on, through edges of both kinds.
+    pub fn upstream(&self, targets: &[usize]) -> BTreeSet<usize> {
+        let mut seen: BTreeSet<usize> = targets.iter().copied().collect();
+        let mut todo: Vec<usize> = targets.to_vec();
+        while let Some(i) = todo.pop() {
+            for e in self.edges.iter().filter(|e| e.to == i) {
+                if seen.insert(e.from) {
+                    todo.push(e.from);
+                }
+            }
+        }
+        seen
+    }
+
     /// Sources of the edges of `kind` into `to`.
     fn sources(&self, to: usize, kind: EdgeKind) -> impl Iterator<Item = usize> + '_ {
         self.edges
@@ -181,6 +236,23 @@ impl Graph {
         o.push_str("}\n");
         o
     }
+}
+
+/// Whether `text` matches `pattern`, where `*` is any run of characters.
+fn glob(pattern: &str, text: &str) -> bool {
+    let parts: Vec<&str> = pattern.split('*').collect();
+    let (first, last) = (parts[0], parts[parts.len() - 1]);
+    if !text.starts_with(first) || text.len() < first.len() + last.len() || !text.ends_with(last) {
+        return false;
+    }
+    let mut rest = &text[first.len()..text.len() - last.len()];
+    for part in &parts[1..parts.len() - 1] {
+        match rest.find(part) {
+            Some(at) => rest = &rest[at + part.len()..],
+            None => return false,
+        }
+    }
+    true
 }
 
 /// The nodes a changed file restarts.
@@ -378,11 +450,53 @@ fn contract_outcome(d: &Desired, chain: &Chain) -> Outcome {
     o
 }
 
+/// Why a resource can't be replaced, if it can't.
+fn unreplaceable(kind: Kind) -> Option<&'static str> {
+    match kind {
+        Kind::Node | Kind::File | Kind::Release => None,
+        Kind::Contract => Some(
+            "a settlement contract can't be replaced in place: its address derives from the admin and the lane's name, so a new one is a new lane (destroy this one, or give the lane a new name)",
+        ),
+        Kind::Account => Some("an account isn't replaced: its key is the lane file's identity"),
+        Kind::Token => Some("the settlement token is fixed when the contract is deployed"),
+        Kind::Wasm => Some("an uploaded Wasm is content-addressed: there is nothing to replace"),
+        Kind::Signers => Some("the signer set changes through the lane file's validators (a rotation)"),
+        Kind::Host | Kind::HostData => Some(
+            "the host's data is replaced with the contract (`caravel destroy --wipe`, then apply)",
+        ),
+        Kind::Orphan => Some("a node the lane file no longer names is stopped, not replaced"),
+    }
+}
+
 /// The plan for `d` against what the chain and the host have: every
-/// resource compared, the steps in the graph's order.
-pub fn diff(d: &Desired, chain: &Chain, host: &Host) -> Plan {
+/// resource compared, the steps in the graph's order. `opts` narrows it to
+/// targets and what they depend on, or forces replacements.
+pub fn diff(d: &Desired, chain: &Chain, host: &Host, opts: &Options) -> Result<Plan, String> {
     let g = build(d, host);
-    let order = g.order().expect("the built-in edges have no cycle");
+    let order = g.order().map_err(|cycle| {
+        format!(
+            "the deployment's resources depend on each other in a cycle: {}",
+            cycle.join(", ")
+        )
+    })?;
+    let mut replace = BTreeSet::new();
+    for pattern in &opts.replace {
+        for i in g.resolve(pattern)? {
+            if let Some(why) = unreplaceable(g.resources[i].kind) {
+                return Err(format!("{} can't be replaced: {why}", g.resources[i].addr));
+            }
+            replace.insert(i);
+        }
+    }
+    let scope: Option<BTreeSet<usize>> = if opts.target.is_empty() {
+        None
+    } else {
+        let mut targets = Vec::new();
+        for pattern in &opts.target {
+            targets.extend(g.resolve(pattern)?);
+        }
+        Some(g.upstream(&targets))
+    };
     let target = target_epoch(d, chain);
     let mut out: Vec<Outcome> = vec![Outcome::default(); g.resources.len()];
     for &i in &order {
@@ -465,7 +579,8 @@ pub fn diff(d: &Desired, chain: &Chain, host: &Host) -> Plan {
                 }
             }
             (Kind::Release, _) => {
-                if host.release.as_deref() != Some(d.host.release.as_str()) {
+                if host.release.as_deref() != Some(d.host.release.as_str()) || replace.contains(&i)
+                {
                     o.steps.push(Step::InstallRelease {
                         from: host.release.clone(),
                         to: d.host.release.clone(),
@@ -474,7 +589,7 @@ pub fn diff(d: &Desired, chain: &Chain, host: &Host) -> Plan {
             }
             (Kind::File, addr) => {
                 let path = addr.trim_start_matches("file.");
-                if host.files.get(path) != d.host.files.get(path) {
+                if host.files.get(path) != d.host.files.get(path) || replace.contains(&i) {
                     o.steps.push(Step::WriteFile { path: path.into() });
                 }
             }
@@ -503,7 +618,7 @@ pub fn diff(d: &Desired, chain: &Chain, host: &Host) -> Plan {
                     });
                 if !state.running {
                     o.steps.push(Step::Start { node: name.into() });
-                } else if restart || stale {
+                } else if restart || stale || replace.contains(&i) {
                     o.steps.push(Step::Restart { node: name.into() });
                 } else if let Some(r) = report.filter(|_| !immutable) {
                     let checks = [
@@ -531,13 +646,23 @@ pub fn diff(d: &Desired, chain: &Chain, host: &Host) -> Plan {
         }
         out[i] = o;
     }
-    let steps = order.iter().flat_map(|&i| out[i].steps.clone()).collect();
-    let problems = out.iter().flat_map(|o| o.problems.clone()).collect();
-    Plan {
+    let planned = |i: &usize| scope.as_ref().is_none_or(|s| s.contains(i));
+    let steps = order
+        .iter()
+        .filter(|i| planned(i))
+        .flat_map(|&i| out[i].steps.clone())
+        .collect();
+    let problems = (0..out.len())
+        .filter(planned)
+        .flat_map(|i| out[i].problems.clone())
+        .collect();
+    Ok(Plan {
         target_epoch: target,
         steps,
         problems,
-    }
+        targets: opts.target.clone(),
+        replaced: opts.replace.clone(),
+    })
 }
 
 #[cfg(test)]
@@ -775,7 +900,7 @@ mod tests {
         #[test]
         fn the_graph_plans_what_the_fixed_order_did(bytes in prop::collection::vec(any::<u8>(), 96)) {
             let (d, chain, host) = scenario(&bytes);
-            prop_assert_eq!(diff(&d, &chain, &host), legacy_diff(&d, &chain, &host));
+            prop_assert_eq!(diff(&d, &chain, &host, &Options::default()).unwrap(), legacy_diff(&d, &chain, &host));
         }
     }
 
@@ -812,6 +937,39 @@ mod tests {
         assert!(g
             .dot()
             .contains("\"file.sequencer.toml\" -> \"node.sequencer\" [style=dashed"));
+    }
+
+    #[test]
+    fn globs() {
+        assert!(glob("node.*", "node.validator-1"));
+        assert!(glob("node.validator-*", "node.validator-12"));
+        assert!(glob("*.settlement", "contract.settlement"));
+        assert!(glob("file.*.toml", "file.validator-2.toml"));
+        assert!(!glob("file.*.toml", "file.relayer.json"));
+        assert!(!glob("node.*", "nodes.x"));
+        assert!(glob("a*a", "aa") && !glob("a*a", "a"));
+    }
+
+    #[test]
+    fn depends_on_reorders_and_a_cycle_is_named() {
+        let (d, _, mut host) = scenario(&[0; 96]);
+        host.nodes.clear();
+        let mut g = build(&d, &host);
+        let at = |g: &Graph, a: &str| {
+            let order = g.order().unwrap();
+            order
+                .iter()
+                .position(|&i| g.resources[i].addr == a)
+                .unwrap()
+        };
+        assert!(at(&g, "node.sequencer") < at(&g, "node.relayer"));
+        g.depends_on("node.sequencer", "node.relayer").unwrap();
+        assert!(at(&g, "node.relayer") < at(&g, "node.sequencer"));
+        // The contract needs the admin; making the admin need a node closes a loop.
+        g.depends_on("account.admin", "node.relayer").unwrap();
+        let stuck = g.order().unwrap_err();
+        assert!(stuck.contains(&"account.admin".to_string()), "{stuck:?}");
+        assert!(g.depends_on("node.nope", "node.relayer").is_err());
     }
 
     #[test]

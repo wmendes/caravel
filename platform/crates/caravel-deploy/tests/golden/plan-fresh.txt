@@ -3,22 +3,22 @@ Lane demo-pay-0 · env local · network local
   settlement CC3UKZIZZ2LOLG6ZXQ3UNAEAP5JSCTWSSU4X33RU3VIAJMYUDZCSC6D4 (derived from the admin and the lane), admin GCQK…AGP5, token CADF…T54G
   signers: 2 of 3 at epoch 1
 
-+ fund      admin GCQK…AGP5 (friendbot)
-+ fund      relayer GCQ2…DJX7 (friendbot)
-+ create    token contract CADF…T54G (the Stellar Asset Contract of USDC:GCQK…AGP5)
-+ upload    settlement Wasm fb68ee32…
-+ deploy    settlement CC3UKZIZZ2LOLG6ZXQ3UNAEAP5JSCTWSSU4X33RU3VIAJMYUDZCSC6D4
-+ release   0a1b2c3d
-~ write     lane.toml
-~ write     relayer.json
-~ write     sequencer.toml
-~ write     validator-1.toml
-~ write     validator-2.toml
-~ write     validator-3.toml
-+ start     validator-1
-+ start     validator-2
-+ start     validator-3
-+ start     sequencer
-+ start     relayer
++ fund      admin GCQK…AGP5 (friendbot)     account.admin
++ fund      relayer GCQ2…DJX7 (friendbot)   account.relayer
++ create    token contract CADF…T54G (the Stellar Asset Contract of USDC:GCQK…AGP5)  token.settlement
++ upload    settlement Wasm fb68ee32…       wasm.settlement
++ deploy    settlement CC3UKZIZZ2LOLG6ZXQ3UNAEAP5JSCTWSSU4X33RU3VIAJMYUDZCSC6D4  contract.settlement
++ release   0a1b2c3d                        release
+~ write     lane.toml                       file.lane.toml
+~ write     relayer.json                    file.relayer.json
+~ write     sequencer.toml                  file.sequencer.toml
+~ write     validator-1.toml                file.validator-1.toml
+~ write     validator-2.toml                file.validator-2.toml
+~ write     validator-3.toml                file.validator-3.toml
++ start     validator-1                     node.validator-1
++ start     validator-2                     node.validator-2
++ start     validator-3                     node.validator-3
++ start     sequencer                       node.sequencer
++ start     relayer                         node.relayer
 
 17 step(s), 0 problem(s).

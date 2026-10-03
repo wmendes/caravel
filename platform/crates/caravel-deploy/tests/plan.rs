@@ -8,8 +8,8 @@ use std::path::PathBuf;
 use caravel_deploy::address::{asset_contract_id, contract_id, settlement_salt};
 use caravel_deploy::manifest::{Network, Provider};
 use caravel_deploy::plan::{
-    diff, target_epoch, Chain, Desired, DesiredHost, Host, NodeReport, NodeState, OnChain, Params,
-    Plan, Problem, SignerSet, Step,
+    diff, diff_with, step_addr, target_epoch, Chain, Desired, DesiredHost, Host, NodeReport,
+    NodeState, OnChain, Options, Params, Plan, Problem, SignerSet, Step,
 };
 
 fn key(n: u8) -> [u8; 32] {
@@ -525,4 +525,181 @@ fn vars_in_the_header() {
         text.contains("  vars: validators = [\"1\", \"2\"], token = (sensitive)\n"),
         "{text}"
     );
+}
+
+fn lines(plan: &Plan) -> Vec<String> {
+    plan.steps.iter().map(step_addr).collect()
+}
+
+fn target(t: &[&str]) -> Options {
+    Options {
+        target: t.iter().map(|s| s.to_string()).collect(),
+        replace: vec![],
+    }
+}
+
+fn replace(r: &[&str]) -> Options {
+    Options {
+        target: vec![],
+        replace: r.iter().map(|s| s.to_string()).collect(),
+    }
+}
+
+#[test]
+fn a_target_plans_it_and_what_it_depends_on() {
+    let d = desired();
+    let (chain, host) = (Chain::default(), Host::default());
+    // The relayer needs its account, the contract (and what that needs), the
+    // release and the files it reads; not the validators or the sequencer.
+    let plan = diff_with(&d, &chain, &host, &target(&["node.relayer"])).unwrap();
+    assert_eq!(
+        lines(&plan),
+        [
+            "account.admin",
+            "account.relayer",
+            "token.settlement",
+            "wasm.settlement",
+            "contract.settlement",
+            "release",
+            "file.lane.toml",
+            "file.relayer.json",
+            "node.relayer",
+        ]
+    );
+    assert!(plan
+        .render(&d)
+        .contains("  target: node.relayer (and what it depends on)\n"));
+    // The sequencer follows the rotation, which follows every validator.
+    let plan = diff_with(&d, &chain, &host, &target(&["node.sequencer"])).unwrap();
+    for n in ["node.validator-1", "node.validator-2", "node.validator-3"] {
+        assert!(lines(&plan).iter().any(|l| l == n), "{n}");
+    }
+    assert!(!lines(&plan).iter().any(|l| l == "node.relayer"));
+    // `kind.*`: every file, and what writing them needs.
+    let plan = diff_with(&d, &chain, &host, &target(&["file.*"])).unwrap();
+    assert_eq!(
+        lines(&plan)
+            .iter()
+            .filter(|l| l.starts_with("file."))
+            .count(),
+        d.host.files.len()
+    );
+    assert!(!lines(&plan).iter().any(|l| l.starts_with("node.")));
+}
+
+#[test]
+fn a_target_leaves_out_what_it_does_not_need() {
+    // Validator 3 replaced by 4: the new validator alone, without the
+    // rotation (which follows it) or the old validator's stop.
+    let old = desired();
+    let mut d = desired();
+    d.signers = signers(&[0x61, 0x62, 0x64]);
+    d.validators = vec![
+        "validator-1".into(),
+        "validator-2".into(),
+        "validator-4".into(),
+    ];
+    d.host.files = files(2, &["1", "2", "4"]);
+    let mut chain = deployed(&old);
+    if let Some(oc) = chain.settlement.as_mut() {
+        oc.desired_set_epoch = None;
+    }
+    let plan = diff_with(&d, &chain, &running(&old), &target(&["node.validator-4"])).unwrap();
+    assert_eq!(lines(&plan), ["file.validator-4.toml", "node.validator-4"]);
+}
+
+#[test]
+fn an_unknown_target_says_what_it_meant() {
+    let d = desired();
+    let err = diff_with(
+        &d,
+        &Chain::default(),
+        &Host::default(),
+        &target(&["node.validator-9"]),
+    )
+    .unwrap_err();
+    assert!(err.contains("no resource \"node.validator-9\""), "{err}");
+    assert!(err.contains("did you mean node.validator-"), "{err}");
+    let err = diff_with(
+        &d,
+        &Chain::default(),
+        &Host::default(),
+        &target(&["nodes.*"]),
+    )
+    .unwrap_err();
+    assert!(err.contains("caravel graph"), "{err}");
+}
+
+#[test]
+fn a_replacement_is_planned_even_when_nothing_differs() {
+    let d = desired();
+    let (chain, host) = (deployed(&d), running(&d));
+    assert!(diff(&d, &chain, &host).is_empty());
+    let one = |r: &[&str]| diff_with(&d, &chain, &host, &replace(r)).unwrap();
+    assert_eq!(
+        one(&["node.sequencer"]).steps,
+        [Step::Restart {
+            node: "sequencer".into()
+        }]
+    );
+    // A file is written again, and the node that reads it restarts.
+    assert_eq!(
+        one(&["file.relayer.json"]).steps,
+        [
+            Step::WriteFile {
+                path: "relayer.json".into()
+            },
+            Step::Restart {
+                node: "relayer".into()
+            }
+        ]
+    );
+    // The release again restarts every node.
+    let plan = one(&["release"]);
+    assert!(matches!(plan.steps[0], Step::InstallRelease { .. }));
+    assert_eq!(plan.steps.len(), 1 + 5);
+    assert!(plan.render(&d).contains("  replace: release\n"));
+    // Patterns: every validator, every node.
+    assert_eq!(one(&["node.validator-*"]).steps.len(), 3);
+    assert_eq!(one(&["node.*"]).steps.len(), 5);
+}
+
+#[test]
+fn what_cannot_be_replaced_says_why() {
+    let d = desired();
+    let (chain, host) = (deployed(&d), running(&d));
+    for (addr, why) in [
+        (
+            "contract.settlement",
+            "its address derives from the admin and the lane's name",
+        ),
+        ("account.admin", "its key is the lane file's identity"),
+        ("signers.settlement", "a rotation"),
+    ] {
+        let err = diff_with(&d, &chain, &host, &replace(&[addr])).unwrap_err();
+        assert!(err.contains(&format!("{addr} can't be replaced")), "{err}");
+        assert!(err.contains(why), "{err}");
+    }
+}
+
+#[test]
+fn the_plan_for_scripts_names_each_resource() {
+    let d = desired();
+    let chain = Chain {
+        token_exists: false,
+        ..Chain::default()
+    };
+    let mut d2 = d.clone();
+    d2.token_asset = None;
+    let v = diff(&d2, &chain, &Host::default()).to_json(&d2);
+    assert_eq!(v["format"], "caravel-plan/1");
+    assert_eq!(v["steps"][0]["address"], "account.admin");
+    assert_eq!(v["steps"][0]["change"], "+");
+    assert_eq!(v["steps"][0]["action"], "fund");
+    assert_eq!(v["problems"][0]["address"], "token.settlement");
+    assert!(v["problems"][0]["message"]
+        .as_str()
+        .unwrap()
+        .starts_with("the network has no token contract"));
+    let _ = d;
 }
