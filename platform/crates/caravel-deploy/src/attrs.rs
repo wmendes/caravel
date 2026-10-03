@@ -41,10 +41,11 @@ pub const LATER: [&str; 8] = [
 
 /// Where deferred values may be used: they are filled in before the files
 /// are written.
-pub const DEFERRED_OK: [&str; 1] = ["relayer.feeds"];
+pub const DEFERRED_OK: [&str; 2] = ["relayer.feeds", "web.config"];
 
-/// Whether a deferred value may be at `path`: under `relayer.feeds`, or a
-/// contract's `args` (filled in before it is deployed, C-20).
+/// Whether a deferred value may be at `path`: under `relayer.feeds` or
+/// `web.config` (C-25), or a contract's `args` (filled in before it is
+/// deployed, C-20).
 pub fn deferred_ok(path: &str) -> bool {
     DEFERRED_OK.iter().any(|ok| path.starts_with(ok))
         || (path.starts_with("contracts.") && path.contains(".args"))

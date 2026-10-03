@@ -22,6 +22,7 @@ Decisions behind it: DEC-066 to DEC-068 (deployments), DEC-078 to DEC-082 (the l
 - [for_each](#for_each)
 - [Attributes: values known after reading Stellar](#attributes-values-known-after-reading-stellar)
 - [Outputs](#outputs)
+- [The web app's config](#the-web-apps-config)
 - [Checking what a file means](#checking-what-a-file-means)
 - [Resources, targets and replacements](#resources-targets-and-replacements)
 - [A worked example](#a-worked-example)
@@ -438,7 +439,7 @@ Some values exist only once the keys, the chain and the release are read. Expres
 | `signers.settlement` | `threshold`, `count` |
 | `release.commit` | The release the hosts run |
 
-These are read in a second pass, after `lane.name`, `lane.template`, `lane.id` and `lane.engine_wasm_hash`, which are known from the start. Inside a deployment they may only be used under `relayer.feeds` (a feed that needs a contract id, say) and in a contract's `args`. Anywhere else an error points at the line and says why. Outputs can use them all.
+These are read in a second pass, after `lane.name`, `lane.template`, `lane.id` and `lane.engine_wasm_hash`, which are known from the start. Inside a deployment they may only be used under `relayer.feeds` (a feed that needs a contract id, say), in a contract's `args` and in `web.config`. Anywhere else an error points at the line and says why. Outputs can use them all.
 
 ## Outputs
 
@@ -454,6 +455,26 @@ explorer = "https://stellar.expert/explorer/testnet/contract/${contract.settleme
 ```
 
 `caravel output` lists them with the built-in ones (`settlement`, `token`, `api`, `lane_id`, …), and `caravel output NAME` prints one. `status --json` has them under `outputs`. An output computed from a sensitive var is sensitive: masked in listings, printed only when asked for by name.
+
+## The web app's config
+
+A template's web app can read its deployment from the lane file instead of build-time variables:
+
+```toml
+[env.testnet.web]
+# host = "a"                       # default: the sequencer's host
+
+[env.testnet.web.config]
+sequencerUrl = "${node.sequencer.url}"
+settlementContract = "${contract.settlement.address}"
+networkPassphrase = "${network.passphrase}"
+validatorUrls = ["${node.validator-1.url}", "${node.validator-2.url}"]
+```
+
+- `config` is rendered as `<root>/config/web.json` on the web host. That host's Caddy serves it at `/config.json`, and nothing else from `config/`.
+- The perps web app fetches `/config.json` at boot and lays its known keys over its defaults. Without the file, the defaults are the `VITE_*` variables, else the testnet lane.
+- A change rewrites the file and restarts nothing.
+- On an ssh host, the web host needs a `public_url`. On a `local` host the file is written but not served; the dev server still uses `VITE_*`.
 
 ## Checking what a file means
 

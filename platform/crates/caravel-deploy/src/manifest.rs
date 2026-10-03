@@ -452,6 +452,23 @@ pub struct EnvSpec {
     /// shorthand for one host named `default`).
     #[serde(default)]
     pub hosts: BTreeMap<String, HostSpec>,
+    /// The web app's deployment config (C-25).
+    #[serde(default)]
+    pub web: Option<WebSpec>,
+}
+
+/// `[env.<name>.web]` (C-25): the config the web app reads at boot,
+/// rendered to `<root>/config/web.json` on its host and served there at
+/// `/config.json`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct WebSpec {
+    /// The host that serves it; the sequencer's when not given.
+    #[serde(default)]
+    pub host: Option<String>,
+    /// Anything the app reads, e.g. `sequencerUrl = "${node.sequencer.url}"`.
+    #[serde(default)]
+    pub config: toml::Table,
 }
 
 /// A lane file and one of its deployments.
@@ -570,7 +587,7 @@ impl Manifest {
                     .map(|l| format!("\n    at {l}"))
                     .unwrap_or_default();
                 format!(
-                    "{p} uses a value known only once the lane's keys and addresses are (account, contract, token, node, …): only relayer feeds, contracts' args and [outputs] can{at}"
+                    "{p} uses a value known only once the lane's keys and addresses are (account, contract, token, node, …): only relayer feeds, contracts' args, web.config and [outputs] can{at}"
                 )
             })
             .collect();
@@ -756,6 +773,16 @@ impl Manifest {
             .context("relayer.feeds")?
             .unwrap_or_default();
         self.env.relayer.feeds = feeds;
+        // The web app's config may name addresses (C-25).
+        if let (Some(web), Some(config)) = (
+            self.env.web.as_mut(),
+            r.table
+                .get("web")
+                .and_then(|w| w.get("config"))
+                .and_then(|c| c.as_table()),
+        ) {
+            web.config = config.clone();
+        }
         // Contracts' arguments may name addresses (C-20).
         if let Some(contracts) = r.table.get("contracts").and_then(|c| c.as_table()) {
             for (name, c) in contracts {
@@ -962,6 +989,13 @@ impl EnvSpec {
         } else {
             &self.hosts[name]
         }
+    }
+
+    /// The host serving the web app's config, with `[web]` (C-25).
+    pub fn web_host(&self) -> Option<String> {
+        self.web
+            .as_ref()
+            .map(|w| w.host.clone().unwrap_or_else(|| self.primary_host()))
     }
 
     /// The validators this deployment runs (not the ones run elsewhere).
@@ -1323,6 +1357,21 @@ impl EnvSpec {
                         v.name
                     ));
                 }
+            }
+        }
+        // The web app's host: a declared one, serving it at a public URL.
+        if let Some(w) = &self.web {
+            let h = w.host.clone().unwrap_or_else(|| self.primary_host());
+            if !known.contains(&h) {
+                p.push(format!(
+                    "web.host = {h:?}: not one of the deployment's hosts"
+                ));
+            } else if self.host_spec(&h).provider == Provider::Ssh
+                && self.host_spec(&h).public_url.is_none()
+            {
+                p.push(format!(
+                    "web: host {h:?} has no public_url to serve the web app at"
+                ));
             }
         }
         // A validator run elsewhere: where, and nothing to deploy.

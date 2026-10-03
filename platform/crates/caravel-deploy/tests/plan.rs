@@ -1206,3 +1206,14 @@ fn a_host_another_lane_holds() {
         ]
     );
 }
+
+/// The web app's config changes no node (C-25).
+#[test]
+fn the_web_apps_config_restarts_nothing() {
+    let d = desired();
+    let chain = deployed(&d);
+    let host = running(&d);
+    let mut web = d.clone();
+    web.host.files.insert("web.json".into(), key(0x77));
+    assert_eq!(lines(&diff(&web, &chain, &host)), ["file.web.json"]);
+}

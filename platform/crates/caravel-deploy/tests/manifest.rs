@@ -778,7 +778,7 @@ fn declared_contracts_are_checked() {
     assert!(bad(
         "[env.testnet.contracts.c]\nwasm = \"x.wasm\"\nsalt = \"${account.admin.public_key}\"\n"
     )
-    .contains("only relayer feeds, contracts' args and [outputs] can"));
+    .contains("only relayer feeds, contracts' args, web.config and [outputs] can"));
     let hash = "ab".repeat(32);
     let m = Manifest::parse(
         &file(&format!(
@@ -1020,4 +1020,60 @@ fn namespaces() {
         .replace("[[env.testnet", "[[env.local");
     let e = format!("{:#}", Manifest::parse(&file(&local), "local").unwrap_err());
     assert!(e.contains("keeps each lane apart already"), "{e}");
+}
+
+/// The web app's config (C-25): values known once keys and addresses are,
+/// filled in like the relayer's feeds.
+#[test]
+fn the_web_apps_config() {
+    use caravel_deploy::attrs::attributes;
+    use caravel_deploy::deploy::{addresses, Keys};
+
+    let lane = format!(
+        "{LANE}{ENV}
+[env.testnet.web.config]
+sequencerUrl = \"${{node.sequencer.url}}\"
+settlementContract = \"${{contract.settlement.address}}\"
+networkName = \"${{network.name}}\"
+validatorUrls = [\"/validators/1\", \"/validators/2\"]
+"
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("lane.toml");
+    std::fs::write(&path, &lane).unwrap();
+    let mut m = Manifest::load(&path, "testnet").unwrap();
+    assert_eq!(m.env.web_host().as_deref(), Some("default"));
+    let keys = Keys {
+        admin: [0xA0; 32],
+        relayer: [0xA1; 32],
+        validators: vec![[1; 32], [2; 32], [3; 32]],
+        accounts: Default::default(),
+        sequencer: None,
+    };
+    let a = addresses(&m, &keys.admin).unwrap();
+    let attrs = attributes(&m, &keys, &a, None, None);
+    m.finish(&attrs).unwrap();
+    let c = &m.env.web.as_ref().unwrap().config;
+    assert_eq!(c["sequencerUrl"].as_str(), Some("https://lane.example"));
+    assert_eq!(
+        c["settlementContract"].as_str(),
+        Some(stellar_strkey::Contract(a.settlement).to_string().as_str())
+    );
+    assert_eq!(c["networkName"].as_str(), Some("testnet"));
+    assert_eq!(c["validatorUrls"].as_array().map(Vec::len), Some(2));
+
+    // Served at a public URL, from a declared host.
+    let e = err(&format!("{ENV}\n[env.testnet.web]\nhost = \"b\"\n"));
+    assert!(
+        e.contains("web.host = \"b\": not one of the deployment's hosts"),
+        "{e}"
+    );
+    let e = err(&format!(
+        "{}\n[env.testnet.web]\n",
+        ENV.replace("public_url = \"https://lane.example\"\n", "")
+    ));
+    assert!(
+        e.contains("has no public_url to serve the web app at"),
+        "{e}"
+    );
 }

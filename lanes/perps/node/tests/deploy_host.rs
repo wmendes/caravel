@@ -465,3 +465,33 @@ fn files_in_a_namespace() {
     assert!(f["sequencer.toml"].contains("/opt/caravel-perps/data/sequencer.sqlite"));
     assert!(f["caddy/caravel.d/perps.caddy"].contains("root * /opt/caravel-perps/web"));
 }
+
+/// Lane #1's lane file with a web config (C-25): `web.json` beside the
+/// node configs, served at `/config.json` before the app's catch-all.
+#[test]
+fn the_web_apps_config_is_served() {
+    let text =
+        std::fs::read_to_string(root().join("lanes/perps/config/lane.caravel-perps.testnet.toml"))
+            .unwrap()
+            + "\n[env.testnet.web.config]\nnetworkName = \"testnet\"\nsequencerUrl = \"https://35-224-76-64.sslip.io\"\n";
+    let m = Manifest::parse(&text, "testnet").unwrap();
+    let r = Resolved {
+        template: "perps".into(),
+        engine_wasm_hash: m.lane.engine_wasm_hash().unwrap().unwrap(),
+        settlement: [9; 32],
+        validator_keys: vec![[1; 32], [2; 32], [3; 32]],
+        web: true,
+        sequencer_key: None,
+    };
+    let f = render(&m, &r, "/opt/caravel", 1).unwrap();
+    let web: serde_json::Value = serde_json::from_str(&f["web.json"]).unwrap();
+    assert_eq!(web["networkName"], "testnet");
+    let caddy = &f["caddy/Caddyfile"];
+    let route = caddy.find("handle /config.json {\n\t\troot * /opt/caravel/config\n\t\trewrite * /web.json\n\t\tfile_server\n\t}").expect(caddy);
+    assert!(
+        route < caddy.find("root * /opt/caravel/web").unwrap(),
+        "{caddy}"
+    );
+    // Without [web], nothing of it (the pins above).
+    assert!(!files().contains_key("web.json"));
+}
