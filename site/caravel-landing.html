@@ -414,18 +414,11 @@ footer p { font-size: .875rem; color: var(--muted); }
 /* Logo fills */
 .lg-lane { fill: var(--lane); } .lg-harbor { fill: var(--harbor); } .lg-ink { fill: var(--ink); }
 
-/* One lane file: the file on the left, the four commands on the right. */
-.filegrid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); gap: 32px; margin-top: 32px; align-items: start; }
-@media (max-width: 900px) { .filegrid { grid-template-columns: minmax(0, 1fr); } }
+/* Code blocks: lane files and plan output. */
 .lanefile { margin: 0; background: var(--raised); border: 1px solid var(--rule); border-radius: 12px; padding: 22px 24px; overflow-x: auto; font: .875rem/1.65 var(--mono); color: var(--ink); tab-size: 2; }
 .lanefile .h { color: var(--lane); font-weight: 700; }
 .lanefile .s { color: var(--harbor-ink); }
 .lanefile .c { color: var(--muted); }
-.verbs { list-style: none; padding: 0; display: grid; gap: 22px; }
-.verb { border-top: 3px solid var(--lane); padding-top: 14px; }
-.verb.st { border-top-color: var(--harbor); }
-.verb code { font: 700 1.125rem var(--mono); }
-.verb p { margin-top: 6px; color: var(--muted); font-size: .9375rem; max-width: 52ch; }
 
 /* Plan: a change to the file on the left, what plan prints for it on the right */
 .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 40px; }
@@ -462,9 +455,7 @@ footer p { font-size: .875rem; color: var(--muted); }
       </svg>
     </a>
     <nav class="nav" aria-label="Sections">
-      <a href="#who">Who it's for</a>
-      <a href="#file">Lane file</a>
-      <a href="#plan">Plan</a>
+      <a href="#rules">Your rules</a>
       <a href="#how">How it works</a>
       <a href="#templates">Templates</a>
       <a href="#start">Quickstart</a>
@@ -522,69 +513,12 @@ footer p { font-size: .875rem; color: var(--muted); }
     </div>
   </section>
 
-  <section class="band" id="who" aria-labelledby="who-h">
+  <section class="band" id="rules" aria-labelledby="rules-h">
     <div class="wrap">
       <div class="head">
-        <p class="eyebrow">Who it's for</p>
-        <h2 id="who-h">For apps that can't wait for the next ledger.</h2>
-        <p class="lede">Stellar closes a ledger about every 5 seconds, and every app plays by the same rules. That's fine for most apps. Some need many fast actions, or rules of their own, and still want the money on Stellar. A lane gives them that: you pick the block time, the fees, who can join and who validates, and deposits and withdrawals stay on Stellar.</p>
-      </div>
-      <div class="lanes">
-        <article class="lanecard first"><span class="tag">Trading</span><h3>An order book</h3><p>A team building perps on Stellar found 5 second blocks too slow for an order book. Caravel Perps is that app on a lane: 1 s blocks on testnet, trades confirmed in well under a second, USDC settled on Stellar.</p></article>
-        <article class="lanecard"><span class="tag">Payments</span><h3>Paying at the till</h3><p>Another team wanted to fund a card purchase just in time, from a wallet the user holds. A card network won't wait for the next ledger. On a lane with short blocks the payment is confirmed in under a second, and it settles on Stellar at the next checkpoint. Nobody has built this one on Caravel yet.</p></article>
-        <article class="lanecard"><span class="tag">Your rules</span><h3>One line each</h3><p>Block time, fees, an allowlist, the token you settle in, your validators: each is a line in the lane file. If Stellar's ledger time and rules already fit your app, build on Stellar directly.</p></article>
-      </div>
-    </div>
-  </section>
-
-  <section class="band" id="file" aria-labelledby="file-h">
-    <div class="wrap">
-      <div class="head">
-        <p class="eyebrow">One lane file</p>
-        <h2 id="file-h">Everything about a lane lives in one file.</h2>
-        <p class="lede">What the lane is, and where it runs. <code>plan</code> reads Stellar and your host, and <code>apply</code> changes only what differs from the file.</p>
-      </div>
-      <div class="filegrid">
-        <pre class="lanefile" aria-label="Lane #1's lane file, abridged"><span class="c"># lanes/perps/config/lane.caravel-perps.testnet.toml (abridged)</span>
-<span class="h">[lane]</span>
-name = <span class="s">"caravel-perps-testnet-0"</span>
-<span class="h">[app]</span>
-template = <span class="s">"perps"</span>
-<span class="h">[node]</span>
-block_time_ms = 1000
-checkpoint_every_blocks = 60
-
-<span class="h">[env.testnet]</span>
-network = <span class="s">"testnet"</span>
-admin = <span class="s">"caravel-admin"</span>  <span class="c"># a key in the keystore</span>
-token = <span class="s">"circle-usdc"</span>
-settlement = <span class="s">"CBIHBEUZ…PONWO"</span>
-threshold = 2
-
-<span class="h">[[env.testnet.validators]]</span>
-name = <span class="s">"1"</span>
-key = <span class="s">"caravel-validator-1"</span>  <span class="c"># and 2, 3</span>
-
-<span class="h">[env.testnet.host]</span>
-provider = <span class="s">"ssh"</span>
-transport = <span class="s">"gcloud-iap"</span>
-address = <span class="s">"caravel-1"</span></pre>
-        <ol class="verbs">
-          <li class="verb"><code>plan</code><p>Lists every change on Stellar and on your host, down to the settlement contract's address, before anything is sent.</p></li>
-          <li class="verb"><code>apply</code><p>Deploys the contract, installs the release and starts the nodes. Run it again and nothing changes. Interrupted, it finishes on the next run.</p></li>
-          <li class="verb"><code>status</code><p>Height, checkpoints on Stellar, when a freeze would become possible, and whether the lane still matches its file.</p></li>
-          <li class="verb st"><code>destroy</code><p>Drains the lane, writes every account's exit proof, and freezes the contract so users withdraw on Stellar.</p></li>
-        </ol>
-      </div>
-    </div>
-  </section>
-
-  <section class="band" id="plan" aria-labelledby="plan-h">
-    <div class="wrap">
-      <div class="head">
-        <p class="eyebrow">Configure and plan</p>
-        <h2 id="plan-h">Every rule is a line. Every change gets a plan.</h2>
-        <p class="lede">Pick what you'd change. <code>plan</code> compares the file with the contract on Stellar and the nodes on your host, and says what <code>apply</code> would do.</p>
+        <p class="eyebrow">Your rules</p>
+        <h2 id="rules-h">A chain with your rules.<br>The money stays on Stellar.</h2>
+        <p class="lede">On Stellar, every app shares the network's fees and rules. A lane sets its own, one line each: fees, who may join, account limits, validators, the settlement token, block time. Deposits, withdrawals and exits stay on Stellar.</p>
       </div>
       <div class="plangrid">
         <div class="groups" role="tablist" aria-label="What a change does">
@@ -825,7 +759,7 @@ const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       rows: [["!", "", "settlement_params.escape_timeout_secs: the contract has 30, the lane file gives 60. The constructor fixed it: destroy this lane, or give the lane a new name", "x"]],
       sum: "0 step(s), 1 problem(s). Apply refuses until they are fixed.", src: "From the tool's plan tests. Coral steps run on your host, teal ones on Stellar." },
   ];
-  const tabs = Array.from(document.querySelectorAll('#plan [role="tab"]'));
+  const tabs = Array.from(document.querySelectorAll('#rules [role="tab"]'));
   const pane = document.getElementById("diff"), A = document.getElementById("diffA"), B = document.getElementById("diffB"), SRC = document.getElementById("diffSrc");
   const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
   function show(i, focus) {
