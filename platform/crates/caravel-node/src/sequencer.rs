@@ -85,6 +85,8 @@ pub struct SequencerNode<A: NodeApp> {
     pub block_time_ms: u64,
     pub checkpoint_every_blocks: u64,
     pub signers: Option<Signers>,
+    /// Signs each `/v1/sign` request (DEC-095).
+    request_key: Option<ed25519_dalek::SigningKey>,
     token: String,
     production: bool,
     identity: api::Identity,
@@ -217,6 +219,7 @@ pub async fn start<A: NodeApp>(
         block_time_ms: cfg.lane.node.block_time_ms,
         checkpoint_every_blocks: cfg.lane.node.checkpoint_every_blocks,
         signers: cfg.signers.clone(),
+        request_key: cfg.key.clone(),
         token: cfg.internal_token.clone(),
         production: cfg.production,
         identity: api::Identity {
@@ -326,6 +329,7 @@ async fn signer_loop<A: NodeApp>(app: Arc<SequencerNode<A>>) {
         }
         match collect(
             &client,
+            app.request_key.as_ref(),
             &signers,
             &row.header,
             &row.batch,
@@ -379,6 +383,7 @@ fn prior_signatures(row: &CheckpointRow) -> Vec<[u8; 64]> {
 /// (spec §15).
 async fn collect(
     client: &reqwest::Client,
+    request_key: Option<&ed25519_dalek::SigningKey>,
     signers: &Signers,
     header: &[u8],
     batch: &[u8],
@@ -394,13 +399,26 @@ async fn collect(
             got.insert(v.index, (v.weight, hex(sig)));
         }
     }
-    let body = json!({ "header": hex(header), "batch": hex(batch) });
+    let body =
+        serde_json::to_vec(&json!({ "header": hex(header), "batch": hex(batch) })).expect("json");
+    // Signed once for every validator (DEC-095).
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let signed = request_key.map(|k| crate::sign_request::sign(k, now, &body));
     let requests = signers
         .validators
         .iter()
         .filter(|v| !got.contains_key(&v.index))
         .map(|v| {
-            let req = client.post(format!("{}/v1/sign", v.url)).json(&body).send();
+            let mut req = client
+                .post(format!("{}/v1/sign", v.url))
+                .header("content-type", "application/json")
+                .body(body.clone());
+            for (name, value) in signed.iter().flatten() {
+                req = req.header(*name, value);
+            }
+            let req = req.send();
             async move { (v, req.await) }
         });
     for (v, resp) in futures_util::future::join_all(requests).await {

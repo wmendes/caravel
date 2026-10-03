@@ -54,6 +54,10 @@ pub struct SequencerSection {
     /// Browser origins allowed to call the public API (CORS).
     #[serde(default)]
     pub cors_origins: Vec<String>,
+    /// A file holding the sequencer's `S...` key, relative to this file: it
+    /// signs each `/v1/sign` request (DEC-095).
+    #[serde(default)]
+    pub key_file: Option<PathBuf>,
 }
 
 fn default_token_env() -> String {
@@ -128,6 +132,8 @@ pub struct SequencerConfig {
     pub mempool_max_per_account: usize,
     pub signers: Option<Signers>,
     pub cors_origins: Vec<String>,
+    /// Signs each `/v1/sign` request (DEC-095).
+    pub key: Option<ed25519_dalek::SigningKey>,
 }
 
 impl SequencerConfig {
@@ -172,6 +178,10 @@ impl SequencerConfig {
         let engine_wasm_hash = parse_hash(&s.engine_wasm_sha256)?;
         lane.check_engine(&engine_wasm_hash)?;
         let signers = file.signers.map(parse_signers).transpose()?;
+        let key = match &s.key_file {
+            Some(f) if need_token => Some(crate::validator::read_key_file(&dir.join(f))?),
+            _ => None,
+        };
         Ok(Self {
             listen: s.listen,
             lane,
@@ -187,6 +197,7 @@ impl SequencerConfig {
             mempool_max_per_account: s.mempool_max_per_account,
             signers,
             cors_origins: s.cors_origins,
+            key,
         })
     }
 

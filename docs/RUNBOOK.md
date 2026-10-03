@@ -122,6 +122,14 @@ The node refuses a mainnet passphrase. Take `engine_wasm_sha256` and the contrac
 RUST_LOG=info ./target/release/caravel-perps-node validator --config lanes/perps/config/my-validator.toml
 ```
 
+To sign for a lane, its operator adds you to the lane file (`url` and your public key; see LANE_FILE.md, "A validator someone else runs") and rotates the signer set. You then add the sequencer's public key to your config, so that `/v1/sign` answers only requests it signed (DEC-095):
+
+```toml
+sequencer_key = "G…"                                  # the operator's `caravel output`, or ${node.sequencer.key}
+```
+
+Serve `/v1/sign` at your `url` over HTTPS.
+
 It catches up from block 1, then follows live. On 2026-09-29, a laptop following the testnet lane with this exact config caught up about 6,150 blocks in 14 minutes. Compare with the sequencer at the same height:
 
 ```sh

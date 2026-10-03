@@ -108,10 +108,11 @@ impl Prepared {
                 let all = self.all_nodes();
                 let node = node_name(v, &all)?;
                 let i = self
-                    .desired
+                    .m
+                    .env
                     .validators
                     .iter()
-                    .position(|n| *n == node)
+                    .position(|v| crate::render::validator_node(&v.name) == node)
                     .ok_or_else(|| anyhow!("{node} is not one of the lane file's validators"))?;
                 crate::deploy::validator_url(&self.m, i)
                     .ok_or_else(|| anyhow!("the host has no public_url: pass --api-url"))

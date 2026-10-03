@@ -72,6 +72,8 @@ pub struct Keys {
     pub validators: Vec<Key>,
     /// Declared accounts, by name.
     pub accounts: BTreeMap<String, Key>,
+    /// The sequencer's request key (`[sequencer] key`, DEC-095).
+    pub sequencer: Option<Key>,
 }
 
 impl Keys {
@@ -84,7 +86,18 @@ impl Keys {
                 .env
                 .validators
                 .iter()
-                .map(|v| Cli::public_key(&v.key))
+                .map(|v| {
+                    Cli::public_key(&v.key).map_err(|e| match &v.url {
+                        // Its secret is its operator's: only the public key.
+                        Some(_) => anyhow!(
+                            "validator {:?} runs elsewhere: add its key as identity {:?} (`stellar keys add {} --public-key G…`)",
+                            v.name,
+                            v.key,
+                            v.key
+                        ),
+                        None => e,
+                    })
+                })
                 .collect::<Result<Vec<_>>>()?,
             accounts: m
                 .env
@@ -92,6 +105,13 @@ impl Keys {
                 .iter()
                 .map(|(name, a)| Ok((name.clone(), Cli::public_key(a.identity_of(name))?)))
                 .collect::<Result<_>>()?,
+            sequencer: m
+                .env
+                .sequencer
+                .key
+                .as_deref()
+                .map(Cli::public_key)
+                .transpose()?,
         })
     }
 }
@@ -364,9 +384,8 @@ pub fn desired(
         },
         validators: m
             .env
-            .validators
-            .iter()
-            .map(|v| validator_node(&v.name))
+            .run_validators()
+            .map(|(_, v)| validator_node(&v.name))
             .collect(),
         host: DesiredHost {
             provider: m.env.host.provider,
@@ -385,9 +404,8 @@ pub fn desired(
             .map(|(name, spec)| crate::plan::OtherHost {
                 nodes: m
                     .env
-                    .validators
-                    .iter()
-                    .map(|v| validator_node(&v.name))
+                    .run_validators()
+                    .map(|(_, v)| validator_node(&v.name))
                     .filter(|n| m.env.host_of(n) == name)
                     .collect(),
                 host: DesiredHost {
@@ -417,11 +435,20 @@ pub fn api_url(m: &Manifest) -> Option<String> {
     }
 }
 
-/// Validator `i`'s API (0-based, in file order), where users reach it.
+/// Validator `i`'s API (0-based, in file order), where users reach it: on
+/// this machine, through its host's public URL, or where it runs elsewhere.
 pub fn validator_url(m: &Manifest, i: usize) -> Option<String> {
-    match m.env.host.provider {
+    let v = &m.env.validators[i];
+    if let Some(url) = &v.url {
+        return Some(url.trim_end_matches('/').to_string());
+    }
+    let host = m.env.host_spec(&m.env.host_of(&validator_node(&v.name)));
+    match host.provider {
         Provider::Local => Some(format!("http://127.0.0.1:{}", render::validator_port(m, i))),
-        Provider::Ssh => api_url(m).map(|u| format!("{u}/validators/{}", m.env.validators[i].name)),
+        Provider::Ssh => host
+            .public_url
+            .as_deref()
+            .map(|u| format!("{}/validators/{}", u.trim_end_matches('/'), v.name)),
     }
 }
 
@@ -584,6 +611,7 @@ pub async fn prepare(
         settlement: addrs.settlement,
         validator_keys: keys.validators.clone(),
         web: release.web.is_some(),
+        sequencer_key: keys.sequencer,
     };
     let files = render::render(&m, &resolved, &host_provider.root_str(), epoch)?;
     desired.host.files = files
@@ -736,11 +764,16 @@ impl Prepared {
             .env
             .validators
             .iter()
-            .filter(|v| self.desired.host_of(&validator_node(&v.name)) == host)
+            .filter(|v| !v.external() && self.desired.host_of(&validator_node(&v.name)) == host)
             .map(|v| Ok((validator_node(&v.name), Cli::secret(&v.key)?)))
             .collect::<Result<Vec<_>>>()?;
+        let mut validators = validators;
         let mut env = Vec::new();
         if host.is_none() {
+            // The sequencer's request key, beside it (DEC-095).
+            if let Some(k) = &self.m.env.sequencer.key {
+                validators.push(("sequencer".to_string(), Cli::secret(k)?));
+            }
             env.push((
                 "CARAVEL_RELAYER_SECRET".to_string(),
                 Cli::secret(&self.m.env.relayer.account)?,

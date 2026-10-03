@@ -58,8 +58,15 @@ pub fn roles(m: &Manifest) -> Vec<(String, String)> {
         ("admin".to_string(), m.env.admin.clone()),
         ("relayer".to_string(), m.env.relayer.account.clone()),
     ];
+    if let Some(k) = &m.env.sequencer.key {
+        out.push(("sequencer".to_string(), k.clone()));
+    }
     for v in &m.env.validators {
-        out.push((format!("validator-{}", v.name), v.key.clone()));
+        let role = match v.url {
+            Some(_) => format!("validator-{} (run elsewhere)", v.name),
+            None => format!("validator-{}", v.name),
+        };
+        out.push((role, v.key.clone()));
     }
     for (var, id) in &m.env.relayer.feed_keys {
         out.push((format!("feed {var}"), id.clone()));
@@ -216,8 +223,12 @@ pub fn keys_report(m: &Manifest) -> Value {
 /// ones created.
 pub fn ensure_identities(m: &Manifest) -> Result<Vec<String>> {
     let mut created = Vec::new();
-    for (_, identity) in roles(m) {
+    for (role, identity) in roles(m) {
         if !created.contains(&identity) && !Stellar::has_identity(&identity) {
+            // Its operator holds the secret: never made up here.
+            if role.ends_with("(run elsewhere)") {
+                bail!("{role} needs identity {identity:?} from its public key: `stellar keys add {identity} --public-key G…`");
+            }
             Stellar::generate_identity(&identity)?;
             created.push(identity);
         }

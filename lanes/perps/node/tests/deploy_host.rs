@@ -42,6 +42,7 @@ fn files() -> std::collections::BTreeMap<String, String> {
         .0,
         validator_keys: vec![[1; 32], [2; 32], [3; 32]],
         web: true,
+        sequencer_key: None,
     };
     render(&m, &r, "/opt/caravel", 1).unwrap()
 }
@@ -56,7 +57,7 @@ fn files_for_two_hosts() {
     let text = text
         .replace(
             "[env.testnet.sequencer]\n",
-            "[env.testnet.sequencer]\nhost = \"a\"\n",
+            "[env.testnet.sequencer]\nhost = \"a\"\nkey = \"caravel-sequencer\"\n",
         )
         .replace(
             "key = \"caravel-validator-3\"\n",
@@ -71,6 +72,7 @@ fn files_for_two_hosts() {
         settlement: [9; 32],
         validator_keys: vec![[1; 32], [2; 32], [3; 32]],
         web: true,
+        sequencer_key: Some([5; 32]),
     };
     let a = render(&m, &r, "/opt/caravel", 1).unwrap();
     let b = render_for(&m, &r, "b", "/opt/caravel", 1).unwrap();
@@ -96,12 +98,58 @@ fn files_for_two_hosts() {
     let v3 = &b["validator-3.toml"];
     assert!(v3.contains("http://10.0.0.2:8080"), "{v3}");
     assert!(v3.contains("10.0.0.3:8083"), "{v3}");
-    // Validator 1 stays on loopback.
-    assert!(a["validator-1.toml"].contains("127.0.0.1:8081"));
+    // Validator 1 listens on loopback, and follows the sequencer where it
+    // listens.
+    let v1 = &a["validator-1.toml"];
+    assert!(v1.contains("listen = \"127.0.0.1:8081\""), "{v1}");
+    assert!(
+        v1.contains("sequencer_url = \"http://10.0.0.2:8080\""),
+        "{v1}"
+    );
+    // The sequencer signs its requests, and every validator checks them
+    // (DEC-095).
+    let seq_g = stellar_strkey::ed25519::PublicKey([5; 32]).to_string();
+    assert!(
+        seq.contains("key_file = \"/opt/caravel/keys/sequencer.key\""),
+        "{seq}"
+    );
+    for v in [v1, v3] {
+        assert!(
+            v.contains(&format!("sequencer_key = \"{}\"", seq_g.as_str())),
+            "{v}"
+        );
+    }
     // b's Caddyfile has validator 3's routes, not the sequencer's.
     let caddy = &b["caddy/Caddyfile"];
     assert!(caddy.contains("10.0.0.3:8083"), "{caddy}");
     assert!(!caddy.contains(":8080"), "{caddy}");
+    assert!(caddy.contains("respond /v1/sign 404"), "{caddy}");
+
+    // Without private addresses, through the public URLs: b's proxy passes
+    // validator 3's /v1/sign (signed), and nothing listens off loopback.
+    let public = text
+        .replace("private_address = \"10.0.0.2\"\n", "")
+        .replace("private_address = \"10.0.0.3\"\n", "");
+    let m = Manifest::parse(&public, "testnet").unwrap();
+    let a = render(&m, &r, "/opt/caravel", 1).unwrap();
+    let b = render_for(&m, &r, "b", "/opt/caravel", 1).unwrap();
+    let seq = &a["sequencer.toml"];
+    assert!(seq.contains("listen = \"127.0.0.1:8080\""), "{seq}");
+    assert!(
+        seq.contains("url = \"https://b.example/validators/3\""),
+        "{seq}"
+    );
+    let v3 = &b["validator-3.toml"];
+    assert!(
+        v3.contains("sequencer_url = \"https://35-224-76-64.sslip.io\""),
+        "{v3}"
+    );
+    assert!(v3.contains("listen = \"127.0.0.1:8083\""), "{v3}");
+    let caddy = &b["caddy/Caddyfile"];
+    assert!(!caddy.contains("respond /v1/sign 404"), "{caddy}");
+    assert!(caddy.contains("reverse_proxy 127.0.0.1:8083"), "{caddy}");
+    // a's proxy keeps its own validators' /v1/sign closed.
+    assert!(a["caddy/Caddyfile"].contains("respond /v1/sign 404"));
 }
 
 #[test]
@@ -260,6 +308,7 @@ fn lane_1_plans_no_changes() {
         relayer: [0xA1; 32],
         validators: vec![[1; 32], [2; 32], [3; 32]],
         accounts: Default::default(),
+        sequencer: None,
     };
     let a = addresses(&m, &keys.admin).unwrap();
     assert!(a.settlement_pinned);
@@ -283,6 +332,7 @@ fn lane_1_plans_no_changes() {
             settlement: a.settlement,
             validator_keys: keys.validators.clone(),
             web: true,
+            sequencer_key: None,
         },
         "/opt/caravel",
         1,

@@ -75,6 +75,9 @@ fn common_fields(db: &str) -> String {
     )
 }
 
+/// The sequencer's request key (DEC-095): honest validators know it.
+const SEQUENCER_SEED: u8 = 0x5e;
+
 fn validator_config(dir: &Path, n: usize, seed: u8, sequencer: &str, rpc: Option<&str>) -> PathBuf {
     let key_file = dir.join(format!("v{n}.key"));
     std::fs::write(
@@ -87,6 +90,12 @@ fn validator_config(dir: &Path, n: usize, seed: u8, sequencer: &str, rpc: Option
     let rpc_line = rpc
         .map(|r| format!("rpc_url = \"{r}\"\nstellar_poll_secs = 1\n"))
         .unwrap_or_default();
+    // The tampered follower (no RPC) takes any request.
+    let rpc_line = if rpc.is_some() {
+        format!("{rpc_line}sequencer_key = \"{}\"\n", g(SEQUENCER_SEED))
+    } else {
+        rpc_line
+    };
     let cfg = format!(
         "[validator]\nlisten = \"127.0.0.1:0\"\nsequencer_url = \"{sequencer}\"\nkey_file = \"v{n}.key\"\n{}poll_ms = 50\n{rpc_line}",
         common_fields(&format!("v{n}.sqlite"))
@@ -278,10 +287,17 @@ async fn validators_follow_sign_and_refuse_a_tampered_chain() {
         .map(|(s, u)| format!("  {{ url = \"{u}\", key = \"{}\" }},\n", g(*s)))
         .collect::<String>();
     let seq_cfg = format!(
-        "[sequencer]\nlisten = \"127.0.0.1:0\"\n{}internal_token_env = \"CARAVEL_TEST_TOKEN_V\"\n\n[signers]\nepoch = 1\nthreshold = 2\nvalidators = [\n{validators}]\n",
+        "[sequencer]\nlisten = \"127.0.0.1:0\"\n{}internal_token_env = \"CARAVEL_TEST_TOKEN_V\"\nkey_file = \"seq.key\"\n\n[signers]\nepoch = 1\nthreshold = 2\nvalidators = [\n{validators}]\n",
         common_fields("seq.sqlite")
     );
     std::fs::write(dir.path().join("sequencer.toml"), seq_cfg).unwrap();
+    std::fs::write(
+        dir.path().join("seq.key"),
+        stellar_strkey::ed25519::PrivateKey([SEQUENCER_SEED; 32])
+            .to_string()
+            .as_str(),
+    )
+    .unwrap();
     // SAFETY: set once, before the sequencer reads it; no other thread touches the environment.
     unsafe { std::env::set_var("CARAVEL_TEST_TOKEN_V", TOKEN) };
     let cfg = caravel_node::node_config::SequencerConfig::load(&dir.path().join("sequencer.toml"))
@@ -425,14 +441,35 @@ async fn validators_follow_sign_and_refuse_a_tampered_chain() {
     // An honest validator refuses a header it did not compute.
     let mut forged = header.clone();
     forged[200] ^= 1;
-    let r = c
-        .http
-        .post(format!("{}/v1/sign", urls[0]))
-        .json(&json!({ "header": hex(&forged), "batch": batch }))
-        .send()
+    let body = serde_json::to_vec(&json!({ "header": hex(&forged), "batch": batch })).unwrap();
+    let post = |headers: Vec<(&'static str, String)>| {
+        let mut r = c
+            .http
+            .post(format!("{}/v1/sign", urls[0]))
+            .header("content-type", "application/json")
+            .body(body.clone());
+        for (k, v) in headers {
+            r = r.header(k, v);
+        }
+        r.send()
+    };
+    let seq_key = key(SEQUENCER_SEED);
+    let now = now_ms() / 1000;
+    let r = post(caravel_node::sign_request::sign(&seq_key, now, &body).to_vec())
         .await
         .unwrap();
     assert_eq!(r.status().as_u16(), 409);
+    // It answers only the sequencer (DEC-095): unsigned, signed by another
+    // key, or signed long ago, the request is refused before anything runs.
+    for headers in [
+        vec![],
+        caravel_node::sign_request::sign(&key(0x99), now, &body).to_vec(),
+        caravel_node::sign_request::sign(&seq_key, now - 600, &body).to_vec(),
+    ] {
+        let r = post(headers).await.unwrap();
+        assert_eq!(r.status().as_u16(), 401);
+        assert_eq!(r.json::<Value>().await.unwrap()["code"], "UNSIGNED");
+    }
 
     // Stellar accepts checkpoint 1: validators learn it from RPC and serve the escape proof.
     *last_accepted.lock().unwrap() = Some((1, sha256(&header)));
