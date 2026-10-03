@@ -2223,6 +2223,50 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-24 | Lane namespaces: several lanes on one host (DEC-096) | C-23 | done |
 | C-25 | The web app as a resource, configured from outputs — **Gate G6** (DEC-097) | C-24 | done |
 
+### 20.6 Milestone M0.7: ready for HackMeridian
+
+**Decided with the human on 2026-10-03,** after the HackMeridian track discussion (Stellar Unlocked and Frankenstack). Caravel goes to HackMeridian as an optional building block that teams can pick up, with the human mentoring the teams that use it. This milestone does what the human told the organisers would be ready:
+- a page that says who Caravel is for;
+- a short path from nothing to a first lane, on prebuilt binaries;
+- a lane that runs its own smart contract execution engine, so hackers can try Groundhog;
+- a starter kit for Frankenstack teams.
+
+The privacy stack is left out for now; the human will take it up separately.
+
+**The first user,** from what the human saw after Istanbul, is a team whose app needs many fast actions and its own rules, with assets, wallets and exits on Stellar. Two cases:
+- perps, where 5 s ledgers are too slow for an order book;
+- just-in-time card payments from a non-custodial wallet, which block time also rules out.
+
+**Rules that hold for every task:**
+- M0.6's rules still apply. Lane #1 keeps "No changes." and its genesis hashes, and the frozen engine is untouched.
+- Copy stays honest:
+  - "testnet only, not audited" stays prominent;
+  - validity proofs and bonded validators are plans, not features;
+  - block time is configurable, so never "1 s blocks" as a property of Caravel (lane #1 runs 1 s);
+  - nothing claims Groundhog or confidential-token support before it exists.
+
+**Needs the human first (§0.4):**
+- the landing page deploy;
+- publishing releases;
+- Groundhog's design, because a new execution engine touches consensus (DEC-002) and the trust model;
+- anything sent to the HackMeridian organisers.
+
+Branches are `h-0x-short-name`. Gates: H1 (H-01), H2 (H-04), H3 (H-06, the Groundhog design), H4 (H-08) and H5 (H-11).
+
+| ID | Task | Depends | Status |
+|---|---|---|---|
+| H-01 | **The landing page tells it straight** — **Gate H1**. Add "Who it's for", with the perps and just-in-time card payment cases. Describe block time as configurable. Move validity proofs and bonded validators into a section clearly labelled planned. Keep "testnet only, not audited" in the hero and the trust section. Deploy only with the human's OK | — | todo |
+| H-02 | **Prebuilt binaries.** The CI release job builds `caravel` and each template's node binary for macOS (arm64) and Linux (x86_64, arm64), with the relayer, the web apps and the contracts of record, plus `SHA256SUMS`. A tag publishes them as a GitHub Release, the first public one, with the human's OK. Reuses `scripts/assemble-release.sh` and the platform guard (C-04) | H-01 | todo |
+| H-03 | **One-line install.** `curl -fsSL <raw>/scripts/install.sh \| sh` fetches the release for this platform, checks its checksum, and installs into `~/.caravel`. `--from-source` keeps today's path. Covers the Stellar CLI the CLI needs (an install hint, or a pinned download), and `caravel doctor` says what's missing | H-02 | todo |
+| H-04 | **The 15-minute path, measured** — **Gate H2**. On a clean macOS machine and a clean Linux one, take the time from nothing to a lane in use (install, `init`, `apply`, deposit, `tx`, withdraw) and record it in RESULTS. Fix what blocks it (first start of the local network, keys, Docker). README and landing quickstart on the release path. `check-quickstart.sh` runs it from a release in CI | H-03 | todo |
+| H-05 | **Groundhog: find out.** What it is today (the Stanford parallel execution engine): status, interface, what contracts it runs, license, readiness for Meridian, and who mentors it (Tyler's note in the tracks doc). Record the facts with sources in `docs/SOURCES.md` and the open questions as an OQ. No code | H-01 | todo |
+| H-06 | **Groundhog: design** — **Gate H3**. A lane template that runs user-deployed contracts (deploy and invoke as lane transactions), with deposits, checkpoints and exits like any lane. Decide with the human:<br>- how Groundhog executes them, against DEC-002 (consensus runs the engine Wasm through `soroban-env-host`) and INV-P5 (native and Wasm match);<br>- what validators re-execute;<br>- what goes in a checkpoint;<br>- what the copy may claim | H-05 | todo |
+| H-07 | **A contracts lane template (MVP).** The engine from H-06's design on the app SDK. Users deploy and call contracts on the lane, and a token balance moves in and out through settlement as on Payments. Scenarios, vectors, a parity gate, `caravel init contracts`, and an e2e on the CLI | H-06 | todo |
+| H-08 | **Groundhog in the lane** — **Gate H4**. Groundhog as the lane's executor, as H-06 decided, with replay and validators matching it. Measured against the H-07 baseline, with numbers in RESULTS. If Groundhog isn't ready, the template ships without it and the copy says so | H-07 | todo |
+| H-09 | **The Frankenstack starter kit.** A lane file and a one-page guide for each recipe, built on the Payments or contracts template:<br>- a lane with x402 or agent payments (many small payments, settled in USDC);<br>- a lane with a passkey or smart wallet (payments that feel instant);<br>- a lane with an oracle (trading, as Caravel Perps does).<br>Each recipe runs end to end with `caravel` alone | H-04 | todo |
+| H-10 | **The first outside run.** Someone outside the team goes from the README to a working lane and one recipe, with the human watching. Record the friction and fix what blocks. This is the first external run, and it happens before HackMeridian | H-09 | todo |
+| H-11 | **Mentor kit** — **Gate H5**. A 5-minute lightning talk, a FAQ (what it is, who it's for, the tradeoffs, what isn't built yet), a troubleshooting page, and how mentors help a team pick it up. Nothing goes to the organisers without the human | H-10 | todo |
+
 ---
 
 ## 21. Later milestones (not for M0 agents to start without a human go-ahead)
