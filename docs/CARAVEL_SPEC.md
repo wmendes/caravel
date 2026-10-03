@@ -2184,7 +2184,7 @@ M0.6 makes Caravel a real infrastructure-as-code CLI. The human chose:
 - The frozen engine is untouched.
 - `platform/` never depends on `lanes/`.
 
-The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.md`. Phase gates are G1 (C-05), G2 (C-10), G3 (C-14), G4 (C-17), G5 (C-21) and G6 (C-25).
+The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.md`. Phase gates are G1 (C-05), G2 (C-10), G3 (C-14), G4 (C-17), G5 (C-21) and G6 (C-25). **Gate G1 passed on 2026-10-02**, with #49–#54 merged.
 
 **Needs the human first (§0.4):**
 - signing users' lane transactions through the Stellar CLI keystore (SEP-53);
@@ -2195,13 +2195,13 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 
 | ID | Task | Depends | Status |
 |---|---|---|---|
-| C-00 | Baseline pins: every file rendered for lane #1, its Stellar-side values, every lane file's genesis hashes; docs fixes | P-22 | review |
-| C-01 | Plugin protocol in the template binaries: `plugin info`, `plugin example`, `plugin body`; `init` scaffolds (DEC-073) | C-00 | review |
-| C-02 | `caravel-deploy` without `NodeApp`: a `Template` trait (in-process or plugin), pure `addresses()`/`desired()`, a state root (DEC-074) | C-01 | review |
-| C-03 | `caravel-cli`, the one CLI: lane-file and env discovery, `--json`, exit codes; plan, apply, status, destroy, validate, env, output, version, doctor (DEC-075) | C-02 | review |
-| C-04 | Install from source: `install.sh`, the release next to the binary, a web dir per template, a binary-platform guard (DEC-076) | C-03 | review |
-| C-05 | `init` and `keys`; local applies create the identities they name (DEC-077) — **Gate G1** | C-04 | review |
-| C-06 | `caravel-lanefile`: loader with spans and diagnostics, `include`, `extends`, reserved keys; genesis refuses `${` | C-05 | todo |
+| C-00 | Baseline pins: every file rendered for lane #1, its Stellar-side values, every lane file's genesis hashes; docs fixes | P-22 | done |
+| C-01 | Plugin protocol in the template binaries: `plugin info`, `plugin example`, `plugin body`; `init` scaffolds (DEC-073) | C-00 | done |
+| C-02 | `caravel-deploy` without `NodeApp`: a `Template` trait (in-process or plugin), pure `addresses()`/`desired()`, a state root (DEC-074) | C-01 | done |
+| C-03 | `caravel-cli`, the one CLI: lane-file and env discovery, `--json`, exit codes; plan, apply, status, destroy, validate, env, output, version, doctor (DEC-075) | C-02 | done |
+| C-04 | Install from source: `install.sh`, the release next to the binary, a web dir per template, a binary-platform guard (DEC-076) | C-03 | done |
+| C-05 | `init` and `keys`; local applies create the identities they name (DEC-077) — **Gate G1** | C-04 | done |
+| C-06 | `caravel-lanefile`: loader with spans and diagnostics, `include`, `extends`, reserved keys; genesis refuses `${` (DEC-078) | C-05 | review |
 | C-07 | The expression evaluator: grammar, types, functions, no time or randomness | C-06 | todo |
 | C-08 | Vars, locals, `for_each`, per-env `[env.<name>.node]` | C-07 | todo |
 | C-09 | The manifest on resolved values; `caravel render`; the e2e without heredoc or `sed` | C-08 | todo |
@@ -2657,6 +2657,20 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 - **`caravel keys list | ensure | show <who>`**: each role's identity (admin, relayer, `validator-<name>`, `feed <VAR>`), whether the keystore has it, and its key. `ensure` creates the missing ones.
 - **On a local network,** `apply` creates the identities the deployment names, and `plan` lists them first, because every address derives from the admin's key. **On testnet** both refuse and point to `caravel keys ensure`. Funding stays `apply`'s friendbot step.
 - **Keys stay in the Stellar CLI's keystore** (`stellar keys generate`, CLI 28.1.0, `docs/SOURCES.md`). No secret is written anywhere else | The quickstart's `for … stellar keys generate` loop goes, and nothing beyond the keystore holds a key | Identities in a hardware wallet or the OS secure store for testnet admins (`--secure-store`) |
+| DEC-078 | **M0.6 (C-06).** The lane file language starts: `platform/crates/caravel-lanefile`, pure TOML with no Stellar and no network, on toml 1.1.6's `DeTable` for spans (no new dependency, never `preserve_order`).
+- **`include = ["envs.toml", …]`** (top level, before any table) loads more deployment tables, relative to the including file.
+  - An included file holds only `[env.*]` and its own `include`. A genesis section there is an error that points at it.
+  - Each name is defined once across all files, and a cycle is an error.
+- **`extends = "base"` or `["a", "b"]`** in an `[env.<name>]`. Parents apply in order, then the deployment's own values.
+  - Tables merge key by key. Anything else replaces what it inherits: a value, an array, an array of tables such as `validators`.
+  - `abstract = true` marks a deployment that can only be extended: it isn't listed, planned or chosen, and it can't be the default.
+  - `default` isn't inherited.
+  - An unknown parent gets a did-you-mean. A cycle names its chain.
+- **Origins.** Each value of a merged deployment keeps where it came from (file, line, column, and the deployment it was inherited from), for later errors on resolved values.
+- **Errors** are all collected and printed with `file:line:col`, the line, carets, notes and help.
+- **`vars`, `locals` and `outputs`** are reserved and refused for now, until the expression layer (C-07, C-08).
+- **The node's parser** (`LaneFile::from_table`/`parse`) sets aside every deployment key (`env`, `include`, `vars`, `locals`, `outputs`). It refuses any `${` outside `[env]`: genesis sections are consensus config and stay literal. No template may be named after a deployment key.
+- **Who uses the loader:** `caravel_deploy::manifest::load_lane` and `Manifest::load`/`parse` read lane files through it, and so does the CLI. Every existing lane file loads to the same tables and genesis hashes (tested) | The quickstart's lane files repeat a deployment per environment, and the e2e builds one with a heredoc | A deployment needs to drop an inherited key (comes with expressions: a value of `${null}`) |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

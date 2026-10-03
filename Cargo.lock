@@ -486,6 +486,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "caravel-core",
+ "caravel-lanefile",
  "caravel-node",
  "caravel-runtime",
  "clap",
@@ -510,6 +511,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "caravel-lanefile"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "toml",
+]
+
+[[package]]
 name = "caravel-merkle"
 version = "0.1.0"
 dependencies = [
@@ -523,6 +532,7 @@ dependencies = [
  "anyhow",
  "axum",
  "caravel-core",
+ "caravel-lanefile",
  "caravel-runtime",
  "clap",
  "ed25519-dalek",

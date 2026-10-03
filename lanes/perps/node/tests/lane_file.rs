@@ -181,3 +181,18 @@ fn env_tables_change_no_hash() {
         assert_eq!(report_env.config_hash, report.config_hash, "{path}");
     }
 }
+
+/// Through the lane file language (M0.6, caravel_lanefile): the same lane
+/// file, deployments and hashes as the plain parser gives.
+#[test]
+fn the_lane_file_language_changes_no_file() {
+    for path in [TESTNET, LOCAL, TESTNET_M0, LOCAL_M0] {
+        let plain = LaneFile::parse(&text(path)).unwrap();
+        let loaded = caravel_deploy::manifest::load_lane(&root().join(path)).unwrap();
+        assert_eq!(loaded.raw, plain.raw, "{path}");
+        assert_eq!(loaded.env, plain.env, "{path}");
+        let (a, ca, sa) = lane_toml::genesis(&PerpsApp, &loaded).unwrap();
+        let (b, cb, sb) = lane_toml::genesis(&PerpsApp, &plain).unwrap();
+        assert_eq!((a.config_hash, ca, sa), (b.config_hash, cb, sb), "{path}");
+    }
+}

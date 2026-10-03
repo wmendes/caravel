@@ -14,8 +14,11 @@
 //! same bytes (spec §16.2).
 //!
 //! `[env.<name>]` tables describe deployments (where and how a lane runs).
-//! They are removed before anything else reads the file, so they never reach
-//! genesis or the app's parser.
+//! They, and the rest of the lane file language's top-level keys
+//! (`include`, …: `caravel_lanefile::DEPLOYMENT_KEYS`), are removed before
+//! anything else reads the file, so they never reach genesis or the app's
+//! parser. Genesis sections are literal: a `${` in one is refused, so no
+//! node or replay ever hashes an unresolved expression.
 
 use std::path::Path;
 
@@ -122,6 +125,31 @@ fn section<T: DeserializeOwned>(raw: &toml::Table, name: &str) -> Result<T> {
         .with_context(|| format!("[{name}]"))
 }
 
+/// The first value outside `[env]` with `${` in it, as `section.key`.
+fn expression_in(t: &toml::Table, prefix: &str) -> Option<String> {
+    fn value(v: &toml::Value, at: &str) -> Option<String> {
+        match v {
+            toml::Value::String(s) if s.contains("${") => Some(at.to_string()),
+            toml::Value::Table(t) => expression_in(t, at),
+            toml::Value::Array(a) => a
+                .iter()
+                .enumerate()
+                .find_map(|(i, v)| value(v, &format!("{at}[{i}]"))),
+            _ => None,
+        }
+    }
+    t.iter()
+        .filter(|(k, _)| !(prefix.is_empty() && *k == ENV))
+        .find_map(|(k, v)| {
+            let at = if prefix.is_empty() {
+                k.clone()
+            } else {
+                format!("{prefix}.{k}")
+            };
+            value(v, &at)
+        })
+}
+
 impl LaneFile {
     pub fn load(path: &Path) -> Result<Self> {
         let text =
@@ -130,7 +158,22 @@ impl LaneFile {
     }
 
     pub fn parse(text: &str) -> Result<Self> {
-        let mut raw: toml::Table = toml::from_str(text)?;
+        Self::from_table(toml::from_str(text)?)
+    }
+
+    /// A lane file already parsed, e.g. by `caravel_lanefile` with its
+    /// includes and inheritance resolved.
+    pub fn from_table(mut raw: toml::Table) -> Result<Self> {
+        for k in caravel_lanefile::DEPLOYMENT_KEYS {
+            if k != ENV {
+                raw.remove(k);
+            }
+        }
+        if let Some(at) = expression_in(&raw, "") {
+            bail!(
+                "{at} has `${{`: genesis sections are consensus config, so their values are literal (deployment settings go in [env.<name>])"
+            );
+        }
         let env = match raw.remove(ENV) {
             None => toml::Table::new(),
             Some(toml::Value::Table(t)) => t,
@@ -138,8 +181,11 @@ impl LaneFile {
         };
         let app: Option<AppSection> = raw.get("app").map(|_| section(&raw, "app")).transpose()?;
         if let Some(app) = &app {
-            if app.template == ENV {
-                bail!("[app] template {ENV:?} is reserved for the deployment tables");
+            if caravel_lanefile::DEPLOYMENT_KEYS.contains(&app.template.as_str()) {
+                bail!(
+                    "[app] template {:?} is reserved for the lane file's deployments",
+                    app.template
+                );
             }
             if let Some(extra) = raw
                 .keys()
@@ -376,6 +422,28 @@ greeting = "hi"
             .replace("template = \"demo\"", "template = \"env\"")
             .replace("[demo]\ngreeting = \"hi\"\n", "");
         assert!(LaneFile::parse(&reserved).is_err());
+    }
+
+    /// The lane file language's other top-level keys never reach genesis
+    /// either, and genesis values are literal (M0.6).
+    #[test]
+    fn the_language_stays_out_of_genesis() {
+        let plain = LaneFile::parse(FILE).unwrap();
+        let with_include = LaneFile::parse(&format!("include = [\"envs.toml\"]\n{FILE}")).unwrap();
+        assert_eq!(with_include.raw, plain.raw);
+        for k in ["include", "vars", "locals", "outputs"] {
+            let reserved = FILE
+                .replace("template = \"demo\"", &format!("template = \"{k}\""))
+                .replace("[demo]\ngreeting = \"hi\"\n", "");
+            assert!(LaneFile::parse(&reserved).is_err(), "{k}");
+        }
+        let e = LaneFile::parse(&FILE.replace("greeting = \"hi\"", "greeting = \"${var.hi}\""))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("demo.greeting has `${`"), "{e}");
+        // In a deployment, `${` is the deployment's business.
+        let in_env = format!("{FILE}\n[env.a]\nadmin = \"${{lane.name}}-admin\"\n");
+        assert!(LaneFile::parse(&in_env).is_ok());
     }
 
     #[test]

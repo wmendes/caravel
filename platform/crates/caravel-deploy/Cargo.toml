@@ -10,6 +10,7 @@ publish.workspace = true
 [dependencies]
 caravel-core = { workspace = true }
 caravel-node = { workspace = true }
+caravel-lanefile = { workspace = true }
 caravel-runtime = { workspace = true }
 stellar-xdr = { workspace = true, features = ["std"] }
 stellar-strkey = { workspace = true }

@@ -267,7 +267,7 @@ fn release_args(g: &Global) -> ReleaseArgs {
 
 pub fn context(g: &Global, positional: Option<&Path>) -> Result<Ctx> {
     let (lane_path, file_from) = lane_file(g, positional)?;
-    let lane = LaneFile::load(&lane_path)?;
+    let lane = caravel_deploy::manifest::load_lane(&lane_path)?;
     let (env, env_from) =
         project::choose_env(&lane, g.env.as_deref(), env_var("CARAVEL_ENV").as_deref())?;
     let cwd = std::env::current_dir()?;
@@ -678,7 +678,7 @@ fn validate(g: &Global, positional: Option<&Path>) -> Result<u8> {
 /// the template's binary), each deployment's rules (`env`: only that one),
 /// and whether the Stellar CLI keystore has the identities it names.
 pub fn validate_report(lane_path: &Path, env: Option<&str>) -> Result<(bool, Value)> {
-    let lane = LaneFile::load(lane_path)?;
+    let lane = caravel_deploy::manifest::load_lane(lane_path)?;
     let names: Vec<String> = match env {
         Some(e) => vec![e.to_string()],
         None => envs(&lane).into_iter().map(|e| e.name).collect(),
@@ -746,7 +746,7 @@ pub fn identities(m: &Manifest) -> Vec<String> {
 
 fn env_list(g: &Global) -> Result<u8> {
     let (lane_path, _) = lane_file(g, None)?;
-    let lane = LaneFile::load(&lane_path)?;
+    let lane = caravel_deploy::manifest::load_lane(&lane_path)?;
     let list = env_list_json(&lane, g.env.as_deref(), env_var("CARAVEL_ENV").as_deref());
     if g.json {
         print_json(&list)?;
