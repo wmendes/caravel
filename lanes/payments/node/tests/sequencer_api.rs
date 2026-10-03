@@ -390,6 +390,8 @@ async fn payments_sequencer_end_to_end() {
         )
         .await;
     assert_eq!(a["next_nonce"], (na + 1).to_string());
+    // Nothing of A's is queued any more: the next transaction takes next_nonce.
+    assert_eq!(a["pending_nonce"], a["next_nonce"]);
     lane.until(&format!("/v1/accounts/{}", g(B)), "B's balance", |_, v| {
         v["balance"].as_str() == Some(&(55 * USDC - FEE).to_string())
     })

@@ -576,10 +576,22 @@ async fn status<A: NodeApp>(State(app): AppState<A>) -> ApiResult {
 
 async fn account<A: NodeApp>(State(app): AppState<A>, Path(account): Path<String>) -> ApiResult {
     let key = api::parse_account(&account)?;
-    ok(app
+    let view = app
         .app
         .account(&app.state(), &key)
-        .ok_or_else(|| ApiError::not_found("no lane account for this key"))?)
+        .ok_or_else(|| ApiError::not_found("no lane account for this key"))?;
+    let mut body = serde_json::to_value(view).map_err(ApiError::internal)?;
+    // The nonce a new transaction takes: after the account's queued ones
+    // (read under one lock, so a block can't land in between).
+    let pending = {
+        let core = app.core.lock().expect("core lock");
+        let next = app.app.next_nonce(&core.state(), &key);
+        next.map(|n| n.max(core.mempool.next_queued_nonce(&key).unwrap_or(0)))
+    };
+    if let (Some(o), Some(p)) = (body.as_object_mut(), pending) {
+        o.insert("pending_nonce".into(), json!(p.to_string()));
+    }
+    ok(body)
 }
 
 async fn block<A: NodeApp>(State(app): AppState<A>, Path(height): Path<u64>) -> ApiResult {

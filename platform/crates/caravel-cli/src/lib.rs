@@ -240,6 +240,68 @@ pub enum Cmd {
         #[arg(long, default_value_t = 120)]
         timeout: u64,
     },
+    /// Sign a lane transaction with SEP-53 through the Stellar CLI keystore
+    /// and send it; waits until a block takes it and prints its result.
+    Tx {
+        /// The identity that signs: the lane account's owner.
+        #[arg(long)]
+        from: String,
+        /// Return once the sequencer has it, before a block takes it.
+        #[arg(long)]
+        no_wait: bool,
+        #[arg(long, default_value_t = 60)]
+        expiry_secs: u64,
+        #[arg(long, default_value_t = 120)]
+        timeout: u64,
+        /// The nonce to sign; by default the one after the account's queued
+        /// transactions.
+        #[arg(long)]
+        nonce: Option<u64>,
+        /// The body, in the template's `tx` syntax, amounts in token units;
+        /// `@name` is an identity's G… account (e.g. transfer --to @bob --amount 5).
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, required = true)]
+        body: Vec<String>,
+    },
+    /// Withdraw from the lane: the transaction, then its leaf in an accepted
+    /// checkpoint, then the claim on Stellar.
+    Withdraw {
+        who: String,
+        /// In token units.
+        amount: String,
+        /// Return once the transaction is sent.
+        #[arg(long)]
+        no_wait: bool,
+        /// Wait for the leaf but don't claim it.
+        #[arg(long)]
+        no_claim: bool,
+        #[arg(long, default_value_t = 300)]
+        timeout: u64,
+    },
+    /// Ask the settlement contract for a withdrawal the lane must include
+    /// (when it won't take one), then claim it.
+    ForceWithdraw {
+        who: String,
+        amount: String,
+        #[arg(long)]
+        no_wait: bool,
+        #[arg(long)]
+        no_claim: bool,
+        #[arg(long, default_value_t = 300)]
+        timeout: u64,
+    },
+    /// Claim every unclaimed withdrawal of an account on Stellar.
+    Claim { who: String },
+    /// After a freeze: claim an account's withdrawals and its share of the
+    /// lane's last checkpoint.
+    Escape {
+        who: String,
+        /// Leave its withdrawals unclaimed.
+        #[arg(long)]
+        no_withdrawals: bool,
+        /// Claim even if it pays nothing (it uses the escape up).
+        #[arg(long)]
+        allow_zero: bool,
+    },
     /// The lane file's deployments.
     Env {
         #[command(subcommand)]
@@ -687,19 +749,34 @@ fn dispatch(cli: Cli) -> Result<u8> {
             runtime()?.block_on(async {
                 let p = ctx.prepare(false).await?;
                 let names = p.nodes(&nodes)?;
-                let stops_sequencer = names.iter().any(|n| n == "sequencer");
-                if stops_sequencer {
-                    let at = p.freeze_possible_at();
+                // What stops checkpoints: the sequencer, the relayer (it
+                // posts them), or validators below the signing threshold.
+                let stopped_weight: u32 = p
+                    .m
+                    .env
+                    .validators
+                    .iter()
+                    .filter(|v| names.contains(&caravel_deploy::render::validator_node(&v.name)))
+                    .map(|v| v.weight)
+                    .sum();
+                let total: u32 = p.m.env.validators.iter().map(|v| v.weight).sum();
+                let halts = names.iter().any(|n| n == "sequencer" || n == "relayer")
+                    || total.saturating_sub(stopped_weight) < p.m.env.threshold;
+                if halts {
                     eprintln!(
-                        "Stopping the sequencer stops checkpoints. {}",
-                        match at {
-                            Some(t) => format!("Unless it starts again, anyone may freeze the lane from {t} (in {} s).", t.saturating_sub(now())),
+                        "Stopping {} stops checkpoints. {}",
+                        names.join(", "),
+                        match p.freeze_possible_at() {
+                            Some(t) => format!(
+                                "Unless they start again, anyone may freeze the lane from {t} (in {} s).",
+                                t.saturating_sub(now())
+                            ),
                             None => "Anyone may freeze the lane after the contract's escape timeout without one.".into(),
                         }
                     );
                     if p.m.env.network != Network::Local && !yes {
-                        if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
-                            bail!("stopping a testnet sequencer: pass --yes");
+                        if g.json || !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+                            bail!("this stops a testnet lane's checkpoints: pass --yes");
                         }
                         eprint!("Stop {}? [y/N] ", names.join(", "));
                         let mut line = String::new();
@@ -732,7 +809,11 @@ fn dispatch(cli: Cli) -> Result<u8> {
                 let started: Vec<String> = plan
                     .steps
                     .iter()
-                    .map(caravel_deploy::plan::step_line)
+                    .filter_map(|s| match s {
+                        caravel_deploy::plan::Step::Start { node }
+                        | caravel_deploy::plan::Step::Restart { node } => Some(node.clone()),
+                        _ => None,
+                    })
                     .collect();
                 if plan.steps.is_empty() {
                     if g.json {
@@ -746,7 +827,7 @@ fn dispatch(cli: Cli) -> Result<u8> {
                 if g.json {
                     print_json(&json!({ "started": started }))?;
                 } else {
-                    println!("Started. The lane matches the lane file.");
+                    println!("Started {}.", started.join(", "));
                 }
                 Ok(exit::OK)
             })
@@ -810,7 +891,7 @@ fn dispatch(cli: Cli) -> Result<u8> {
                 } => (name, amount, max_xlm, false),
             };
             let ctx = context(g, None)?;
-            let flows = caravel_deploy::flows::Flows::new(ctx.manifest()?)?;
+            let flows = flows_for(&ctx)?;
             let created = create && !Stellar::has_identity(&name);
             if created {
                 Stellar::generate_identity(&name)?;
@@ -845,26 +926,30 @@ fn dispatch(cli: Cli) -> Result<u8> {
         }
         Cmd::Balance { who } => {
             let ctx = context(g, None)?;
-            let flows = caravel_deploy::flows::Flows::new(ctx.manifest()?)?;
+            let flows = flows_for(&ctx)?;
             let key = Stellar::public_key(&who).or_else(|_| {
                 stellar_strkey(&who)
                     .ok_or_else(|| anyhow!("{who:?} is neither an identity nor a G… account"))
             })?;
             runtime()?.block_on(async {
-                let b = flows.balance(&key).await?;
+                let b = flows.balance(&who, &key).await?;
                 if g.json {
                     print_json(&b)?;
                 } else {
                     println!("{who} ({})", b["account"].as_str().unwrap_or_default());
-                    println!(
-                        "  on Stellar  {}",
-                        b["stellar"].as_str().unwrap_or("(no trustline)")
-                    );
-                    match &b["lane"] {
-                        Value::Null => {
+                    match (b["stellar"].as_str(), b["stellar_error"].as_str()) {
+                        (Some(v), _) => println!("  on Stellar  {v}"),
+                        (None, Some(e)) => println!("  on Stellar  (couldn't read it: {e})"),
+                        (None, None) => println!("  on Stellar  (no trustline)"),
+                    }
+                    match (&b["lane"], b["lane_error"].as_str()) {
+                        (Value::Null, Some(e)) => {
+                            println!("  on the lane (the lane's API didn't answer: {e})")
+                        }
+                        (Value::Null, None) => {
                             println!("  on the lane (no lane account yet: deposit first)")
                         }
-                        lane => println!("  on the lane {lane}"),
+                        (lane, _) => println!("  on the lane {lane}"),
                     }
                 }
                 Ok(exit::OK)
@@ -877,27 +962,250 @@ fn dispatch(cli: Cli) -> Result<u8> {
             timeout,
         } => {
             let ctx = context(g, None)?;
-            let flows = caravel_deploy::flows::Flows::new(ctx.manifest()?)?;
+            let flows = flows_for(&ctx)?;
             let amount = caravel_deploy::flows::parse_units(&amount, flows.decimals()?)?;
             runtime()?.block_on(async {
                 let wait = (!no_wait).then(|| std::time::Duration::from_secs(timeout));
                 let r = flows.deposit(&who, amount, wait).await?;
+                let amt = r["amount"].as_str().unwrap_or_default().to_string();
+                let code = if r["bounced"] == true {
+                    exit::ERROR
+                } else if r["timed_out"] == true {
+                    exit::TIMEOUT
+                } else {
+                    exit::OK
+                };
                 if g.json {
                     print_json(&r)?;
                 } else if r["credited"] == true {
-                    println!(
-                        "Deposited {} for {who}; the lane credited it (inbox message {}).",
-                        r["amount"].as_str().unwrap_or_default(),
-                        r["inbox_index"]
-                    );
+                    println!("Deposited {amt} for {who}; the lane credited it (inbox message {}).", r["inbox_index"]);
+                } else if r["bounced"] == true {
+                    eprintln!("The lane refused the deposit of {amt} (inbox message {}): it comes back as a withdrawal, `caravel claim {who}` once a checkpoint is accepted.", r["inbox_index"]);
+                } else if r["timed_out"] == true {
+                    eprintln!("Deposited {amt} for {who} (inbox message {}), but the lane hasn't processed it after {timeout} s: is the relayer running?", r["inbox_index"]);
                 } else {
-                    println!(
-                        "Deposited {} for {who} (inbox message {}); the lane credits it at its next block.",
-                        r["amount"].as_str().unwrap_or_default(),
-                        r["inbox_index"]
-                    );
+                    println!("Deposited {amt} for {who} (inbox message {}); the lane credits it at its next block.", r["inbox_index"]);
                 }
-                Ok(exit::OK)
+                Ok(code)
+            })
+        }
+        Cmd::Tx {
+            from,
+            no_wait,
+            expiry_secs,
+            timeout,
+            nonce,
+            body,
+        } => {
+            let ctx = context(g, None)?;
+            let flows = flows_for(&ctx)?;
+            let template = ctx.template()?;
+            // `@name` is that identity's account; `@@` a literal `@`.
+            let args: Vec<String> = body
+                .iter()
+                .map(|a| match a.strip_prefix('@') {
+                    Some(rest) if rest.starts_with('@') => Ok(rest.to_string()),
+                    Some(id) => {
+                        Stellar::public_key(id).map(|k| caravel_runtime::views::g_address(&k))
+                    }
+                    None => Ok(a.clone()),
+                })
+                .collect::<Result<_>>()?;
+            let (kind, bytes) = template.body(&args, Some(flows.decimals()?))?;
+            runtime()?.block_on(async {
+                let sent = flows.send(&from, kind, bytes, expiry_secs, nonce).await?;
+                let mut r = json!({ "tx_hash": sent.tx_hash, "nonce": sent.nonce.to_string(), "kind": kind });
+                if !no_wait {
+                    // Sent: whatever happens next, it may still land.
+                    eprintln!("Sent {} (nonce {}); waiting for a block.", sent.tx_hash, sent.nonce);
+                }
+                if no_wait {
+                    if g.json {
+                        print_json(&r)?;
+                    } else {
+                        println!("Sent {} (nonce {}).", sent.tx_hash, sent.nonce);
+                    }
+                    return Ok(exit::OK);
+                }
+                use caravel_deploy::flows::{receipt_name, Outcome};
+                let code = match flows.included(&sent, std::time::Duration::from_secs(timeout)).await? {
+                    Outcome::Included { height, code, events } => {
+                        r["height"] = json!(height);
+                        r["code"] = json!(code);
+                        r["result"] = json!(receipt_name(code));
+                        r["events"] = json!(events);
+                        if !g.json {
+                            if code == 0 {
+                                println!("Included at height {height}: OK.");
+                            } else {
+                                eprintln!("Included at height {height}, but the lane refused it: {}.", receipt_name(code));
+                            }
+                            for e in &events {
+                                println!("  {e}");
+                            }
+                        }
+                        if code == 0 {
+                            exit::OK
+                        } else {
+                            exit::ERROR
+                        }
+                    }
+                    Outcome::Dropped => {
+                        r["dropped"] = json!(true);
+                        if !g.json {
+                            eprintln!("Not included: {}.", caravel_deploy::flows::DROPPED);
+                        }
+                        exit::ERROR
+                    }
+                    Outcome::Pending => {
+                        r["timed_out"] = json!(true);
+                        if !g.json {
+                            eprintln!("Not in a block after {timeout} s.");
+                        }
+                        exit::TIMEOUT
+                    }
+                };
+                if g.json {
+                    print_json(&r)?;
+                }
+                Ok(code)
+            })
+        }
+        Cmd::Withdraw {
+            who,
+            amount,
+            no_wait,
+            no_claim,
+            timeout,
+        } => {
+            let ctx = context(g, None)?;
+            let flows = flows_for(&ctx)?;
+            let amount = caravel_deploy::flows::parse_units(&amount, flows.decimals()?)?;
+            runtime()?.block_on(async {
+                let wait = (!no_wait).then(|| std::time::Duration::from_secs(timeout));
+                let r = flows.withdraw(&who, amount, wait, !no_claim).await?;
+                user_result(g, &r, "withdrawal")
+            })
+        }
+        Cmd::ForceWithdraw {
+            who,
+            amount,
+            no_wait,
+            no_claim,
+            timeout,
+        } => {
+            let ctx = context(g, None)?;
+            let flows = flows_for(&ctx)?;
+            let amount = caravel_deploy::flows::parse_units(&amount, flows.decimals()?)?;
+            runtime()?.block_on(async {
+                let wait = (!no_wait).then(|| std::time::Duration::from_secs(timeout));
+                let r = flows.force_withdraw(&who, amount, wait, !no_claim).await?;
+                user_result(g, &r, "forced withdrawal")
+            })
+        }
+        Cmd::Claim { who } => {
+            let ctx = context(g, None)?;
+            let flows = flows_for(&ctx)?;
+            let key = Stellar::public_key(&who)?;
+            let d = flows.decimals()?;
+            runtime()?.block_on(async {
+                use caravel_deploy::flows::format_units;
+                let open = flows.unclaimed(&key).await?;
+                let c = flows.claim(&who, &open);
+                if g.json {
+                    print_json(&c.json(d))?;
+                } else if open.is_empty() {
+                    println!("Nothing to claim for {who}.");
+                } else {
+                    if !c.paid.is_empty() {
+                        let total: i128 = c.paid.iter().map(|l| l.amount).sum();
+                        println!(
+                            "Claimed {} for {who} ({} withdrawal(s)).",
+                            format_units(total, d),
+                            c.paid.len()
+                        );
+                    }
+                    if !c.already.is_empty() {
+                        println!(
+                            "{} withdrawal(s) were claimed meanwhile (a claim always pays {who}).",
+                            c.already.len()
+                        );
+                    }
+                    for (l, e) in &c.failed {
+                        eprintln!(
+                            "Claiming {} from checkpoint {} (leaf {}) failed: {e}",
+                            format_units(l.amount, d),
+                            l.seq,
+                            l.index
+                        );
+                    }
+                }
+                Ok(if c.failed.is_empty() {
+                    exit::OK
+                } else {
+                    exit::ERROR
+                })
+            })
+        }
+        Cmd::Escape {
+            who,
+            no_withdrawals,
+            allow_zero,
+        } => {
+            let ctx = context(g, None)?;
+            let flows = flows_for(&ctx)?;
+            runtime()?.block_on(async {
+                let r = flows.escape(&who, !no_withdrawals, allow_zero).await?;
+                let w = &r["withdrawals"];
+                // Withdrawals left unclaimed, or a failed escape, are errors.
+                let left = r["withdrawals_error"].is_string()
+                    || w["failed"].as_array().is_some_and(|f| !f.is_empty());
+                let failed = r["escape_error"].as_str();
+                if g.json {
+                    print_json(&r)?;
+                } else {
+                    // Amounts a failed balance read left out are unknown, not 0.
+                    let s = |k: &str| r[k].as_str().unwrap_or("(unknown)").to_string();
+                    match r["escape"].as_str() {
+                        Some("claimed") => println!(
+                            "{who} escaped: its share of the last checkpoint paid {} (equity {}, expected {}).",
+                            s("escape_paid"),
+                            s("equity"),
+                            s("expected")
+                        ),
+                        Some("skipped") => println!(
+                            "{who}'s escape is left unclaimed: {}.",
+                            r["note"].as_str().unwrap_or_default()
+                        ),
+                        Some("none") => println!("{who} has nothing to escape with: no balance in the lane's last checkpoint."),
+                        Some("failed") => eprintln!(
+                            "{who}'s escape failed: {}",
+                            failed.unwrap_or_default()
+                        ),
+                        _ => println!("{who}'s escape was already claimed."),
+                    }
+                    for l in w["paid"].as_array().into_iter().flatten() {
+                        println!(
+                            "  claimed withdrawal {} from checkpoint {}",
+                            l["amount"].as_str().unwrap_or_default(),
+                            l["seq"]
+                        );
+                    }
+                    if !no_withdrawals {
+                        println!("  withdrawals paid {}; {} in all", s("withdrawals_paid"), s("paid"));
+                    }
+                    if left {
+                        eprintln!("Some withdrawals are still unclaimed: `caravel claim {who}`.");
+                    }
+                    if let Some(e) = r["balance_error"].as_str() {
+                        eprintln!("warning: the balance after couldn't be read ({e}): `caravel balance {who}`");
+                    }
+                }
+                Ok(if left || failed.is_some() {
+                    exit::ERROR
+                } else {
+                    exit::OK
+                })
             })
         }
         Cmd::Replay {
@@ -931,17 +1239,14 @@ fn dispatch(cli: Cli) -> Result<u8> {
             let ctx = context(g, None)?;
             runtime()?.block_on(async {
                 let p = ctx.prepare(false).await?;
-                let api = match api_url {
-                    Some(u) => u,
-                    None => p.api_base(None)?,
-                };
+                let api = api_url.or_else(|| p.api_base(None).ok());
                 let start = std::time::Instant::now();
                 let ok = p
                     .wait(
                         &w,
                         std::time::Duration::from_secs(timeout),
                         std::time::Duration::from_secs(1),
-                        &api,
+                        api.as_deref(),
                     )
                     .await?;
                 let secs = start.elapsed().as_secs();
@@ -1314,7 +1619,7 @@ fn output(g: &Global, name: Option<&str>) -> Result<u8> {
     let ctx = context(g, None)?;
     let m = ctx.manifest()?;
     let keys = Keys::from_keystore(&m)?;
-    let a = addresses(&m, &keys)?;
+    let a = addresses(&m, &keys.admin)?;
     let genesis = ctx.template().and_then(|t| t.genesis(&m.lane)).ok();
     let attrs = caravel_deploy::attrs::attributes(&m, &keys, &a, genesis.as_ref(), None);
     let declared = m.outputs(&attrs)?;
@@ -1630,6 +1935,76 @@ fn release_check(ctx: &Ctx, t: Option<&Plugin>) -> Result<String> {
     Ok(format!("{} (engine {}…)", r.commit, &hex(&want)[..16]))
 }
 
+/// The user flows of the context's deployment, with its exit file.
+fn flows_for(ctx: &Ctx) -> Result<caravel_deploy::flows::Flows> {
+    let m = ctx.manifest()?;
+    let exit_file = ctx
+        .state_root
+        .join(".caravel")
+        .join(&m.lane.lane.name)
+        .join(&m.env_name)
+        .join("exit.json");
+    let mut f = caravel_deploy::flows::Flows::new(m)?;
+    f.exit_file = Some(exit_file);
+    Ok(f)
+}
+
+/// A withdrawal's result: JSON, or a line; exit 4 if it timed out.
+fn user_result(g: &Global, r: &Value, what: &str) -> Result<u8> {
+    let timed_out = r["timed_out"] == true;
+    let claim_error = r["claim_error"].as_str();
+    if g.json {
+        print_json(r)?;
+    } else {
+        let leaf = &r["leaf"];
+        if r["already_claimed"] == true {
+            println!(
+                "The {what} of {} in checkpoint {} (leaf {}) was already claimed on Stellar (a claim always pays the account's owner).",
+                leaf["amount"].as_str().unwrap_or_default(),
+                leaf["seq"],
+                leaf["index"]
+            );
+        } else if let Some(e) = claim_error {
+            eprintln!(
+                "The {what} of {} is in checkpoint {} (leaf {}), but claiming it failed: {e}. `caravel claim` tries again.",
+                leaf["amount"].as_str().unwrap_or_default(),
+                leaf["seq"],
+                leaf["index"]
+            );
+        } else if r["claimed"] == true {
+            println!(
+                "The {what} of {} is claimed on Stellar (checkpoint {}, leaf {}).",
+                leaf["amount"].as_str().unwrap_or_default(),
+                leaf["seq"],
+                leaf["index"]
+            );
+        } else if !leaf.is_null() {
+            println!(
+                "The {what} of {} is in checkpoint {} (leaf {}): `caravel claim` pays it.",
+                leaf["amount"].as_str().unwrap_or_default(),
+                leaf["seq"],
+                leaf["index"]
+            );
+        } else if timed_out {
+            eprintln!(
+                "The {what} is sent, but its leaf isn't in an accepted checkpoint yet{}; `caravel claim` pays it later.",
+                r["note"].as_str().map(|n| format!(" ({n})")).unwrap_or_default()
+            );
+        } else if let Some(n) = r["note"].as_str() {
+            println!("The {what} is done: {n}.");
+        } else {
+            println!("The {what} is sent.");
+        }
+    }
+    Ok(if claim_error.is_some() {
+        exit::ERROR
+    } else if timed_out {
+        exit::TIMEOUT
+    } else {
+        exit::OK
+    })
+}
+
 fn now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1652,13 +2027,17 @@ fn account_of(who: &str) -> Result<String> {
 fn replay(g: &Global, escape: Option<&str>, withdrawals: Option<&str>) -> Result<u8> {
     let ctx = context(g, None)?;
     let m = ctx.manifest()?;
-    let keys = Keys::from_keystore(&m)?;
-    let a = addresses(&m, &keys)?;
+    // Only the admin's public key: the settlement address derives from it.
+    let admin = Stellar::admin_public_key(&m.env.admin)?;
+    let a = addresses(&m, &admin)?;
     let template = ctx.template()?;
-    let release = caravel_deploy::release::Release::locate(
+    let mut release = caravel_deploy::release::Release::locate(
         ctx.release.release_dir.as_deref(),
         &template.info.template,
     )?;
+    if let Some(w) = &ctx.release.wasm_dir {
+        release.use_wasm_from(w)?;
+    }
     let engine = release.wasm_path(&template.info.engine_file);
     // The genesis document the nodes hash, next to the deployment's state.
     let dir = ctx
@@ -1685,10 +2064,35 @@ fn replay(g: &Global, escape: Option<&str>, withdrawals: Option<&str>) -> Result
         cmd.args(["--prove-withdrawals", &account_of(w)?]);
     }
     eprintln!("{}", ctx.describe());
-    let status = cmd
-        .status()
+    if !g.json {
+        let status = cmd
+            .status()
+            .with_context(|| format!("running {}", template.path.display()))?;
+        return Ok(if status.success() {
+            exit::OK
+        } else {
+            exit::ERROR
+        });
+    }
+    // --json: the replay's documents (report, then any proofs) as one.
+    let out = cmd
+        .stderr(std::process::Stdio::inherit())
+        .output()
         .with_context(|| format!("running {}", template.path.display()))?;
-    Ok(if status.success() {
+    let docs: Vec<Value> = serde_json::Deserializer::from_slice(&out.stdout)
+        .into_iter::<Value>()
+        .collect::<std::result::Result<_, _>>()
+        .context("the replay's output is not JSON")?;
+    let mut doc = json!({ "report": docs.first().cloned().unwrap_or(Value::Null) });
+    let mut rest = docs.into_iter().skip(1);
+    if escape.is_some() {
+        doc["escape"] = rest.next().unwrap_or(Value::Null);
+    }
+    if withdrawals.is_some() {
+        doc["withdrawals"] = rest.next().unwrap_or(Value::Null);
+    }
+    print_json(&doc)?;
+    Ok(if out.status.success() {
         exit::OK
     } else {
         exit::ERROR

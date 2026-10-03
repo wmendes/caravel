@@ -33,11 +33,21 @@ fn run(args: &[String]) -> Result<String> {
         .context("running the stellar CLI (is it installed?)")?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
-        let tail: Vec<&str> = err.lines().rev().take(6).collect();
+        let all: Vec<&str> = err.lines().collect();
+        let tail = all.len().saturating_sub(6);
+        // The last lines, and every diagnostic line that names a contract
+        // error (they say which contract raised it: the settlement, or the
+        // token it called), in their order.
+        let lines: Vec<&str> = all
+            .iter()
+            .enumerate()
+            .filter(|(i, l)| *i >= tail || l.contains("Error(Contract, #"))
+            .map(|(_, l)| *l)
+            .collect();
         bail!(
             "stellar {} failed: {}",
             args.first().map(String::as_str).unwrap_or(""),
-            tail.into_iter().rev().collect::<Vec<_>>().join("\n")
+            lines.join("\n")
         );
     }
     Ok(String::from_utf8(out.stdout)?.trim().to_string())
@@ -100,6 +110,20 @@ impl Cli {
     pub fn public_key(identity: &str) -> Result<Key> {
         let g = run(&[s("keys"), s("public-key"), s(identity)]).with_context(|| {
             format!("identity {identity:?} (create it with `stellar keys generate {identity}`)")
+        })?;
+        Ok(stellar_strkey::ed25519::PublicKey::from_string(&g)
+            .map_err(|e| anyhow!("identity {identity:?} has no ed25519 key: {e:?}"))?
+            .0)
+    }
+
+    /// The admin's public key, which every address of the lane derives
+    /// from. A missing identity is to be added from the key, never generated:
+    /// a new key would derive another lane's addresses.
+    pub fn admin_public_key(identity: &str) -> Result<Key> {
+        let g = run(&[s("keys"), s("public-key"), s(identity)]).map_err(|_| {
+            anyhow!(
+                "no identity {identity:?}: the lane's addresses derive from its admin's public key, so add it (`stellar keys add {identity} --public-key G…`)"
+            )
         })?;
         Ok(stellar_strkey::ed25519::PublicKey::from_string(&g)
             .map_err(|e| anyhow!("identity {identity:?} has no ed25519 key: {e:?}"))?
@@ -274,14 +298,15 @@ impl Cli {
     }
 
     /// `request_forced_withdrawal(owner, lane_account, amount)`, signed by `owner`.
+    /// `request_forced_withdrawal`; the inbox index it took.
     pub fn request_forced_withdrawal(
         &self,
         owner_identity: &str,
         contract: &Key,
         owner: &Key,
         amount: i128,
-    ) -> Result<()> {
-        run(&self.with_net(vec![
+    ) -> Result<u64> {
+        let out = run(&self.with_net(vec![
             s("contract"),
             s("invoke"),
             s("--id"),
@@ -297,8 +322,31 @@ impl Cli {
             hex(owner),
             s("--amount"),
             amount.to_string(),
-        ]))
-        .map(|_| ())
+        ]))?;
+        out.trim()
+            .trim_matches('"')
+            .parse()
+            .map_err(|_| anyhow!("request_forced_withdrawal returned {out:?}, not an inbox index"))
+    }
+
+    /// A SEP-53 signature of `message` by `identity` (Stellar CLI 28.1.0
+    /// `message sign`, which adds the "Stellar Signed Message:\n" prefix and
+    /// hashes): the 64 signature bytes.
+    pub fn sign_message(identity: &str, message: &str) -> Result<[u8; 64]> {
+        let out = run(&[
+            s("message"),
+            s("sign"),
+            s(message),
+            s("--sign-with-key"),
+            s(identity),
+        ])
+        .with_context(|| format!("signing with identity {identity:?}"))?;
+        let bytes = base64_decode(out.trim()).ok_or_else(|| {
+            anyhow!("stellar message sign printed {out:?}, not a base64 signature")
+        })?;
+        bytes
+            .try_into()
+            .map_err(|b: Vec<u8>| anyhow!("a signature is 64 bytes, not {}", b.len()))
     }
 
     /// A trustline from `identity` to `CODE:issuer` (creating or keeping it).
@@ -590,5 +638,57 @@ mod tests {
             cli.with_net(vec![s("keys"), s("fund"), s("a")]),
             ["keys", "fund", "a", "--network", "local"]
         );
+    }
+}
+
+/// Standard base64 (with padding), for the one signature the CLI prints.
+fn base64_decode(text: &str) -> Option<Vec<u8>> {
+    let val = |c: u8| -> Option<u32> {
+        Some(match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        } as u32)
+    };
+    let t = text.as_bytes();
+    if t.is_empty() || !t.len().is_multiple_of(4) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(t.len() / 4 * 3);
+    for (i, chunk) in t.chunks(4).enumerate() {
+        let last = i == t.len() / 4 - 1;
+        let pad = chunk.iter().rev().take_while(|&&c| c == b'=').count();
+        if pad > 2 || (pad > 0 && !last) {
+            return None;
+        }
+        let mut n = 0u32;
+        for &c in &chunk[..4 - pad] {
+            n = (n << 6) | val(c)?;
+        }
+        n <<= 6 * pad as u32;
+        let b = n.to_be_bytes();
+        out.extend_from_slice(&b[1..4 - pad]);
+    }
+    Some(out)
+}
+
+#[cfg(test)]
+mod base64_tests {
+    use super::base64_decode;
+
+    #[test]
+    fn decodes() {
+        assert_eq!(base64_decode("TWFu").unwrap(), b"Man");
+        assert_eq!(base64_decode("TWE=").unwrap(), b"Ma");
+        assert_eq!(base64_decode("TQ==").unwrap(), b"M");
+        // The signature `stellar message sign` printed (88 characters).
+        let sig = "5Xpt2LJYc1aBvZY9x8EazheLTWzFXI5uXrkNITkKRqosen48H6Pe/2b4q7zcnkY6VwUKyS+HbITmg89NOcF6Dw==";
+        assert_eq!(base64_decode(sig).unwrap().len(), 64);
+        for bad in ["", "TWF", "T===", "TW=u", "TW*u"] {
+            assert!(base64_decode(bad).is_none(), "{bad}");
+        }
     }
 }

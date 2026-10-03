@@ -93,7 +93,9 @@ pub struct Addresses {
     pub settlement_pinned: bool,
 }
 
-pub fn addresses(m: &Manifest, keys: &Keys) -> Result<Addresses> {
+/// Only the admin's public key is needed (the settlement address and a local
+/// token derive from it), so a lane's users don't need the operators' keys.
+pub fn addresses(m: &Manifest, admin: &Key) -> Result<Addresses> {
     let passphrase = m.env.network.passphrase();
     let (token, token_asset) = match &m.env.token {
         Token::Named(_) => (
@@ -117,8 +119,8 @@ pub fn addresses(m: &Manifest, keys: &Keys) -> Result<Addresses> {
             None,
         ),
         Token::Local { local } => (
-            asset_contract_id(passphrase, local, &keys.admin),
-            Some((local.clone(), keys.admin)),
+            asset_contract_id(passphrase, local, admin),
+            Some((local.clone(), *admin)),
         ),
     };
     let (settlement, settlement_pinned) = match &m.env.settlement {
@@ -129,7 +131,7 @@ pub fn addresses(m: &Manifest, keys: &Keys) -> Result<Addresses> {
             true,
         ),
         None => (
-            contract_id(passphrase, &keys.admin, &settlement_salt(&m.lane.lane_id())),
+            contract_id(passphrase, admin, &settlement_salt(&m.lane.lane_id())),
             false,
         ),
     };
@@ -300,7 +302,7 @@ pub async fn prepare(
     };
 
     let keys = Keys::from_keystore(&m)?;
-    let addrs = addresses(&m, &keys)?;
+    let addrs = addresses(&m, &keys.admin)?;
     // A template may need a token with a set number of decimals (perps: 7).
     // A Stellar Asset Contract always has 7; another contract is asked.
     if let Some(want) = t.token_decimals() {

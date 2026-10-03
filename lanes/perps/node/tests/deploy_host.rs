@@ -202,7 +202,7 @@ fn lane_1_plans_no_changes() {
         relayer: [0xA1; 32],
         validators: vec![[1; 32], [2; 32], [3; 32]],
     };
-    let a = addresses(&m, &keys).unwrap();
+    let a = addresses(&m, &keys.admin).unwrap();
     assert!(a.settlement_pinned);
     assert_eq!(
         stellar_strkey::Contract(a.settlement).to_string().as_str(),

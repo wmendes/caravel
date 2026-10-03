@@ -1640,7 +1640,7 @@ All JSON uses:
 |---|---|
 | `POST /v1/tx` | Body: raw `LaneTxV1` (`application/octet-stream`) or `{ "tx": "<hex>" }`. 202 `{tx_hash, status:"queued"}` or 400 `{error, code}` |
 | `GET /v1/status` | lane_id, height, last checkpoint (sequenced, signed, accepted on Stellar), block_time_ms, validators |
-| `GET /v1/accounts/{G...}` | collateral, equity, free collateral, positions (with upnl, liq price), open orders, next_nonce, session keys |
+| `GET /v1/accounts/{G...}` | collateral, equity, free collateral, positions (with upnl, liq price), open orders, next_nonce, pending_nonce (the nonce after the account's queued transactions, DEC-085), session keys |
 | `GET /v1/markets` | params + oracle price + funding |
 | `GET /v1/markets/{id}/book?depth=50` | aggregated levels |
 | `GET /v1/markets/{id}/trades?limit=100` | recent fills (from receipts) |
@@ -2208,7 +2208,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-10 | Attributes and outputs; `caravel output`; references in relayer feeds (DEC-082) — **Gate G2** | C-09 | review |
 | C-11 | Lifecycle: `stop`, `start`, `restart`, `logs`, `replay` from the lane file, `wait`, `api` (DEC-083) | C-10 | review |
 | C-12 | Users' Stellar flows: `account create/fund`, `balance`, `deposit` (waits for the credit) (DEC-084) | C-11 | review |
-| C-13 | Lane transactions: `tx`, `withdraw`, `claim`, `force-withdraw`, `escape` | C-12 | todo |
+| C-13 | Lane transactions: `tx`, `withdraw`, `claim`, `force-withdraw`, `escape` (DEC-085) | C-12 | review |
 | C-14 | The e2e on the CLI only; README, landing quickstart, RUNBOOK, `docs/LANE_FILE.md` — **Gate G3** | C-13 | todo |
 | C-15 | The resource graph, with identical plans (goldens byte for byte) | C-14 | todo |
 | C-16 | Addresses in plans; `plan --json`; `graph`; `depends_on`, `--target`, `--replace` | C-15 | todo |
@@ -2756,6 +2756,35 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - The lane account is the owner's key in raw hex, with no helper script.
 - **Amounts and errors:** amounts are token units (`12.5`), with integer arithmetic only; the decimals are 7 for a Stellar asset, otherwise the token's `decimals()`. Settlement contract errors (`Error(Contract, #N)`) are explained (`#11`: below the lane's minimum deposit).
 - **Verified:** the Stellar CLI 28.1.0 `tx new change-trust`, `tx new path-payment-strict-receive` (`--send-max`, `--dest-amount`) and `contract invoke --send=no` (`docs/SOURCES.md`) | The quickstart's users needed `stellar tx new`, `contract invoke` and `node -e` to get a token in and see it on the lane | Tokens with their own minter, or an anchor (SEP-24) in front of deposits |
+| DEC-085 | **M0.6 (C-13).** Lane transactions, withdrawals, claims, forced withdrawals and escapes from the CLI (`caravel_deploy::flows`). This includes a review pass over C-11 and C-12.
+- **`caravel tx --from WHO <body…>`.**
+  - The body comes from the template's `plugin body`, with amounts in token units; `@name` is replaced by an identity's G… account.
+  - The CLI builds the platform envelope with `signer = account` and SEP-53. The nonce is `--nonce`, else `max(next_nonce, pending_nonce)` from `/v1/accounts`. The sequencer now reports `pending_nonce`, the nonce after the account's queued transactions (read under the core lock with the state), so back-to-back sends don't reuse a nonce. Two senders that read it at once would still sign the same nonce, so the mempool now refuses a second queued transaction with an account's queued nonce (`/v1/tx` 400 `NONCE_QUEUED`; only one of them could ever run), and the CLI re-reads the nonce and signs again, up to 5 times. This is mempool policy, not consensus: blocks and the engine are unchanged. It signs `"Caravel lane tx " ‖ hex(tx_hash)` with `stellar message sign --sign-with-key WHO` (CLI 28.1.0, base64 on stdout, verified 2026-10-03). It checks the signature locally (`tx_signature_ok`) and POSTs `/v1/tx`.
+  - It prints the tx hash and nonce on stderr, then scans `/v1/blocks` after the pre-send height for its exact bytes, because there is no receipt-by-hash endpoint. A failed read is retried until the timeout (the transaction is already sent). It reports the receipt code with its name and events, or "dropped" once a block passes its expiry (a used or skipped nonce, or a quarantine).
+  - No key is written anywhere. Ledger identities can't sign: `message sign` has no Ledger option.
+- **`caravel withdraw WHO AMOUNT`** builds the platform's WITHDRAW (kind 4), so it doesn't depend on the template. It waits for the block (a non-zero receipt fails), then for its leaf, then claims it (`--no-wait`, `--no-claim`). Leaves carry no tx hash. But every withdrawal pending at a checkpoint's end is one of that checkpoint's leaves (§11.8), so the leaf is the account's leaf of that amount in the checkpoint whose block range holds the inclusion height. That checkpoint is the first with `last_block_height ≥ height`, found by a binary search over the sealed checkpoints. Within that checkpoint its leaf is exact: every push to the pending queue is a WITHDRAW with code 0, a bounced deposit or a forced withdrawal that queued something (the last two by their platform events), and leaves keep push order. So the command's leaf is the one whose rank among the account's leaves of that amount equals the count of the account's same-amount pushes before its entry in the checkpoint's blocks. Concurrent withdrawals of one amount therefore claim distinct leaves. If the blocks can't be read, it takes the first leaf of that amount not yet `Claimed` (any of them pays the same), moving past one claimed meanwhile (#53). `claimed` means this command paid it; `already_claimed` that every candidate was claimed already; a claim that fails is reported with the leaf (`claim_error`, exit 1).
+- **`caravel claim WHO`** claims every leaf that isn't yet `Claimed(seq, index)`. That state is read in batches of 100 with `getLedgerEntries`, with no simulation. Proofs come from the sequencer, else a validator (both filtered to the account, and only from a node whose accepted checkpoints reach Stellar's `LastCkpt`: a sequencer whose relayer died before reporting one lags), else `exit.json` when it is for Stellar's last checkpoint, else the node closest to Stellar with a warning. It goes past a failed leaf and reports each: paid, already claimed by someone else meanwhile (#53; a claim always pays the owner), or failed (exit 1).
+- **`caravel force-withdraw WHO AMOUNT`** resolves the lane's API, then sends `request_forced_withdrawal`, whose wrapper now returns the inbox index. Its leaf is in the first checkpoint whose `inbox_through` passes the index. The lane queues at most what the account can withdraw, and says how much in the inbox entry's `FORCED_WITHDRAWAL_PROCESSED` event (a platform event, DEC-052), read from that checkpoint's blocks and receipts. Nothing queued is reported without waiting longer; otherwise its exact leaf is found and claimed as for `withdraw`.
+- **`caravel escape WHO`** works on a frozen lane only, read from `FrozenInfo` and `LastCkpt` in the instance storage.
+  1. It first claims the account's open withdrawals, best effort (`--no-withdrawals` skips this). A failed read or claim is reported (`withdrawals_error`, `withdrawals.failed`, exit 1) and the escape goes on. Once anything is sent, the report is always printed: a failed escape claim or balance read goes in it (`escape_error`, `balance_error`) rather than replacing it.
+  2. It skips an escape already claimed, including one claimed for the owner meanwhile (#53). It reports `none` for an account with no leaf in the last checkpoint (absent from exit.json, or a 404 from a node at `LastCkpt`), and for every account of a lane frozen before its first checkpoint, whose deposits come back through `refund_unprocessed_deposit`.
+  3. It takes the escape leaf from `exit.json` (only when its seq and header hash are `LastCkpt`'s, so an earlier deployment's file at the same path is passed over), else a validator or the sequencer, for Stellar's last checkpoint.
+  4. It skips a claim that would pay 0 or less (it would use the escape up), with a note, unless `--allow-zero`.
+  5. It reports `withdrawals_paid`, `escape_paid` and the expected amount, `max(0, floor(equity × num / den))`.
+- **Users need only the admin's public key.** `addresses()` takes only the admin key, so a user can add it with `stellar keys add <admin> --public-key G…`, which is what a missing admin identity's error says (never `keys generate`, which would derive another lane's addresses). Simulated reads use the user's own identity.
+- **Errors are explained by the contract that raised them.** The stellar CLI's error keeps its `Error(Contract, #N)` diagnostic lines in order. The host's event log is newest first, and a token's error inside a settlement call is repeated twice in the settlement's frame, so the raiser is the oldest error event (the highest index). The Stellar Asset Contract's codes (13: no trustline, 10: not enough) are told apart from the settlement's. `balance` reports a failed Stellar read (`stellar_error`) apart from no trustline. A bounced deposit is reported as refused, and a timed-out wait exits 4 with its result.
+- **Fixes from the C-11/C-12 review** (17 findings confirmed by 3 skeptics each):
+  - `wait checkpoint --epoch` without `--seq`;
+  - `stop` asking for the relayer and below-threshold validators too;
+  - `deposit` resolving the API before sending;
+  - 404 versus an unreachable API;
+  - a lazy wait target;
+  - JSON pointer and path checks;
+  - non-JSON replies;
+  - `start`'s message;
+  - `replay --json` as one document;
+  - `stop --json` needing `--yes`.
+- **Fixes from the C-13 reviews** (16 findings, then 8 more on the fixes, each confirmed by 3 skeptics): the ones above, plus `wait checkpoint --epoch` scanning every checkpoint from the next one; `stop 1 2 1` naming each node once; and `replay` without the admin identity pointing at `stellar keys add`, not `keys generate` | The quickstart and e2e signed with exported key files (`stellar keys secret > file`), parsed proofs with jq, and claimed through `contract invoke` | Ledger signing for lane transactions, or a receipt-by-hash endpoint |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 
