@@ -1655,7 +1655,7 @@ All JSON uses:
 | `GET /internal/checkpoints/pending` | relayer pulls `{seq, header, batch, epoch, sigs}` |
 | `POST /internal/checkpoints/{seq}/accepted` | relayer reports `{stellar_tx_hash, ledger}` |
 
-The sequencer must keep state history to serve proofs and replays: all blocks, plus a state snapshot at every checkpoint. It MAY prune other snapshots.
+The sequencer must keep state history to serve proofs and replays: all blocks, every checkpoint header and its withdrawal leaves, and the state snapshot of genesis, of the last checkpoint accepted on Stellar, of the 3 before it and of every later one. It MAY prune older snapshots and the batch bytes of accepted checkpoints older than those, which are on Stellar and can be rebuilt from the blocks (DEC-105).
 
 ### 14.5 Executor (`platform/crates/caravel-runtime::executor`)
 
@@ -1720,7 +1720,7 @@ Rules:
   Returns `{signer_key, signature}`.
   A validator configured with the sequencer's key (`sequencer_key`) first refuses, with 401 `UNSIGNED`, a request the sequencer didn't sign within the last 60 s (DEC-095).
 - **Never sign two different headers for the same `seq`.** Persist every signed `(seq, header_hash)` before returning. This is what makes M1 equivocation slashing safe for honest validators.
-- Stores a state snapshot at every checkpoint it computes, keeping at least the last 3 plus the one last accepted on Stellar (polled from `last_checkpoint()`).
+- Stores a state snapshot at every checkpoint it computes, keeping at least genesis, the one last accepted on Stellar (polled from `last_checkpoint()`), the 3 before it and every later one; older snapshots and old accepted batch bytes may be pruned as for the sequencer (§14.4, DEC-105). Blocks are never pruned: past the RPC retention window they are the lane's history.
 - Serves from its own store, as redundant DA and an **independent proof source for the escape hatch**:
   - `GET /v1/blocks/{height}`, `GET /v1/checkpoints/{seq}`;
   - `GET /v1/proofs/withdrawals?account=G...`, `GET /v1/proofs/escape?account=G...` (same JSON as the sequencer).
@@ -2273,6 +2273,7 @@ Branches are `h-0x-short-name`. Gates: H1 (H-01), H2 (H-04), H3 (H-06, the Groun
 | H-14 | **The oracle feed never stops silently** (DEC-102). On 2026-10-03 the testnet oracle stopped at 00:59 UTC for about 19 hours while blocks and checkpoints went on: a feed tick waited forever on a Stellar RPC call. Give every RPC client a timeout and every feed tick a deadline, and add the symptom to the runbook. Ships to lane #1 with the human's OK | H-01 | review |
 | H-15 | **The live terminal** (DEC-103). Prices on every block over the stream (`tickers`), candles of the oracle price from the lane's own blocks, trades kept across restarts, and the web app driven by the stream: candle chart with history, live last candle, trade highlights, a Live indicator. The relayer feed runs at a fixed rate with markets in parallel | H-13 | review |
 | H-16 | **Lane #1 at 0.5 s** (DEC-104). Lane #1 makes a block every 500 ms and checkpoints every 120 blocks, so still once a minute; the oracle feed publishes every 500 ms. Node settings only: no new genesis. Ships with the human's OK | H-15 | review |
+| H-17 | **Leaner stores** (DEC-105). An index for the per-block checkpoint queries, withdrawal proofs that skip the batch bytes, and pruning of old snapshots and accepted batches on every node, with a `compact` command to shrink a stopped node's file. Amends §14.4 and §15 on the human's call | H-16 | review |
 
 ---
 
@@ -3135,6 +3136,15 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 - **What it costs the VM:** every block is executed by the sequencer and three validators, so idle CPU roughly doubles (about 13% of the e2-small measured on 2026-10-03, so about 25%), and blocks are stored twice as often. Under load the per-block caps are unchanged, so capacity per second doubles.
 - **Nothing else counts blocks:** the validators' 5 s clock check, the oracle's 30 s staleness and 5 s future limits, the settlement contract's 60 s timestamp rule, the escape and force-inclusion windows, funding, the 200 ms validator poll and the relayer's intervals are all in wall-clock or ledger time.
 - **Rollback:** set the three values back and apply. | The human chose 0.5 s with a checkpoint a minute: the lane should feel as fast as it can without the bill moving | VM CPU above about 40%, or the relayer fee per checkpoint rising |
+| DEC-105 | **M0.7 (H-17).** Store indexes and pruning, on every node (the sequencer and validators share `caravel-runtime::store::Store`):
+- **Index:** `checkpoints_status_seq ON checkpoints (status, seq)`, created at open. Before it, the query that picks signed checkpoints ran before every block and scanned the whole table, as did the signer loop's every 2 s, the three `last_checkpoint_with` reads behind each `/v1/status` call and the validators' acceptance updates. A store from an earlier release gains it, and the `batch_len` column, when it opens (idempotent).
+- **Narrow reads:** `/v1/proofs/withdrawals` and `export-proofs` read `seq, header, withdrawals` of accepted checkpoints (`Store::accepted_withdrawals`), not the batch bytes of every checkpoint.
+- **Pruning** (`Store::prune`, every 30 s, at most 200 rows of each kind per pass so the block loop never waits long):
+  - snapshots older than the last accepted checkpoint minus 3, except genesis. The escape tree (`/v1/proofs/escape`, `export-proofs`) reads the last accepted one; signing reads none of the older ones;
+  - the batch bytes of accepted checkpoints older than that. A batch is on Stellar, its hash is in the header, and `checkpoint::assemble` rebuilds it from `blocks`; `batch_len` keeps its size, so `/v1/checkpoints/{seq}` still reports `batch_bytes`;
+  - never pruned: blocks (validator catch-up, `check-store`, the perps history, and the lane's only history past Stellar RPC's 7-day window), checkpoint headers, withdrawal leaves (withdrawals never expire on chain), the inbox, `head`, `signed`, `flags`.
+- **Space:** freed pages are reused, so a store stops growing for these tables. `caravel-perps-node compact --config <sequencer or validator toml>` prunes a stopped node's store to the end and runs `VACUUM`.
+- Amends §14.4 ("a state snapshot at every checkpoint") and §15, by the human's call (2026-10-03). | Lane #1 kept about 5,700 full snapshots and every batch twice per store, four stores on one VM, and queries on every block grew with them | Blocks themselves, once a ledger archive or snapshot sync replaces them as history (M1) |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

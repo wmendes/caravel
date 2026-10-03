@@ -223,6 +223,7 @@ pub async fn start<A: NodeApp>(
         cfg.sequencer_url.clone(),
         cfg.poll_ms,
     ));
+    tokio::spawn(prune_loop(node.clone()));
     if let Some(url) = cfg.rpc_url.clone() {
         tokio::spawn(stellar_loop(
             node.clone(),
@@ -402,6 +403,18 @@ async fn stellar_loop<A: NodeApp>(
             Err(e) => tracing::warn!("reading last_checkpoint from Stellar: {e}"),
         }
         tokio::time::sleep(Duration::from_secs(every_secs)).await;
+    }
+}
+
+/// Prunes old snapshots and accepted batches (DEC-105), a bounded pass at a time.
+async fn prune_loop<A: NodeApp>(app: Arc<ValidatorNode<A>>) {
+    loop {
+        tokio::time::sleep(crate::PRUNE_EVERY).await;
+        let a = app.clone();
+        let r =
+            tokio::task::spawn_blocking(move || a.with(|f| f.store_mut().prune(crate::PRUNE_ROWS)))
+                .await;
+        crate::log_pruned(r);
     }
 }
 

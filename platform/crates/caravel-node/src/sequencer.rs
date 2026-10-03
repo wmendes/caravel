@@ -248,6 +248,7 @@ pub async fn start<A: NodeApp>(
     let router = router(node.clone(), &cfg.cors_origins);
     tokio::spawn(block_loop(node.clone(), config_hash));
     tokio::spawn(signer_loop(node.clone()));
+    tokio::spawn(prune_loop(node.clone()));
     Ok((node, router))
 }
 
@@ -302,6 +303,24 @@ async fn block_loop<A: NodeApp>(app: Arc<SequencerNode<A>>, config_hash: [u8; 32
                 return;
             }
         }
+    }
+}
+
+/// Prunes old snapshots and accepted batches (DEC-105), a bounded pass at a
+/// time, between blocks.
+async fn prune_loop<A: NodeApp>(app: Arc<SequencerNode<A>>) {
+    loop {
+        tokio::time::sleep(crate::PRUNE_EVERY).await;
+        let a = app.clone();
+        let r = tokio::task::spawn_blocking(move || {
+            a.core
+                .lock()
+                .expect("core lock")
+                .store_mut()
+                .prune(crate::PRUNE_ROWS)
+        })
+        .await;
+        crate::log_pruned(r);
     }
 }
 

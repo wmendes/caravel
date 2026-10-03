@@ -9,7 +9,7 @@ use axum::Json;
 use caravel_core::checkpoint::CheckpointHeaderV1;
 use caravel_runtime::checkpoint;
 use caravel_runtime::sequencer::{hex, parse_leaves};
-use caravel_runtime::store::{CheckpointRow, CheckpointStatus, Store};
+use caravel_runtime::store::{CheckpointRow, Store};
 use caravel_runtime::views;
 use caravel_runtime::LaneApp;
 use serde::Serialize;
@@ -136,7 +136,7 @@ pub fn checkpoint_value(row: &CheckpointRow) -> Result<Value, ApiError> {
         "header_hash": hex(&checkpoint::sha256(&row.header)),
         "header": views::header(&header),
         "batch_hash": hex(&header.batch_hash),
-        "batch_bytes": row.batch.len(),
+        "batch_bytes": row.batch_len,
         "first_block_height": row.first_height.to_string(),
         "last_block_height": row.last_height.to_string(),
         "epoch": row.epoch.map(|e| e.to_string()),
@@ -158,17 +158,16 @@ pub fn checkpoint_json(store: &Store, seq: u64) -> ApiResult {
 /// proofs. Whether one was already claimed is on Stellar (`is_claimed`).
 pub fn withdrawal_proofs(store: &Store, account: &[u8; 32]) -> ApiResult {
     let mut out = Vec::new();
-    for row in store
-        .checkpoints_with(CheckpointStatus::Accepted)
-        .map_err(ApiError::internal)?
+    for (_, header_bytes, withdrawals) in
+        store.accepted_withdrawals().map_err(ApiError::internal)?
     {
         let header =
-            CheckpointHeaderV1::decode(&row.header).map_err(|_| ApiError::internal("header"))?;
+            CheckpointHeaderV1::decode(&header_bytes).map_err(|_| ApiError::internal("header"))?;
         if header.withdrawal_count == 0 {
             continue;
         }
-        let leaves = parse_leaves(&row.withdrawals)
-            .ok_or_else(|| ApiError::internal("withdrawal leaves"))?;
+        let leaves =
+            parse_leaves(&withdrawals).ok_or_else(|| ApiError::internal("withdrawal leaves"))?;
         if !leaves.iter().any(|l| l.key == *account) {
             continue;
         }
@@ -210,17 +209,16 @@ pub fn exit_proofs<A: LaneApp>(app: &A, store: &Store, seq: u64) -> Result<Value
         .map(|p| json!({ "index": p.index, "account": p.account, "equity": p.amount, "proof": p.proof }))
         .collect();
     let mut withdrawals = Vec::new();
-    for row in store
-        .checkpoints_with(CheckpointStatus::Accepted)
-        .map_err(ApiError::internal)?
+    for (_, header_bytes, leaves_json) in
+        store.accepted_withdrawals().map_err(ApiError::internal)?
     {
         let h =
-            CheckpointHeaderV1::decode(&row.header).map_err(|_| ApiError::internal("header"))?;
+            CheckpointHeaderV1::decode(&header_bytes).map_err(|_| ApiError::internal("header"))?;
         if h.withdrawal_count == 0 {
             continue;
         }
-        let leaves = parse_leaves(&row.withdrawals)
-            .ok_or_else(|| ApiError::internal("withdrawal leaves"))?;
+        let leaves =
+            parse_leaves(&leaves_json).ok_or_else(|| ApiError::internal("withdrawal leaves"))?;
         let hashes = checkpoint::withdrawal_hashes(&h, &leaves);
         withdrawals.extend(views::all_proofs(&h, &leaves, &hashes));
     }
