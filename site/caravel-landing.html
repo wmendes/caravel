@@ -530,10 +530,7 @@ const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const tabs = Array.from(document.querySelectorAll('#rules [role="tab"]'));
   const pane = document.getElementById("diff"), A = document.getElementById("diffA"), B = document.getElementById("diffB"), SRC = document.getElementById("diffSrc");
   const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-  function show(i, focus) {
-    const c = CASES[i];
-    tabs.forEach((tb, j) => { tb.setAttribute("aria-selected", String(j === i)); tb.tabIndex = j === i ? 0 : -1; });
-    pane.setAttribute("aria-labelledby", tabs[i].id);
+  function render(c) {
     A.innerHTML = '<span class="ln c"># lane.toml</span>' + c.diff.map(([m, s]) => m === " "
       ? '<span class="ln">  <span class="h">' + esc(s) + "</span></span>"
       : '<span class="ln ' + (m === "+" ? "add" : "del") + '"><span class="m">' + m + "</span> " + esc(s) + "</span>").join("");
@@ -543,11 +540,38 @@ const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
         : "<li" + (k ? ' class="' + k + '"' : "") + '><span class="sg">' + sg + "</span><span>" + v + "</span><span>" + esc(o) + "</span></li>").join("")
       + '</ol><p class="sum">' + esc(c.sum) + "</p>";
     SRC.textContent = c.src;
+  }
+  // Every example fits the same boxes: each box keeps the tallest example's
+  // height, so switching never moves the page. Measured again on resize.
+  let cur = Math.max(0, tabs.findIndex((t) => t.getAttribute("aria-selected") === "true"));
+  function reserve() {
+    const boxes = [A, B, SRC];
+    boxes.forEach((b) => (b.style.minHeight = ""));
+    const tall = boxes.map(() => 0);
+    CASES.forEach((c) => {
+      render(c);
+      B.querySelectorAll(".pl li").forEach((li) => li.classList.add("in"));
+      boxes.forEach((b, k) => (tall[k] = Math.max(tall[k], b.getBoundingClientRect().height)));
+    });
+    boxes.forEach((b, k) => (b.style.minHeight = Math.ceil(tall[k]) + "px"));
+    render(CASES[cur]);
+    B.querySelectorAll(".pl li").forEach((li) => li.classList.add("in"));
+  }
+  function show(i, focus) {
+    const c = CASES[i];
+    cur = i;
+    tabs.forEach((tb, j) => { tb.setAttribute("aria-selected", String(j === i)); tb.tabIndex = j === i ? 0 : -1; });
+    pane.setAttribute("aria-labelledby", tabs[i].id);
+    render(c);
     const lis = B.querySelectorAll(".pl li");
     if (REDUCE) lis.forEach((li) => li.classList.add("in"));
-    else requestAnimationFrame(() => requestAnimationFrame(() => lis.forEach((li, j) => setTimeout(() => li.classList.add("in"), j * 70))));
+    else { void B.offsetWidth; lis.forEach((li, j) => setTimeout(() => li.classList.add("in"), j * 70)); }
     if (focus) tabs[i].focus();
   }
+  reserve();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(reserve);
+  let rt = null;
+  window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(reserve, 150); });
   tabs.forEach((tb, i) => {
     tb.addEventListener("click", () => { if (tb.getAttribute("aria-selected") !== "true") show(i); });
     tb.addEventListener("keydown", (e) => {
