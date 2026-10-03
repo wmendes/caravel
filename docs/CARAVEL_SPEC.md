@@ -1814,6 +1814,7 @@ The perps lane's feed module, `lanes/perps/relayer-feeds` (DEC-053). The relayer
     - `lane #FF8C7C` (lane things only: blocks, soft confirmations), `lane-soft #3E1A18`;
     - `harbor #26958F` (Stellar things only: checkpoints, settlement, claims), `harbor-soft #0F3B3F`.
   - Never add a third accent. Text on `lane` or `harbor` fills uses `#081E22`.
+  - The perps app's trading terminal (M0.7, DEC-101) uses its own tokens: Inter, OKLCH near-blacks, coral for soft and teal for settled as above, plus green and red for direction only.
 - Copy rules:
   - The product is "Caravel", the chain is a "lane", Stellar is "Stellar" (never "L1").
   - No exclamation marks or hype.
@@ -2267,6 +2268,7 @@ Branches are `h-0x-short-name`. Gates: H1 (H-01), H2 (H-04), H3 (H-06, the Groun
 | H-10 | **The first outside run.** Someone outside the team goes from the README to a working lane and one recipe, with the human watching. Record the friction and fix what blocks. This is the first external run, and it happens before HackMeridian | H-09 | todo |
 | H-11 | **Mentor kit** — **Gate H5**. A 5-minute lightning talk, a FAQ (what it is, who it's for, the tradeoffs, what isn't built yet), a troubleshooting page, and how mentors help a team pick it up. Nothing goes to the organisers without the human | H-10 | todo |
 | H-12 | **The docs site** (DEC-100). Docusaurus in `docs-site/`, its own Vercel project. It has Getting started, Concepts, Guides and Reference. The lane-file reference moves there from `docs/LANE_FILE.md`, and the CLI reference is generated from `caravel help` and checked in CI. Local search, the landing page's palette, copy checks. Deploy only with the human's OK | H-01 | review |
+| H-13 | **The perps trading terminal** (DEC-101). A full redesign of `lanes/perps/web` as a professional perps DEX: market bar, chart, book and trades, order ticket with Market and Post-only, positions with Close, first-run steps, soft and settled everywhere, stale-oracle and halted states, phone layout. Same API and signing code. Ships to lane #1 only with the human's OK | H-01 | review |
 
 ---
 
@@ -3105,6 +3107,14 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - CI's apps job runs typecheck and build.
 - **Look:** a quieter palette than the landing page's, by the human's call: white and a near-black charcoal with neutral greys. The landing page's coral (links, the active page, cautions) and teal (notes, markers) appear only as accents, with self-hosted Schibsted Grotesk. Admonitions have even borders, never a side stripe. There is a docs share image, and an announcement bar that can't be dismissed: testnet software, not audited.
 - **Search:** `@easyops-cn/docusaurus-search-local` 0.55.3 (lunr, built at build time; its `open-ask-ai` peer is optional and not installed). Algolia DocSearch can replace it later. | The landing page's job became attracting visitors; the docs were team-facing Markdown with no navigation or search, and the lane-file reference lived in one 30 KB file | Versioned docs (after the first tagged release), DocSearch, a custom domain |
+| DEC-101 | **M0.7 (H-13).** The perps web app is redesigned as a trading terminal, by the human's brief (reference: Hyperliquid; dark only; desktop first; whole app). It overrides §18.1's brand and DEC-047's "direction without colour" for the perps app only:
+- **Colour roles:** green and red mark direction only (long/short, bids/asks, profit/loss) and always come with a sign, arrow or word, so colour is never the only signal; coral marks lane state (soft), teal marks Stellar state (settled) and Stellar actions; amber marks stale or degraded data. Surfaces are OKLCH near-blacks tinted toward the brand's teal hue, split by hairlines, not cards.
+- **Type:** Inter (variable, 400 to 700, OFL) self-hosted in `public/fonts/`, tabular figures for every number; the wordmark is the Caravel logo SVG. Schibsted Grotesk and Google Fonts are gone from the app.
+- **Layout:** market bar (oracle mark and its age, best bid/ask, spread, open interest, max leverage = 10000 / `imf_bps`, fees, price band); chart, book with trades, and the order ticket with the account under it; positions, open orders and your trades below; a status bar with the lane block (soft) and the accepted checkpoint (settled). Only numbers the lane API serves are shown: no funding rate, no 24-hour change.
+- **Ticket:** Limit (GTC), Market and Post-only. Market is an IOC limit at 90% of the price band from the oracle (the engine accepts \|price − oracle\| ≤ band), so a small oracle move between signing and sequencing does not reject it; Close on a position sends the same order, reduce-only. Clicking a book level sets the price; B and S pick the side.
+- **First run:** the ticket pane shows four steps (connect, deposit on Stellar, enable fast trading, place an order) until the account exists.
+- **State:** the connected account moves into the app state, polled every 5 s and updated by the stream, so the top bar, ticket and portfolio share it. The API, codec, signing and session-key code are unchanged.
+- `lanes/perps/web/PRODUCT.md` records the users, principles and anti-references the design follows; `copy.test.ts` still holds the §2 claims. | The human asked for a professional perps DEX look. Traders read direction by colour on every venue they know, and the soft/settled distinction keeps its own two colours | A light theme, or real price history from the lane |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

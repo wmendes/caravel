@@ -3,6 +3,7 @@ import { useState } from "react";
 import { lane, type Proof } from "../api/lane";
 import { explain, stellar } from "../api/stellar";
 import { config } from "../config";
+import { Chip, Empty } from "../components/ui";
 import { short, usdc } from "../format";
 import { useApp, usePoll } from "../state";
 
@@ -65,118 +66,151 @@ export function Escape() {
 
   if (!frozen) {
     return (
-      <div className="prose">
-        <h1>Escape</h1>
-        <p>The settlement contract is not frozen. Withdraw normally from the Portfolio page.</p>
-        <p className="muted">
-          If the lane stops checkpointing for the escape timeout, or leaves a deposit or forced withdrawal sent through Stellar unprocessed past the force-inclusion window, anyone can freeze the contract. Then each account claims its last checkpointed equity here.
-        </p>
+      <div className="page">
+        <div className="page-head">
+          <div>
+            <h1>Escape</h1>
+            <p>
+              The settlement contract is not frozen <Chip kind="settled">normal</Chip>. Withdraw from the Portfolio page as usual.
+            </p>
+          </div>
+        </div>
+        <section className="section">
+          <div className="section-head">
+            <h3>When this page matters</h3>
+          </div>
+          <div className="section-body">
+            <p className="dim" style={{ maxWidth: "72ch" }}>
+              If the lane stops checkpointing for the escape timeout, or leaves a deposit or forced withdrawal sent through Stellar unprocessed past the force-inclusion window, anyone can freeze the contract. From then on, each account claims its equity from the last accepted checkpoint here, with a proof from the sequencer, any validator, or a file from <span className="mono">caravel-perps-node replay --prove-escape</span>.
+            </p>
+          </div>
+        </section>
       </div>
     );
   }
 
   const share = proof && info && info.payout_den > 0n ? (BigInt(proof.equity ?? "0") * info.payout_num) / info.payout_den : null;
   return (
-    <>
+    <div className="page">
       <div className="page-head">
         <div>
           <h1>The settlement contract is frozen</h1>
           <p>
-            The lane stopped checkpointing or ignored a request sent through Stellar. Nothing more is accepted from the lane. Each account can claim its equity from the last accepted checkpoint{onChain ? ` (#${onChain.seq})` : ""}, pro rata to what the vault holds.
+            The lane stopped checkpointing or ignored a request sent through Stellar, so nothing more is accepted from it. Each account can claim its equity from the last accepted checkpoint{onChain ? ` (#${onChain.seq})` : ""}, pro rata to what the vault holds.
           </p>
         </div>
+        <Chip kind="danger">frozen</Chip>
       </div>
       {!address ? (
-        <button className="btn harbor" onClick={() => void connect()}>
-          Connect a wallet
-        </button>
+        <section className="section">
+          <Empty
+            title="Connect the wallet that owns the lane account"
+            action={
+              <button className="btn stellar" onClick={() => void connect()}>
+                Connect wallet
+              </button>
+            }
+          />
+        </section>
       ) : (
-        <div className="two">
-          <section className="panel stack">
-            <h3>Your escape claim</h3>
-            {info && (
-              <p className="note">
-                Payout ratio {usdc(info.payout_num)} / {usdc(info.payout_den)} USDC ({info.payout_den > 0n ? `${Number((info.payout_num * 10_000n) / info.payout_den) / 100}%` : "no equity"}).
-              </p>
-            )}
-            {claimed ? (
-              <p className="ok">You have already claimed.</p>
-            ) : (
-              <>
-                <div className="row">
-                  <button className="btn" onClick={() => void fetchProof()}>
-                    Get my proof
-                  </button>
-                  <label className="btn">
-                    Upload a proof file
-                    <input type="file" accept="application/json" hidden onChange={(e) => e.target.files?.[0] && void upload(e.target.files[0])} />
-                  </label>
-                </div>
-                {proof && (
-                  <dl className="kv">
-                    <dt>Source</dt>
-                    <dd>{proof.from}</dd>
-                    <dt>Checkpoint</dt>
-                    <dd>#{proof.seq}</dd>
-                    <dt>Equity</dt>
-                    <dd>{usdc(proof.equity ?? "0")} USDC</dd>
-                    <dt>You receive</dt>
-                    <dd>{share !== null ? `${usdc(share)} USDC` : "–"}</dd>
-                  </dl>
-                )}
-                <button
-                  className="btn harbor"
-                  disabled={!proof || busy}
-                  onClick={async () => {
-                    if (!proof) return;
-                    setBusy(true);
-                    setMsg(null);
-                    try {
-                      const hash = await stellar.escapeClaim(address, { index: proof.index, equity: proof.equity ?? "0", proof: proof.proof });
-                      setMsg({ ok: true, text: `Claimed on Stellar (${short(hash, 6)}).` });
-                      setClaimed(true);
-                    } catch (e) {
-                      setMsg({ ok: false, text: explain(e) });
-                    } finally {
-                      setBusy(false);
-                    }
-                  }}
-                >
-                  {busy ? "Waiting for your wallet…" : "Claim on Stellar"}
-                </button>
-              </>
-            )}
-            {msg && <p className={msg.ok ? "ok" : "error"}>{msg.text}</p>}
-          </section>
-          <section className="panel stack">
-            <h3>Deposits the lane never processed</h3>
-            {refunds.length === 0 ? (
-              <p className="empty">None for your account.</p>
-            ) : (
-              refunds.map((r) => (
-                <div className="spread" key={r.index.toString()}>
-                  <span>
-                    Inbox #{r.index.toString()}: {usdc(r.amount)} USDC
-                  </span>
+        <div className="cols">
+          <section className="section">
+            <div className="section-head">
+              <h3>Your escape claim</h3>
+              {info && <span className="hint num">Payout {info.payout_den > 0n ? `${Number((info.payout_num * 10_000n) / info.payout_den) / 100}%` : "none"}</span>}
+            </div>
+            <div className="section-body">
+              {info && (
+                <p className="hint">
+                  The vault holds {usdc(info.payout_num)} USDC against {usdc(info.payout_den)} USDC of checkpointed equity.
+                </p>
+              )}
+              {claimed ? (
+                <p className="msg ok">You have already claimed.</p>
+              ) : (
+                <>
+                  <div className="row" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button className="btn" onClick={() => void fetchProof()}>
+                      Get my proof
+                    </button>
+                    <label className="btn">
+                      Upload a proof file
+                      <input type="file" accept="application/json" hidden onChange={(e) => e.target.files?.[0] && void upload(e.target.files[0])} />
+                    </label>
+                  </div>
+                  {proof && (
+                    <dl className="kv">
+                      <dt>Source</dt>
+                      <dd>{proof.from}</dd>
+                      <dt>Checkpoint</dt>
+                      <dd>#{proof.seq}</dd>
+                      <dt>Equity</dt>
+                      <dd>{usdc(proof.equity ?? "0")} USDC</dd>
+                      <dt>You receive</dt>
+                      <dd className="ink">{share !== null ? `${usdc(share)} USDC` : "–"}</dd>
+                    </dl>
+                  )}
                   <button
-                    className="btn small harbor"
+                    className="btn stellar block"
+                    disabled={!proof || busy}
                     onClick={async () => {
+                      if (!proof) return;
+                      setBusy(true);
+                      setMsg(null);
                       try {
-                        await stellar.refund(address, r.index);
-                        setRefunds((x) => x.filter((y) => y.index !== r.index));
+                        const hash = await stellar.escapeClaim(address, { index: proof.index, equity: proof.equity ?? "0", proof: proof.proof });
+                        setMsg({ ok: true, text: `Claimed on Stellar (${short(hash, 6)}).` });
+                        setClaimed(true);
                       } catch (e) {
                         setMsg({ ok: false, text: explain(e) });
+                      } finally {
+                        setBusy(false);
                       }
                     }}
                   >
-                    Refund
+                    {busy ? "Sign in your wallet…" : "Claim on Stellar"}
                   </button>
-                </div>
-              ))
+                </>
+              )}
+              {msg && <p className={`msg ${msg.ok ? "ok" : "err"}`}>{msg.text}</p>}
+            </div>
+          </section>
+          <section className="section">
+            <div className="section-head">
+              <h3>Deposits the lane never processed</h3>
+            </div>
+            {refunds.length === 0 ? (
+              <Empty title="None for your account">A deposit the lane never processed would show here, refundable 1:1.</Empty>
+            ) : (
+              <table className="table">
+                <tbody>
+                  {refunds.map((r) => (
+                    <tr key={r.index.toString()}>
+                      <td className="num">Inbox #{r.index.toString()}</td>
+                      <td className="r num">{usdc(r.amount)} USDC</td>
+                      <td className="r">
+                        <button
+                          className="btn sm stellar"
+                          onClick={async () => {
+                            try {
+                              await stellar.refund(address, r.index);
+                              setRefunds((x) => x.filter((y) => y.index !== r.index));
+                            } catch (e) {
+                              setMsg({ ok: false, text: explain(e) });
+                            }
+                          }}
+                        >
+                          Refund
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </section>
         </div>
       )}
-    </>
+    </div>
   );
 }
