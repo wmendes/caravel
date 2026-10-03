@@ -80,6 +80,16 @@ checkWorkspace("lanes/perps/engine", ["crates", "contracts"]);
 const toolchain = read("rust-toolchain.toml").match(/channel\s*=\s*"([^"]+)"/)?.[1];
 if (toolchain !== versions.rust_toolchain) fail(`rust-toolchain.toml channel ${toolchain}, versions.json says ${versions.rust_toolchain}`);
 if (!read("rust-toolchain.toml").includes(`"${versions.wasm_target}"`)) fail(`rust-toolchain.toml does not list target ${versions.wasm_target}`);
+// The Stellar CLI the installer downloads and CI installs (H-03).
+for (const [file, re] of [
+  ["scripts/install.sh", /^STELLAR_CLI_VERSION="([^"]+)"/m],
+  [".github/workflows/ci.yml", /STELLAR_CLI_VERSION: "([^"]+)"/],
+  [".github/workflows/release.yml", /STELLAR_CLI_VERSION: "([^"]+)"/],
+]) {
+  const m = read(file).match(re);
+  if (!m) fail(`${file} does not pin STELLAR_CLI_VERSION`);
+  else if (m[1] !== versions.stellar_cli) fail(`${file} pins the Stellar CLI ${m[1]}, versions.json says ${versions.stellar_cli}`);
+}
 
 // --- npm: exact pins in package.json and package-lock.json ------------------
 // npm apps: the platform relayer, the perps feed module and web app (M0.5 layout), and the docs site (H-12).
