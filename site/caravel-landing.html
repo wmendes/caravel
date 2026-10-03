@@ -148,6 +148,28 @@ section.band { padding-block: clamp(48px, 6vw, 72px); border-top: 1px solid var(
 .head { display: grid; gap: 12px; max-width: 760px; }
 .head h2 { font-size: clamp(1.875rem, 4.2vw, 3rem); line-height: 1.06; letter-spacing: -.02em; }
 
+/* Who it's for: one sentence whose subject changes, and the four rules that app would set, each over the line that sets it */
+.who-for h2 { font-size: clamp(2.25rem, 6vw, 4.5rem); line-height: 1.02; letter-spacing: -.03em; max-width: 16ch; }
+.who-for .swap { display: inline-grid; vertical-align: bottom; overflow: hidden; color: var(--lane); }
+.who-for .swap > span { grid-area: 1 / 1; transition: transform .55s var(--out), opacity .55s var(--out); }
+.who-for .swap > span.out { transform: translateY(-100%); opacity: 0; }
+.who-for .swap > span.pre { transform: translateY(100%); opacity: 0; transition: none; }
+.apps { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-top: 28px; }
+.app { font: 700 .9375rem var(--font); color: var(--muted); background: none; border: 0; padding: 6px 0; min-height: 40px; cursor: pointer; border-bottom: 2px solid transparent; transition: color .2s ease, border-color .2s ease; }
+.app:hover { color: var(--ink); }
+.app[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--lane); }
+.rules4 { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px; margin-top: 36px; }
+@media (max-width: 960px) { .rules4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 520px) { .rules4 { grid-template-columns: minmax(0, 1fr); gap: 20px; } }
+.rules4 li { border-top: 2px solid var(--rule); padding-top: 14px; display: grid; gap: 6px; transition: opacity .45s var(--out), transform .45s var(--out); }
+.rules4 li b { font-size: 1.1875rem; line-height: 1.25; }
+.rules4 li code { font-size: .8125rem; color: var(--harbor-ink); overflow-wrap: anywhere; }
+.rules4.fade li { opacity: 0; transform: translateY(6px); }
+.rules4 li:nth-child(2) { transition-delay: .04s; } .rules4 li:nth-child(3) { transition-delay: .08s; } .rules4 li:nth-child(4) { transition-delay: .12s; }
+.who-note { margin-top: 28px; display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: .9375rem; color: var(--muted); }
+.who-note .kind { color: var(--ink); font-weight: 700; }
+@media (prefers-reduced-motion: reduce) { .who-for .swap > span, .rules4 li, .app { transition: none; } }
+
 /* Quickstart */
 .join { background: var(--raised); border: 1px solid var(--rule); border-radius: 16px; padding: clamp(28px, 5vw, 56px); display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: clamp(24px, 4vw, 56px); align-items: center; }
 @media (max-width: 860px) { .join { grid-template-columns: minmax(0, 1fr); } }
@@ -236,6 +258,7 @@ footer p { font-size: .875rem; color: var(--muted); }
       </svg>
     </a>
     <nav class="nav" aria-label="Sections">
+      <a href="#who">Who it's for</a>
       <a href="#rules">Your rules</a>
       <a href="#start">Quickstart</a>
       <!-- Docs: a placeholder until the docs site exists; put its URL here. -->
@@ -294,12 +317,32 @@ footer p { font-size: .875rem; color: var(--muted); }
     </div>
   </section>
 
+  <section class="band who-for" id="who" aria-labelledby="who-h">
+    <div class="wrap">
+      <p class="eyebrow">Who it's for</p>
+      <h2 id="who-h">Run <span class="swap" id="whoSwap"><span>a trading venue</span></span> with its own rules.</h2>
+      <div class="apps" role="tablist" aria-label="Kinds of app">
+        <button class="app" type="button" role="tab" aria-selected="true" aria-controls="whoRules" data-app="0">Trading venue</button>
+        <button class="app" type="button" role="tab" aria-selected="false" aria-controls="whoRules" data-app="1" tabindex="-1">Payment network</button>
+        <button class="app" type="button" role="tab" aria-selected="false" aria-controls="whoRules" data-app="2" tabindex="-1">Game economy</button>
+        <button class="app" type="button" role="tab" aria-selected="false" aria-controls="whoRules" data-app="3" tabindex="-1">Agent marketplace</button>
+      </div>
+      <ol class="rules4" id="whoRules" role="tabpanel" aria-live="off">
+        <li><b>Zero maker fees</b><code>maker_fee_bps = 0</code></li>
+        <li><b>Up to 10x leverage</b><code>imf_bps = 1000</code></li>
+        <li><b>Its own price feed</b><code>[perps.oracle] keys = […]</code></li>
+        <li><b>Settles in Circle's USDC</b><code>token = "circle-usdc"</code></li>
+      </ol>
+      <p class="who-note"><span><span class="kind" id="whoKind">Template: Perps</span>, live on testnet</span><span>Deposits, withdrawals and exits stay on Stellar.</span></p>
+    </div>
+  </section>
+
   <section class="band" id="rules" aria-labelledby="rules-h">
     <div class="wrap">
       <div class="head">
         <p class="eyebrow">Your rules</p>
-        <h2 id="rules-h">A chain with your rules.<br>The money stays on Stellar.</h2>
-        <p class="lede">On Stellar, every app shares the network's fees and rules. A lane sets its own, one line each: fees, who may join, account limits, validators, the settlement token, block time. Deposits, withdrawals and exits stay on Stellar.</p>
+        <h2 id="rules-h">Every rule is a line.<br>Every change gets a plan.</h2>
+        <p class="lede">On Stellar, every app shares the network's fees and rules. A lane sets its own in one file. Pick what you'd change: <code>plan</code> says what <code>apply</code> would do, before it does it.</p>
       </div>
       <div class="plangrid">
         <div class="groups" role="tablist" aria-label="What a change does">
@@ -506,6 +549,58 @@ const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       if (j !== undefined) { e.preventDefault(); show(j, true); }
     });
   });
+})();
+
+/* Who it's for: the subject and its rules change every few seconds until someone picks one. */
+(() => {
+  const APPS = [
+    { name: "a trading venue", kind: "Template: Perps", tail: ", live on testnet", rules: [["Zero maker fees", "maker_fee_bps = 0"], ["Up to 10x leverage", "imf_bps = 1000"], ["Its own price feed", "[perps.oracle] keys = […]"], ["Settles in Circle's USDC", 'token = "circle-usdc"']] },
+    { name: "a payment network", kind: "Template: Payments", tail: "", rules: [["A flat fee per transfer", "transfer_fee = 100000"], ["Members only", 'mode = "allowlist"'], ["Two of three validators sign", "threshold = 2"], ["Settles in its own token", 'token = "usd"']] },
+    { name: "a game economy", kind: "Your engine", tail: ", on the app SDK", rules: [["200 ms blocks", "block_time_ms = 200"], ["Players only", 'mode = "allowlist"'], ["50 moves a block per player", "max_txs_per_account_per_block = 50"], ["Its own in-game token", 'token = "gold"']] },
+    { name: "an agent marketplace", kind: "Template: Payments", tail: "", rules: [["No fee between agents", "transfer_fee = 0"], ["Session keys for each agent", "max_session_keys = 4"], ["Up to 256 agents", "max_accounts = 256"], ["Settles in USDC", 'token = "circle-usdc"']] },
+  ];
+  const swap = document.getElementById("whoSwap"), list = document.getElementById("whoRules"), kind = document.getElementById("whoKind");
+  const tabs = Array.from(document.querySelectorAll("#who .app"));
+  if (!swap || !list || !tabs.length) return;
+  const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let cur = 0, timer = null, picked = false, seen = false;
+  const esc = (t) => t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  function show(i, focus) {
+    if (i === cur) return;
+    const a = APPS[i];
+    cur = i;
+    tabs.forEach((t, k) => { t.setAttribute("aria-selected", String(k === i)); t.tabIndex = k === i ? 0 : -1; });
+    if (focus) tabs[i].focus();
+    kind.textContent = a.kind;
+    kind.nextSibling.textContent = a.tail;
+    const fill = () => { list.innerHTML = a.rules.map(([b, c]) => `<li><b>${esc(b)}</b><code>${esc(c)}</code></li>`).join(""); };
+    if (still) { swap.firstElementChild.textContent = a.name; fill(); return; }
+    const old = swap.firstElementChild, nu = document.createElement("span");
+    nu.textContent = a.name; nu.className = "pre"; swap.appendChild(nu);
+    void nu.offsetWidth; // commit the start position, then slide both
+    old.classList.add("out"); nu.classList.remove("pre");
+    setTimeout(() => old.remove(), 600);
+    list.classList.add("fade");
+    setTimeout(() => { fill(); void list.offsetWidth; list.classList.remove("fade"); }, 260);
+  }
+  const stop = () => { clearInterval(timer); timer = null; };
+  const pick = () => { picked = true; stop(); };
+  tabs.forEach((t, k) => {
+    t.addEventListener("click", () => { pick(); show(k); });
+    t.addEventListener("keydown", (e) => {
+      const d = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+      if (d) { e.preventDefault(); pick(); show((cur + d + APPS.length) % APPS.length, true); }
+    });
+  });
+  if (!still) {
+    const sec = document.getElementById("who");
+    // It turns while in view, pauses under the pointer or focus, and stops once someone picks.
+    const go = () => { if (!timer && !picked && seen) timer = setInterval(() => show((cur + 1) % APPS.length), 3800); };
+    sec.addEventListener("mouseenter", stop); sec.addEventListener("mouseleave", go);
+    sec.addEventListener("focusin", stop);
+    if ("IntersectionObserver" in window) new IntersectionObserver((es) => es.forEach((e) => { seen = e.isIntersecting; seen ? go() : stop(); }), { threshold: 0.4 }).observe(sec);
+    else { seen = true; go(); }
+  }
 })();
 </script>
 </body>
