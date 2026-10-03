@@ -2185,7 +2185,7 @@ M0.6 makes Caravel a real infrastructure-as-code CLI. The human chose:
 - The frozen engine is untouched.
 - `platform/` never depends on `lanes/`.
 
-The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.md`. Phase gates are G1 (C-05), G2 (C-10), G3 (C-14), G4 (C-17), G5 (C-21) and G6 (C-25). **Gate G1 passed on 2026-10-02**, with #49–#54 merged.
+The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.md`. Phase gates are G1 (C-05), G2 (C-10), G3 (C-14), G4 (C-17), G5 (C-21) and G6 (C-25). **Gate G1 passed on 2026-10-02**, with #49–#54 merged. Gates G2 to G5 passed on 2026-10-03 (#56–#72), and **Gate G6 on 2026-10-03**, with #73–#76 merged: M0.6 is done.
 
 **Needs the human first (§0.4):**
 - signing users' lane transactions through the Stellar CLI keystore (SEP-53);
@@ -2202,26 +2202,26 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-03 | `caravel-cli`, the one CLI: lane-file and env discovery, `--json`, exit codes; plan, apply, status, destroy, validate, env, output, version, doctor (DEC-075) | C-02 | done |
 | C-04 | Install from source: `install.sh`, the release next to the binary, a web dir per template, a binary-platform guard (DEC-076) | C-03 | done |
 | C-05 | `init` and `keys`; local applies create the identities they name (DEC-077) — **Gate G1** | C-04 | done |
-| C-06 | `caravel-lanefile`: loader with spans and diagnostics, `include`, `extends`, reserved keys; genesis refuses `${` (DEC-078) | C-05 | review |
-| C-07 | The expression evaluator: grammar, types, functions, no time or randomness (DEC-079) | C-06 | review |
-| C-08 | Vars, locals, `for_each`, per-env `[env.<name>.node]` (DEC-080) | C-07 | review |
-| C-09 | The manifest on resolved values; `caravel render`; the e2e without heredoc or `sed` (DEC-081) | C-08 | review |
-| C-10 | Attributes and outputs; `caravel output`; references in relayer feeds (DEC-082) — **Gate G2** | C-09 | review |
-| C-11 | Lifecycle: `stop`, `start`, `restart`, `logs`, `replay` from the lane file, `wait`, `api` (DEC-083) | C-10 | review |
-| C-12 | Users' Stellar flows: `account create/fund`, `balance`, `deposit` (waits for the credit) (DEC-084) | C-11 | review |
-| C-13 | Lane transactions: `tx`, `withdraw`, `claim`, `force-withdraw`, `escape` (DEC-085) | C-12 | review |
-| C-14 | The e2e on the CLI only; README, landing quickstart, RUNBOOK, `docs/LANE_FILE.md` — **Gate G3** (DEC-086) | C-13 | review |
-| C-15 | The resource graph, with identical plans (goldens byte for byte) (DEC-087) | C-14 | review |
-| C-16 | Addresses in plans; `plan --json`; `graph`; `depends_on`, `--target`, `--replace` (DEC-088) | C-15 | review |
-| C-17 | Saved plans: `plan --out`, `apply <planfile>` refused when anything moved — **Gate G4** (DEC-089) | C-16 | review |
-| C-18 | Accounts: funding, trustlines, balances topped up (DEC-090) | C-17 | review |
-| C-19 | Tokens: issued assets and their contracts; a declared token as the settlement token (DEC-091) | C-18 | review |
-| C-20 | Contracts: any Wasm, constructor arguments, derived addresses, `prevent_destroy` (DEC-092) | C-19 | review |
-| C-21 | Local modules with inputs and outputs — **Gate G5** (DEC-093) | C-20 | review |
-| C-22 | Several hosts per deployment and node placement (DEC-094) | C-21 | review |
-| C-23 | Networking across hosts: signed `/v1/sign` requests, private or public addresses, validators run elsewhere (DEC-095) | C-22 | review |
-| C-24 | Lane namespaces: several lanes on one host (DEC-096) | C-23 | review |
-| C-25 | The web app as a resource, configured from outputs — **Gate G6** (DEC-097) | C-24 | review |
+| C-06 | `caravel-lanefile`: loader with spans and diagnostics, `include`, `extends`, reserved keys; genesis refuses `${` (DEC-078) | C-05 | done |
+| C-07 | The expression evaluator: grammar, types, functions, no time or randomness (DEC-079) | C-06 | done |
+| C-08 | Vars, locals, `for_each`, per-env `[env.<name>.node]` (DEC-080) | C-07 | done |
+| C-09 | The manifest on resolved values; `caravel render`; the e2e without heredoc or `sed` (DEC-081) | C-08 | done |
+| C-10 | Attributes and outputs; `caravel output`; references in relayer feeds (DEC-082) — **Gate G2** | C-09 | done |
+| C-11 | Lifecycle: `stop`, `start`, `restart`, `logs`, `replay` from the lane file, `wait`, `api` (DEC-083) | C-10 | done |
+| C-12 | Users' Stellar flows: `account create/fund`, `balance`, `deposit` (waits for the credit) (DEC-084) | C-11 | done |
+| C-13 | Lane transactions: `tx`, `withdraw`, `claim`, `force-withdraw`, `escape` (DEC-085) | C-12 | done |
+| C-14 | The e2e on the CLI only; README, landing quickstart, RUNBOOK, `docs/LANE_FILE.md` — **Gate G3** (DEC-086) | C-13 | done |
+| C-15 | The resource graph, with identical plans (goldens byte for byte) (DEC-087) | C-14 | done |
+| C-16 | Addresses in plans; `plan --json`; `graph`; `depends_on`, `--target`, `--replace` (DEC-088) | C-15 | done |
+| C-17 | Saved plans: `plan --out`, `apply <planfile>` refused when anything moved — **Gate G4** (DEC-089) | C-16 | done |
+| C-18 | Accounts: funding, trustlines, balances topped up (DEC-090) | C-17 | done |
+| C-19 | Tokens: issued assets and their contracts; a declared token as the settlement token (DEC-091) | C-18 | done |
+| C-20 | Contracts: any Wasm, constructor arguments, derived addresses, `prevent_destroy` (DEC-092) | C-19 | done |
+| C-21 | Local modules with inputs and outputs — **Gate G5** (DEC-093) | C-20 | done |
+| C-22 | Several hosts per deployment and node placement (DEC-094) | C-21 | done |
+| C-23 | Networking across hosts: signed `/v1/sign` requests, private or public addresses, validators run elsewhere (DEC-095) | C-22 | done |
+| C-24 | Lane namespaces: several lanes on one host (DEC-096) | C-23 | done |
+| C-25 | The web app as a resource, configured from outputs — **Gate G6** (DEC-097) | C-24 | done |
 
 ---
 
