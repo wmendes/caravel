@@ -23,4 +23,5 @@ reqwest = { version = "0.13.5", default-features = false, features = ["json", "r
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "time"] }
 
 [dev-dependencies]
+proptest = "1.11.0"
 tempfile = "3.27.0"

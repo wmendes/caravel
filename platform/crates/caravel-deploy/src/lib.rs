@@ -23,6 +23,7 @@ pub mod chain;
 pub mod cli;
 pub mod deploy;
 pub mod flows;
+pub mod graph;
 pub mod host;
 pub mod lifecycle;
 pub mod local;
