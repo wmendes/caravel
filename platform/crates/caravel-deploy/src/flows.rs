@@ -433,6 +433,16 @@ impl Flows {
         }))
     }
 
+    /// A contract's balance of the settlement token (the settlement's own is
+    /// what the lane holds on Stellar), read with the admin as the
+    /// simulation's source.
+    pub fn contract_balance(&self, contract: &Key) -> Result<Value> {
+        let b =
+            self.cli
+                .token_balance_of(&self.m.env.admin, &self.addrs.token, &strkey(contract))?;
+        Ok(json!({ "contract": strkey(contract), "stellar": format_units(b, self.decimals()?) }))
+    }
+
     /// Deposits `amount`; with `wait`, polls until the lane has processed it.
     /// The result says whether it was credited, bounced (the lane refused
     /// it; it comes back as a withdrawal) or is still pending (`credited`

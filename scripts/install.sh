@@ -100,7 +100,10 @@ if [[ -n "$WASM_DIR" ]]; then
   [[ -f "$WASM_DIR/settlement.wasm" ]] || fail "$WASM_DIR has no settlement.wasm (the CI contracts-wasm artifact)"
   cp "$WASM_DIR"/*.wasm "$STAGE/release/contracts/"
   if command -v sha256sum > /dev/null; then SHA256=(sha256sum); else SHA256=(shasum -a 256); fi
-  (cd "$STAGE/release" && find bin contracts relayer relayer-feeds -type f -not -path '*/node_modules/*' 2> /dev/null | LC_ALL=C sort | xargs "${SHA256[@]}" > SHA256SUMS)
+  # The release's directories that exist (a payments-only one has no
+  # relayer-feeds): find fails on a missing one, and this runs under pipefail.
+  (cd "$STAGE/release" && dirs=() && for d in bin contracts relayer relayer-feeds; do if [[ -d "$d" ]]; then dirs+=("$d"); fi; done \
+    && find "${dirs[@]}" -type f -not -path '*/node_modules/*' | LC_ALL=C sort | xargs "${SHA256[@]}" > SHA256SUMS)
   if [[ -z "$COMMIT" ]]; then
     echo "local-$("${SHA256[@]}" "$STAGE/release/SHA256SUMS" | cut -c1-8)" > "$STAGE/release/COMMIT"
   fi

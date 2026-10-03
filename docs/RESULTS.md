@@ -187,3 +187,20 @@ Lane #1's deployment is now the `[env.testnet]` table of its lane file (DEC-070)
 | `caravel destroy` | Drained, stopped, exported `exit.json`, triggered, frozen 10 s later (20 s window) |
 | Escape | Alice 799.99 USDC and Bob 1,050 USDC at payout 1:1 (vault 1,850 USDC; the treasury's 0.01 USDC stays unclaimed) |
 | Replay | OK over 11 checkpoints from Stellar data alone, with the same escape proof as `exit.json` |
+
+## The lifecycle on testnet with the CLI alone (M0.6 C-14, 2026-10-03)
+
+`E2E_NETWORK=testnet E2E_TEMPLATE=payments ./scripts/e2e-local.sh` passed in 324 s. Outside its cleanup, the script now calls only `caravel` and `jq` (`scripts/check-e2e.sh`, DEC-086). The lane came from `caravel init payments --prefix e2e`, and the `local` provider ran its nodes on a laptop against Stellar testnet. No `E2E_WASM_DIR` was given, so the settlement contract runs this machine's build, pinned by the `settlement_wasm` var (`d2c67d28…`), not the Wasm of record.
+
+| Step | Command | Result |
+|---|---|---|
+| Deploy | `caravel apply` | Settlement `CBUW43OVL7NFBCZUBMXMYHIF6RBD4LSSMOUQWBGHBBHX67AK5LMW33BP` at its derived address; `plan --exit-code` then exits 0 |
+| Users | `caravel account create`, `deposit`, `tx` | Circle's testnet USDC bought on the DEX; 1,000 USDC deposits each; a 100 USDC transfer with the 0.01 USDC fee to the treasury |
+| Withdrawal | `caravel withdraw` | 100 USDC, claimed on Stellar once its checkpoint was accepted |
+| Rotation | `caravel stop relayer`, `caravel apply --var 'validators=["1","2","4"]'` | Epoch 2; checkpoints 10 and 11 accepted under it, 10 after being signed again by the new set |
+| Forced withdrawal | `caravel force-withdraw` | 50 USDC asked for on Stellar, processed by the lane, its exact leaf claimed |
+| Destroy | `caravel destroy` | Drained, stopped, exported `exit.json`, triggered, frozen 4 s later |
+| Escape | `caravel escape` | Alice 799.99 USDC and Bob 1,050 USDC, each equal to its expected payout |
+| Replay | `caravel replay --prove-escape` | OK over 15 checkpoints from Stellar data alone, with the same escape proof as `exit.json` |
+
+The same script passed on a local network for both templates (perps in 251 s, payments in 182 s), and `scripts/check-quickstart.sh` ran the README's quickstart as written, from `install.sh` to `caravel escape`, on macOS. Lane #1's read-only `caravel plan --exit-code` with its CI release still printed "No changes." the same day.

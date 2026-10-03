@@ -2,7 +2,9 @@
 
 How to run, deploy and operate Caravel M0, the testnet demo. The spec is `docs/CARAVEL_SPEC.md`; dated numbers are in `docs/RESULTS.md`.
 
-**Who runs what in M0.** The Caravel team runs the sequencer, all three validators and the relayer, on one GCP VM (DEC-046). The settlement contract admin has testnet-only powers: upgrading the contract and rotating validators without delay (spec §4.3). Anyone can follow the lane with their own validator (§2 below), rebuild it from Stellar data with `caravel-perps-node replay` (§6), and use the escape hatch if the lane stops (§5).
+**Who runs what in M0.** The Caravel team runs the sequencer, all three validators and the relayer, on one GCP VM (DEC-046). The settlement contract admin has testnet-only powers: upgrading the contract and rotating validators without delay (spec §4.3). Anyone can follow the lane with their own validator (§2 below), rebuild it from Stellar data with `caravel replay` (§6), and use the escape hatch if the lane stops (§5).
+
+Everything here goes through `caravel`, the one CLI (install it with `./scripts/install.sh`, README). It finds the lane file in the current directory or takes `-f`, picks the deployment with `--env`, and takes `--json` everywhere. The lane file language is in `docs/LANE_FILE.md`.
 
 Every command runs from the repository root unless it says otherwise.
 
@@ -14,7 +16,8 @@ Every command runs from the repository root unless it says otherwise.
 | Stellar CLI | 28.1.0 | `cargo install --locked stellar-cli@28.1.0` |
 | Node.js | 22 or later | nodejs.org |
 | Docker | any recent | for the local Stellar network (§1.1) |
-| jq, curl, openssl | any | package manager |
+| jq | any | for `scripts/e2e-local.sh` |
+| curl, openssl | any | package manager; only for the by-hand steps below |
 | gcloud | any recent | only to deploy or reach the testnet VM (§3) |
 
 Check the pins with `node scripts/check-versions.mjs`. Build the contracts first; every node checks the engine Wasm hash when it starts:
@@ -30,19 +33,22 @@ The engine hash is the same on every host. The settlement Wasm of record is the 
 
 ### 1.1 The whole lane, one command
 
+The README's quickstart is the short version: `caravel init`, `caravel apply`, a few users, `caravel destroy`. `./scripts/check-quickstart.sh` runs it exactly as written. The end-to-end script is the long version:
+
 ```sh
 ./scripts/e2e-local.sh          # KEEP=1 leaves everything running afterwards
 ```
 
-It starts a local Stellar network in Docker (`stellar container start local --limits testnet`), deploys a local USDC asset and the settlement contract (30 s escape timeout, DEC-043), then runs the sequencer, three validators and the relayer as local processes. Then it goes through spec §19.5:
+Outside its cleanup it uses only `caravel` and `jq` (`scripts/check-e2e.sh` keeps it so). It makes a lane with `caravel init <template> --prefix e2e`, includes the e2e's deployment (`scripts/e2e/env.toml`, with its vars in a `--var-file`), and runs `caravel apply`. That starts a local Stellar network in Docker, deploys a local USDC asset and the settlement contract (30 s escape timeout, DEC-043), and runs the sequencer, three validators and the relayer as local processes. Then it goes through spec §19.5:
 
-1. deposit 1,000 USDC for A and B through Stellar;
-2. A rests a bid, B sells into it;
-3. a checkpoint is accepted on Stellar;
-4. A withdraws 100 USDC and claims it on Stellar;
-   - 4b. validator 3 is rotated to a new key (the procedure in §4.1);
-5. the sequencer stops, the contract is frozen, A and B escape pro rata;
-6. `caravel-perps-node replay` rebuilds the lane from Stellar data and reports OK.
+1. `caravel account create` and `caravel deposit` 1,000 USDC for A and B;
+2. `caravel tx`: A rests a bid and B sells into it (perps), or A pays B (payments);
+3. `caravel wait checkpoint`: a checkpoint is accepted on Stellar;
+4. `caravel withdraw`: A withdraws 100 USDC and claims it on Stellar;
+   - 4b. `caravel stop relayer`, then `caravel apply --var 'validators=["1","2","4"]'` rotates validator 3 out (the procedure in §4.1); a checkpoint signed by the old set is signed again by the new one;
+   - 4c. `caravel force-withdraw`: B's forced withdrawal through Stellar is processed and claimed;
+5. `caravel destroy` drains the lane, writes `exit.json` and freezes it; `caravel escape` pays A and B pro rata;
+6. `caravel replay` rebuilds the lane from Stellar data and reports OK.
 
 It takes about 4 minutes from a clean clone. Logs and state go to a temporary work directory, printed at the end (and on failure, with the tail of each log). The Stellar CLI keys it creates live in that directory, not in your keystore. With `E2E_NETWORK=testnet` the same run goes to Stellar testnet with a settlement contract of its own (§5).
 
@@ -223,7 +229,7 @@ With the deploy tool (DEC-068, DEC-070), the whole procedure is a lane-file edit
 
 4. Update the sequencer's `[signers]`: `epoch` = the new epoch, and the validator list (key and URL). Restart the sequencer.
 5. On start, the sequencer sends every checkpoint that was signed by the old set and not accepted yet back for signatures (log: `checkpoints signed under an older epoch go back for signatures`). The header does not hold the epoch, so the old signatures of validators that stay in the set still count; only the new validator is asked. The relayer then submits them with the new epoch.
-6. Check that the next checkpoints are accepted: `curl -s <api>/v1/checkpoints/<seq> | jq '{status, epoch}'`.
+6. Check that the next checkpoints are accepted under the new epoch: `caravel wait checkpoint --seq <seq> --epoch <epoch>`, or `caravel api /v1/checkpoints/<seq>`.
 
 Between steps 3 and 5, submissions fail with the old epoch and the relayer retries; nothing is lost.
 
@@ -253,22 +259,30 @@ gh run download <main run id> -n contracts-wasm -D /tmp/wasm
 E2E_NETWORK=testnet E2E_WASM_DIR=/tmp/wasm ./scripts/e2e-local.sh   # on testnet, its own contract
 ```
 
-The testnet run deploys its own settlement contract (the Wasm of record, checked against `versions.json`) and buys its USDC on the testnet DEX; it takes about 3.5 minutes. By hand, on any network:
+The testnet run deploys its own settlement contract (the Wasm of record, checked against `versions.json`) and buys its USDC on the testnet DEX; it takes about 3.5 minutes.
+
+By hand, on any network:
 
 ```sh
+caravel stop sequencer relayer          # checkpoints stop; it prints when a freeze becomes possible
 stellar contract invoke --id <settlement> --source-account <anyone> --network <net> -- freeze
-stellar contract invoke --id <settlement> --source-account <anyone> --network <net> --send=no -- frozen_info
-# the account's proof: any validator, the sequencer, or replay (§6)
-curl -s "<validator>/v1/proofs/escape?account=G..."
-stellar contract invoke --id <settlement> --source-account <owner> --network <net> -- \
-  escape_claim --recipient G... --lane_account <raw hex> --index <index> --equity <equity> --proof '<proof json>'
+caravel wait frozen                     # until the contract is frozen
+caravel escape <identity>               # the account's withdrawals, then its share of the last checkpoint
 ```
 
-Deposits the lane never processed are refunded 1:1 to the depositor with `refund_unprocessed_deposit --index <inbox index>`. The web app's Escape page does all of this with the connected wallet.
+`caravel escape` needs only the lane file and the admin's public key (`stellar keys add <admin> --public-key G…`). It takes the proof from `exit.json` when it is for Stellar's last checkpoint, else from a validator or the sequencer, and `caravel replay --prove-escape` builds one from Stellar alone (§6). It refuses a claim that would pay nothing, since that uses the escape up (`--allow-zero` claims it anyway).
+
+Without caravel, the contract takes `escape_claim --recipient G... --lane_account <raw hex> --index <index> --equity <equity> --proof '<proof json>'`. Deposits the lane never processed are refunded 1:1 to the depositor with `refund_unprocessed_deposit --index <inbox index>`. The web app's Escape page does all of this with the connected wallet.
 
 ## 6. Replay
 
 Rebuilds the lane from Stellar data only and checks every hash (spec §16):
+
+```sh
+caravel replay -f lanes/perps/config/lane.caravel-perps.testnet.toml --env testnet [--prove-escape G...] [--prove-withdrawals G...] [--json]
+```
+
+It fills in the network, the settlement address (derived from the admin's public key), the genesis document and the engine Wasm from the lane file and the release. Without the lane file, the template's binary takes them all as flags:
 
 ```sh
 ./target/release/caravel-perps-node replay --rpc https://soroban-testnet.stellar.org \

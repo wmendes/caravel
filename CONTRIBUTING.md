@@ -29,8 +29,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --locked
 ./scripts/check-frozen.sh
 node scripts/check-deps.mjs
+./scripts/check-e2e.sh
 npm --prefix platform/relayer ci && npm --prefix platform/relayer test
 ```
+
+**CLI or deploy changes:** also run `./scripts/e2e-local.sh` (both templates, `E2E_TEMPLATE=payments`) and `./scripts/check-quickstart.sh`. The e2e drives a lane with `caravel` and `jq` only.
 
 **Engine changes:** also run the native/Wasm parity gates:
 

@@ -71,7 +71,10 @@ for d in "$OUT"/relayer-feeds/*/; do
   [[ -d "$d" ]] && npm --prefix "$d" ci --omit=dev --no-audit --no-fund --loglevel=error
 done
 
-(cd "$OUT" && find bin contracts relayer relayer-feeds -type f -not -path '*/node_modules/*' 2> /dev/null | LC_ALL=C sort | xargs "${SHA256[@]}" > SHA256SUMS)
+# The release's directories that exist (a payments-only one has no
+# relayer-feeds): find fails on a missing one, and this runs under pipefail.
+(cd "$OUT" && dirs=() && for d in bin contracts relayer relayer-feeds; do if [[ -d "$d" ]]; then dirs+=("$d"); fi; done \
+  && find "${dirs[@]}" -type f -not -path '*/node_modules/*' | LC_ALL=C sort | xargs "${SHA256[@]}" > SHA256SUMS)
 if [[ -z "$COMMIT" ]]; then
   # A build from a clean tree is its commit; anything else is named by
   # what it holds.

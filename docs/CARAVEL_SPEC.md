@@ -2209,7 +2209,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-11 | Lifecycle: `stop`, `start`, `restart`, `logs`, `replay` from the lane file, `wait`, `api` (DEC-083) | C-10 | review |
 | C-12 | Users' Stellar flows: `account create/fund`, `balance`, `deposit` (waits for the credit) (DEC-084) | C-11 | review |
 | C-13 | Lane transactions: `tx`, `withdraw`, `claim`, `force-withdraw`, `escape` (DEC-085) | C-12 | review |
-| C-14 | The e2e on the CLI only; README, landing quickstart, RUNBOOK, `docs/LANE_FILE.md` — **Gate G3** | C-13 | todo |
+| C-14 | The e2e on the CLI only; README, landing quickstart, RUNBOOK, `docs/LANE_FILE.md` — **Gate G3** (DEC-086) | C-13 | review |
 | C-15 | The resource graph, with identical plans (goldens byte for byte) | C-14 | todo |
 | C-16 | Addresses in plans; `plan --json`; `graph`; `depends_on`, `--target`, `--replace` | C-15 | todo |
 | C-17 | Saved plans: `plan --out`, `apply <planfile>` refused when anything moved — **Gate G4** | C-16 | todo |
@@ -2785,6 +2785,21 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - `replay --json` as one document;
   - `stop --json` needing `--yes`.
 - **Fixes from the C-13 reviews** (16 findings, then 8 more on the fixes, each confirmed by 3 skeptics): the ones above, plus `wait checkpoint --epoch` scanning every checkpoint from the next one; `stop 1 2 1` naming each node once; and `replay` without the admin identity pointing at `stellar keys add`, not `keys generate` | The quickstart and e2e signed with exported key files (`stellar keys secret > file`), parsed proofs with jq, and claimed through `contract invoke` | Ledger signing for lane transactions, or a receipt-by-hash endpoint |
+| DEC-086 | **M0.6 (C-14), Gate G3.** The e2e on the CLI alone, and the docs for it.
+- **`scripts/e2e-local.sh`** makes its lane with `caravel init <template> --prefix e2e`, includes `scripts/e2e/env.toml` (whose identities are now `e2e-<role>`) and drives every step with `caravel`: `validate`, `render`, `doctor`, `keys ensure`, `apply`, `plan --exit-code`, `output`, `account create`, `deposit`, `tx`, `wait api`, `wait checkpoint`, `withdraw`, `stop relayer`, the rotation by `--var`, `logs`, `force-withdraw`, `destroy`, `balance`, `escape` and `replay`, with `jq` for the checks.
+  - Gone: the raw `stellar` invocations, `curl`, `node -e` (the perps fixture oracle key: init generates the oracle identity), and the `until_ok` sleep loops.
+  - `scripts/check-e2e.sh` (in CI's checks job, on every pull request) fails if the script calls `stellar`, `curl`, `node -e/-p`, `kill` or `sleep` outside its cleanup trap.
+  - Amounts are compared in base units, with no floats.
+- **`scripts/check-quickstart.sh`** installs from the checkout into a scratch prefix and runs the README's quickstart block, the one after its `<!-- quickstart -->` marker, as written, in a scratch keystore. It runs locally and in a CI job on main.
+- **`CARAVEL_YES=1`** answers `apply`, `destroy` and `stop` as `--yes` does, for scripts and CI. At a terminal, `apply` still shows the plan and asks.
+- **`caravel balance C…`** reads a contract's balance of the settlement token (the settlement's vault, say), with the admin as the simulation's source.
+- **Release checksums:** `assemble-release.sh` and `install.sh` hash only the release directories that exist. A payments-only install has no `relayer-feeds`, and `find` failed on it under `pipefail`. This carries the fix of the open #55 (`xargs` can't run a shell function).
+- **Docs:**
+  - `docs/LANE_FILE.md` is the language reference, and its worked example is checked with `caravel validate` and `caravel render`;
+  - the README's quickstart goes from `install.sh` and `caravel init` to `caravel escape`, and lists the commands and exit codes;
+  - the RUNBOOK uses the CLI for the e2e, the rotation check, the freeze drill and replay;
+  - the landing page's quickstart matches the README, in the repo only until approved;
+  - `docs/SOURCES.md` has `stellar keys add --public-key` | The quickstart was a set of commands and a loop, and the e2e reached past the CLI for half its steps, so neither showed that the CLI is enough | Shell completions (`caravel completions`), left out: they would add `clap_complete` |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 
