@@ -119,3 +119,23 @@ fn rendered_files_are_pinned() {
         assert!(*text == want, "{name} changed:\n{text}");
     }
 }
+
+/// A deployment's own [node] (M0.6) reaches the nodes' lane.toml and
+/// leaves the genesis as it was: [node] is not consensus.
+#[test]
+fn a_deployments_node_settings_reach_the_hosts_not_genesis() {
+    let text = std::fs::read_to_string(
+        root().join("lanes/payments/config/lane.caravel-payments.local.toml"),
+    )
+    .unwrap()
+        + "\n[env.local.node]\ncheckpoint_every_blocks = 5\n";
+    let m = Manifest::parse(&text, "local").unwrap();
+    let files = render(&m, &resolved(&m), "/opt/caravel", 1).unwrap();
+    let rendered = LaneFile::parse(&files["lane.toml"]).unwrap();
+    assert_eq!(rendered.node.checkpoint_every_blocks, 5);
+    assert_eq!(rendered.node.block_time_ms, 1000);
+    let base = manifest();
+    let (_, c1, s1) = lane_toml::genesis(&PaymentsApp, &rendered).unwrap();
+    let (_, c2, s2) = lane_toml::genesis(&PaymentsApp, &base.lane).unwrap();
+    assert_eq!((c1, s1), (c2, s2));
+}

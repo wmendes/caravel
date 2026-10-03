@@ -124,7 +124,16 @@ pub fn run<A: NodeApp>(app: A, cmd: Command) -> Result<()> {
                 release,
                 diff,
             } => {
-                let p = deploy::prepare(&app, &lane, &env, &release, false, &cwd).await?;
+                let p = deploy::prepare(
+                    &app,
+                    &lane,
+                    &env,
+                    &Default::default(),
+                    &release,
+                    false,
+                    &cwd,
+                )
+                .await?;
                 for n in &p.notes {
                     eprintln!("note: {n}");
                 }
@@ -141,7 +150,9 @@ pub fn run<A: NodeApp>(app: A, cmd: Command) -> Result<()> {
                 release,
                 yes,
             } => {
-                let p = deploy::prepare(&app, &lane, &env, &release, true, &cwd).await?;
+                let p =
+                    deploy::prepare(&app, &lane, &env, &Default::default(), &release, true, &cwd)
+                        .await?;
                 for n in &p.notes {
                     eprintln!("note: {n}");
                 }
@@ -159,7 +170,9 @@ pub fn run<A: NodeApp>(app: A, cmd: Command) -> Result<()> {
                 }
                 p.apply(&plan).await?;
                 // Read everything back: a finished apply leaves nothing to do.
-                let again = deploy::prepare(&app, &lane, &env, &release, true, &cwd).await?;
+                let again =
+                    deploy::prepare(&app, &lane, &env, &Default::default(), &release, true, &cwd)
+                        .await?;
                 let left = again.plan();
                 if left.is_empty() {
                     println!("\nApplied. The lane matches the lane file.");
@@ -177,7 +190,16 @@ pub fn run<A: NodeApp>(app: A, cmd: Command) -> Result<()> {
                 release,
                 json,
             } => {
-                let p = deploy::prepare(&app, &lane, &env, &release, false, &cwd).await?;
+                let p = deploy::prepare(
+                    &app,
+                    &lane,
+                    &env,
+                    &Default::default(),
+                    &release,
+                    false,
+                    &cwd,
+                )
+                .await?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&p.status_json().await)?);
                 } else {
@@ -195,7 +217,9 @@ pub fn run<A: NodeApp>(app: A, cmd: Command) -> Result<()> {
                 pay_out,
                 wipe,
             } => {
-                let p = deploy::prepare(&app, &lane, &env, &release, true, &cwd).await?;
+                let p =
+                    deploy::prepare(&app, &lane, &env, &Default::default(), &release, true, &cwd)
+                        .await?;
                 print!("{}", p.render_status().await);
                 if !yes && !deploy::confirm_destroy(&p.desired.lane_name)? {
                     println!("Nothing done.");

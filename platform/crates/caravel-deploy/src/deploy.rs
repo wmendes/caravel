@@ -195,6 +195,7 @@ pub fn desired(
             platform: None,
             files: BTreeMap::new(),
         },
+        vars: m.vars.clone(),
     })
 }
 
@@ -223,16 +224,18 @@ pub fn validator_url(m: &Manifest, i: usize) -> Option<String> {
 /// Resolves the deployment and reads what Stellar and the host have.
 /// `for_apply` starts the local network if it isn't up; `plan` never does.
 /// A local host keeps its processes under `<state_root>/.caravel/`.
+#[allow(clippy::too_many_arguments)]
 pub async fn prepare(
     t: &dyn Template,
     lane_path: &Path,
     env: &str,
+    inputs: &crate::manifest::Inputs,
     source: &crate::cli::ReleaseArgs,
     for_apply: bool,
     state_root: &Path,
 ) -> Result<Prepared> {
     Cli::check_version()?;
-    let m = Manifest::load(lane_path, env)?;
+    let m = Manifest::load_with(lane_path, env, inputs)?;
     let mut notes = Vec::new();
     let template = m
         .lane

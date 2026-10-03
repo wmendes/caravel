@@ -59,6 +59,9 @@ pub struct Desired {
     /// `validator-<name>` for each validator, in file order.
     pub validators: Vec<String>,
     pub host: DesiredHost,
+    /// The lane file's vars and values (sensitive ones masked), shown in
+    /// the plan; empty when it declares none.
+    pub vars: String,
 }
 
 #[derive(Clone, Debug)]
@@ -594,6 +597,9 @@ impl Plan {
             d.signers.signers.len(),
             self.target_epoch
         );
+        if !d.vars.is_empty() {
+            let _ = writeln!(o, "  vars: {}", d.vars);
+        }
         if self.steps.is_empty() && self.problems.is_empty() {
             o.push_str("\nNo changes.\n");
             return o;

@@ -16,7 +16,7 @@ use std::process::ExitCode;
 use anyhow::{anyhow, bail, Context, Result};
 use caravel_deploy::cli::ReleaseArgs;
 use caravel_deploy::deploy::{self, addresses, api_url, validator_url, Keys};
-use caravel_deploy::manifest::{envs, Manifest, Network};
+use caravel_deploy::manifest::{envs, Inputs, Manifest, Network};
 use caravel_deploy::ops::DestroyOptions;
 use caravel_deploy::stellar::Cli as Stellar;
 use caravel_deploy::template::{self, Plugin, Template};
@@ -70,6 +70,21 @@ pub struct Global {
     /// artifact (also CARAVEL_WASM_DIR).
     #[arg(long, global = true, value_name = "DIR")]
     pub wasm_dir: Option<PathBuf>,
+    /// Set one of the lane file's vars; repeat for more. Read by the var's
+    /// type (lists and maps as TOML: --var 'validators=["1","2"]'). Also
+    /// CARAVEL_VAR_<name>.
+    #[arg(long = "var", global = true, value_name = "NAME=VALUE")]
+    pub vars: Vec<String>,
+    /// A TOML file of var values (name = value); later files win, and --var
+    /// over them.
+    #[arg(long = "var-file", global = true, value_name = "FILE")]
+    pub var_files: Vec<PathBuf>,
+}
+
+impl Global {
+    pub fn inputs(&self) -> Result<Inputs> {
+        Inputs::new(&self.vars, &self.var_files).map_err(|e| anyhow!(e))
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -225,6 +240,7 @@ pub fn run(cli: Cli) -> ExitCode {
 
 /// A command's lane file and deployment.
 pub struct Ctx {
+    pub inputs: Inputs,
     pub lane_path: PathBuf,
     pub lane: LaneFile,
     pub env: String,
@@ -276,6 +292,7 @@ pub fn context(g: &Global, positional: Option<&Path>) -> Result<Ctx> {
         eprintln!("note: {n}");
     }
     Ok(Ctx {
+        inputs: g.inputs()?,
         lane_path,
         lane,
         env,
@@ -309,7 +326,7 @@ impl Ctx {
     }
 
     fn manifest(&self) -> Result<Manifest> {
-        Manifest::from_lane(self.lane.clone(), &self.env)
+        Manifest::load_with(&self.lane_path, &self.env, &self.inputs)
     }
 
     fn template(&self) -> Result<Plugin> {
@@ -323,6 +340,7 @@ impl Ctx {
             &t,
             &self.lane_path,
             &self.env,
+            &self.inputs,
             &self.release,
             for_apply,
             &self.state_root,
@@ -645,7 +663,7 @@ fn dispatch(cli: Cli) -> Result<u8> {
 /// `validate`: every deployment (or the one --env names), offline.
 fn validate(g: &Global, positional: Option<&Path>) -> Result<u8> {
     let (lane_path, _) = lane_file(g, positional)?;
-    let (ok, report) = validate_report(&lane_path, g.env.as_deref())?;
+    let (ok, report) = validate_report(&lane_path, g.env.as_deref(), &g.inputs()?)?;
     if g.json {
         print_json(&report)?;
     } else {
@@ -677,7 +695,11 @@ fn validate(g: &Global, positional: Option<&Path>) -> Result<u8> {
 /// What `validate` checks, without Stellar or a host: the genesis (through
 /// the template's binary), each deployment's rules (`env`: only that one),
 /// and whether the Stellar CLI keystore has the identities it names.
-pub fn validate_report(lane_path: &Path, env: Option<&str>) -> Result<(bool, Value)> {
+pub fn validate_report(
+    lane_path: &Path,
+    env: Option<&str>,
+    inputs: &Inputs,
+) -> Result<(bool, Value)> {
     let lane = caravel_deploy::manifest::load_lane(lane_path)?;
     let names: Vec<String> = match env {
         Some(e) => vec![e.to_string()],
@@ -708,7 +730,7 @@ pub fn validate_report(lane_path: &Path, env: Option<&str>) -> Result<(bool, Val
         checks.push(json!({ "check": "deployments", "ok": false, "error": "the lane file has no [env.<name>] table" }));
     }
     for name in &names {
-        match Manifest::from_lane(lane.clone(), name) {
+        match Manifest::load_with(lane_path, name, inputs) {
             Ok(m) => {
                 let missing: Vec<String> = identities(&m)
                     .into_iter()
@@ -806,7 +828,7 @@ fn c_addr(k: &[u8; 32]) -> String {
 /// `output`: a deployment's addresses and URLs, without Stellar or the host.
 fn output(g: &Global, name: Option<&str>) -> Result<u8> {
     let ctx = context(g, None)?;
-    let m = Manifest::from_lane(ctx.lane.clone(), &ctx.env)?;
+    let m = ctx.manifest()?;
     let keys = Keys::from_keystore(&m)?;
     let a = addresses(&m, &keys)?;
     let validators: Vec<Value> = m
@@ -969,7 +991,7 @@ fn doctor(g: &Global) -> Result<u8> {
         Err(e) => add("lane file", Err(e)),
         Ok(ctx) => {
             add("lane file", Ok(ctx.describe()));
-            let m = Manifest::from_lane(ctx.lane.clone(), &ctx.env);
+            let m = ctx.manifest();
             let t = ctx.template();
             add(
                 "template",

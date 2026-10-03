@@ -83,6 +83,7 @@ fn desired() -> Desired {
             platform: Some("Linux x86_64".into()),
             files: files(1, &["1", "2", "3"]),
         },
+        vars: String::new(),
     }
 }
 
@@ -509,4 +510,19 @@ fn a_release_for_another_platform() {
     check("wrong-platform", &d, &plan);
     host.release = Some(d.host.release.clone());
     assert!(diff(&d, &deployed(&d), &host).problems.is_empty());
+}
+
+/// A lane file's vars show in the plan's header; without vars, the header
+/// is as it was (lane #1's plan stays byte for byte).
+#[test]
+fn vars_in_the_header() {
+    let mut d = desired();
+    let plain = diff(&d, &deployed(&d), &running(&d)).render(&d);
+    assert!(!plain.contains("vars:"));
+    d.vars = "validators = [\"1\", \"2\"], token = (sensitive)".into();
+    let text = diff(&d, &deployed(&d), &running(&d)).render(&d);
+    assert!(
+        text.contains("  vars: validators = [\"1\", \"2\"], token = (sensitive)\n"),
+        "{text}"
+    );
 }

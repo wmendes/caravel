@@ -267,6 +267,10 @@ pub struct EnvSpec {
     pub validator_polling: ValidatorPolling,
     pub relayer: RelayerSpec,
     pub host: HostSpec,
+    /// This deployment's `[node]` settings, over the lane file's (they
+    /// aren't consensus, so deployments may differ).
+    #[serde(default)]
+    pub node: Option<toml::Table>,
 }
 
 /// A lane file and one of its deployments.
@@ -275,6 +279,9 @@ pub struct Manifest {
     pub lane: LaneFile,
     pub env_name: String,
     pub env: EnvSpec,
+    /// The lane file's vars and their values (`name = value, …`, sensitive
+    /// ones masked); empty when it declares none.
+    pub vars: String,
 }
 
 /// One `[env.<name>]` table, as listed before any is chosen.
@@ -306,22 +313,66 @@ pub fn envs(lane: &LaneFile) -> Vec<EnvInfo> {
 }
 
 /// A lane file from disk, with its includes and inheritance resolved
-/// (`caravel_lanefile`): every deployment fully merged.
+/// (`caravel_lanefile`): every deployment merged, its expressions not yet
+/// evaluated (for listing deployments; a [`Manifest`] evaluates its own).
 pub fn load_lane(path: &Path) -> Result<LaneFile> {
     let doc = caravel_lanefile::LaneDoc::load(path).map_err(anyhow::Error::new)?;
     LaneFile::from_table(doc.to_table()).with_context(|| format!("parsing {}", path.display()))
 }
 
+pub use caravel_lanefile::Inputs;
+
 impl Manifest {
     pub fn load(path: &Path, env: &str) -> Result<Self> {
-        let lane = load_lane(path)?;
-        Self::from_lane(lane, env).with_context(|| format!("{} [env.{env}]", path.display()))
+        Self::load_with(path, env, &Inputs::default())
+    }
+
+    /// One deployment of a lane file, its expressions evaluated with `inputs`
+    /// (`--var`, `--var-file`, `CARAVEL_VAR_*`).
+    pub fn load_with(path: &Path, env: &str, inputs: &Inputs) -> Result<Self> {
+        let doc = caravel_lanefile::LaneDoc::load(path).map_err(anyhow::Error::new)?;
+        Self::from_doc(&doc, env, inputs).with_context(|| format!("{} [env.{env}]", path.display()))
     }
 
     pub fn parse(text: &str, env: &str) -> Result<Self> {
         let doc = caravel_lanefile::LaneDoc::parse(text).map_err(anyhow::Error::new)?;
-        Self::from_lane(LaneFile::from_table(doc.to_table())?, env)
-            .with_context(|| format!("[env.{env}]"))
+        Self::from_doc(&doc, env, &Inputs::default()).with_context(|| format!("[env.{env}]"))
+    }
+
+    fn from_doc(doc: &caravel_lanefile::LaneDoc, env: &str, inputs: &Inputs) -> Result<Self> {
+        // Secrets are refused where they're written, as well as where they land.
+        let mut written = toml::Table::new();
+        for (k, v) in &doc.vars {
+            written.insert(format!("vars.{k}"), v.clone());
+        }
+        for (k, v) in &doc.locals {
+            written.insert(format!("locals.{k}"), v.clone());
+        }
+        let problems = secrets_in(&written, "");
+        if !problems.is_empty() {
+            bail!("{}", problems.join("\n"));
+        }
+        let r = doc.resolve_env(env, inputs).map_err(anyhow::Error::new)?;
+        let values: toml::Table = r
+            .vars
+            .iter()
+            .map(|(k, v)| (format!("--var {k}"), v.clone()))
+            .collect();
+        let problems = secrets_in(&values, "");
+        if !problems.is_empty() {
+            bail!("{}", problems.join("\n"));
+        }
+        let mut t = doc.genesis.clone();
+        t.insert(
+            "env".into(),
+            toml::Value::Table(toml::Table::from_iter([(
+                env.to_string(),
+                toml::Value::Table(r.table.clone()),
+            )])),
+        );
+        let mut m = Self::from_lane(LaneFile::from_table(t)?, env)?;
+        m.vars = r.vars_line();
+        Ok(m)
     }
 
     pub fn from_lane(lane: LaneFile, env: &str) -> Result<Self> {
@@ -350,10 +401,33 @@ impl Manifest {
         if !problems.is_empty() {
             bail!("{}", problems.join("\n"));
         }
+        // The deployment's [node] over the lane file's: not consensus.
+        let lane = match &spec.node {
+            None => lane,
+            Some(over) => {
+                let mut raw = lane.raw.clone();
+                let mut node = raw
+                    .get("node")
+                    .and_then(|n| n.as_table())
+                    .cloned()
+                    .unwrap_or_default();
+                for (k, v) in over {
+                    node.insert(k.clone(), v.clone());
+                }
+                raw.insert("node".into(), toml::Value::Table(node));
+                let mut merged = LaneFile::from_table(raw).context("[env] node")?;
+                merged.env = lane.env;
+                merged
+                    .check_node_settings()
+                    .with_context(|| format!("[env.{env}.node]"))?;
+                merged
+            }
+        };
         Ok(Self {
             lane,
             env_name: env.to_string(),
             env: spec,
+            vars: String::new(),
         })
     }
 
