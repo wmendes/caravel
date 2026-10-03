@@ -33,6 +33,35 @@ pub struct SignerSet {
     pub threshold: u32,
 }
 
+/// A declared token (`[env.<name>.tokens.<n>]`, C-19), resolved.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeclaredToken {
+    pub name: String,
+    pub code: String,
+    pub issuer: Key,
+    /// The identity that issues it, when the lane file has it (so it can
+    /// mint): the admin or a declared account.
+    pub minter: Option<String>,
+    /// Its Stellar Asset Contract.
+    pub contract: Key,
+}
+
+/// A balance a declared account holds at least: of the settlement token or
+/// a declared token.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Holding {
+    /// `settlement`, or the declared token's name.
+    pub token: String,
+    pub code: String,
+    pub issuer: Key,
+    /// The token's contract, which mints.
+    pub contract: Key,
+    /// The identity that may mint it, when the file has one.
+    pub minter: Option<String>,
+    /// At least this, in base units.
+    pub want: i128,
+}
+
 /// A declared account (`[env.<name>.accounts.<n>]`, C-18), resolved.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeclaredAccount {
@@ -43,8 +72,8 @@ pub struct DeclaredAccount {
     pub fund: bool,
     /// Assets it trusts, `(code, issuer)`, in file order.
     pub trustlines: Vec<(String, Key)>,
-    /// The settlement token's balance to top up to, in base units.
-    pub balance: Option<i128>,
+    /// Balances to top up to.
+    pub balances: Vec<Holding>,
     /// Addresses applied before it.
     pub depends_on: Vec<String>,
 }
@@ -83,6 +112,8 @@ pub struct Desired {
     pub vars: String,
     /// Declared accounts, in name order.
     pub accounts: Vec<DeclaredAccount>,
+    /// Declared tokens other than the settlement token, in name order.
+    pub tokens: Vec<DeclaredToken>,
 }
 
 #[derive(Clone, Debug)]
@@ -106,6 +137,8 @@ pub struct Chain {
     /// units (declared accounts' only).
     pub trustlines: BTreeMap<(Key, String, Key), i128>,
     pub token_exists: bool,
+    /// Declared tokens' contracts that exist.
+    pub tokens: BTreeSet<Key>,
     pub settlement_wasm_uploaded: bool,
     pub settlement: Option<OnChain>,
 }
@@ -189,16 +222,21 @@ pub enum Step {
         code: String,
         issuer: Key,
     },
-    /// The admin mints the settlement token to a declared account, up to its
-    /// balance.
+    /// A token's issuer mints it to a declared account, up to its balance.
     Mint {
         who: String,
         key: Key,
         code: String,
         amount: i128,
+        /// The token's contract.
+        contract: Key,
+        /// The identity that mints (the token's issuer).
+        minter: String,
     },
-    /// The Stellar Asset Contract of the settlement token's asset.
+    /// The Stellar Asset Contract of a token's asset: the settlement
+    /// token's (`settlement`) or a declared one's.
     DeployToken {
+        name: String,
         contract: Key,
         code: String,
         issuer: Key,
@@ -328,7 +366,7 @@ pub fn step_addr(s: &Step) -> String {
         Step::Fund { who, .. } | Step::Trust { who, .. } | Step::Mint { who, .. } => {
             format!("account.{who}")
         }
-        Step::DeployToken { .. } => "token.settlement".into(),
+        Step::DeployToken { name, .. } => format!("token.{name}"),
         Step::UploadWasm { .. } => "wasm.settlement".into(),
         Step::DeploySettlement { .. } => "contract.settlement".into(),
         Step::RotateSigners { .. } => "signers.settlement".into(),
@@ -442,6 +480,7 @@ pub(crate) fn legacy_diff(d: &Desired, chain: &Chain, host: &Host) -> Plan {
     if !chain.token_exists {
         match &d.token_asset {
             Some((code, issuer)) => steps.push(Step::DeployToken {
+                name: "settlement".into(),
                 contract: d.token,
                 code: code.clone(),
                 issuer: *issuer,
@@ -795,15 +834,20 @@ pub fn step_line(s: &Step) -> String {
             format!("+ trust     {who} {code}:{}", g_short(issuer))
         }
         Step::Mint {
-            who, code, amount, ..
+            who,
+            code,
+            amount,
+            minter,
+            ..
         } => format!(
-            "+ mint      {} {code} to {who} (the admin issues it)",
+            "+ mint      {} {code} to {who} (by its issuer, {minter})",
             crate::flows::format_units(*amount, 7)
         ),
         Step::DeployToken {
             contract,
             code,
             issuer,
+            ..
         } => format!(
             "+ create    token contract {} (the Stellar Asset Contract of {code}:{})",
             c_short(contract),
@@ -883,7 +927,7 @@ pub fn problem_line(p: &Problem) -> String {
             have,
             want,
         } => format!(
-            "! {who} holds {} {code}, less than its balance of {}, and the admin doesn't issue {code}: send it some, or lower the balance",
+            "! {who} holds {} {code}, less than its balance of {}, and nothing in the lane file issues {code}: send it some, or lower the balance",
             crate::flows::format_units(*have, 7),
             crate::flows::format_units(*want, 7)
         ),

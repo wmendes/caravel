@@ -2214,7 +2214,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-16 | Addresses in plans; `plan --json`; `graph`; `depends_on`, `--target`, `--replace` (DEC-088) | C-15 | review |
 | C-17 | Saved plans: `plan --out`, `apply <planfile>` refused when anything moved — **Gate G4** (DEC-089) | C-16 | review |
 | C-18 | Accounts: funding, trustlines, balances topped up (DEC-090) | C-17 | review |
-| C-19 | Tokens: issued assets and their contracts; a declared token as the settlement token | C-18 | todo |
+| C-19 | Tokens: issued assets and their contracts; a declared token as the settlement token (DEC-091) | C-18 | review |
 | C-20 | Contracts: any Wasm, constructor arguments, derived addresses, `prevent_destroy` | C-19 | todo |
 | C-21 | Local modules with inputs and outputs — **Gate G5** | C-20 | todo |
 | C-22 | Several hosts per deployment and node placement | C-21 | todo |
@@ -2893,6 +2893,20 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - manifest checks;
   - the property test, unchanged;
   - on a local lane: apply funds, trusts and mints (100); "No changes." after; raising the balance to 150 mints 50; an output reads `account.alice.public_key` | Test users, market makers and treasuries were shell steps after `apply`; declaring them makes them part of the deployment | Balances in other tokens (C-19), and taking a balance back down |
+| DEC-091 | **M0.6 (C-19).** Declared tokens: `[env.<name>.tokens.<n>]`, with `code` and `issuer` (`"admin"`, a declared account's name, or a `G…` address).
+- **Each token is a resource, `token.<n>`.** `apply` deploys its Stellar Asset Contract when missing, paid by the admin (anyone may deploy one). It follows the admin and an issuer that is a declared account. Accounts that trust or hold it follow it, and so does the account that mints their top-ups. The chain reader checks the contracts in one batch; nothing is read when none are declared.
+- **The settlement token can be a declared one: `token = "<n>"`.** The token is rewritten after the checks:
+  - issued by the admin → `{ local = CODE }`, which is `CODE:<admin>`, now on any network (the testnet refusal of `local` applies only to the form as written);
+  - issued by a `G…` address → `{ asset = "CODE:G…" }`.
+
+  Only these two issuers are allowed, because the lane's addresses (and its users' flows) derive from the admin's key alone. Today's forms are unchanged, and so are their plans (the original 10 goldens didn't move). It stays `token.settlement`: a declared token equal to it isn't a second resource.
+- **Accounts' `trustlines` and `balances`** take a declared token's name, and a balance needs a trustline to its token. A top-up (`Holding`) is minted by the token's issuer when the file has it: the admin, or a declared account through its identity. Otherwise it is `CannotMint`. `Step::Mint` carries the contract and the minting identity; `Step::DeployToken` names its token.
+- **Expressions** read `token.<n>.address`, `.asset`, `.code` and `.issuer`.
+- **Checked:**
+  - manifest checks: names, codes, issuers, and the two settlement-token rewrites;
+  - a golden plan with a token issued by a declared account (issuer, then token, then holder), and its "No changes." once deployed;
+  - C-18's golden, whose mint line now names the minting identity;
+  - on a local lane: settling in a declared `usd`, with `eur` issued by a declared `treasury`; contracts deployed, trustlines, mints by each issuer; "No changes." after; outputs; a deposit in `usd` | A lane's tokens were fixed forms, and a second asset (for users, or a contract in C-20) needed shell steps | Tokens that aren't Stellar assets (SEP-41 contracts) as declared resources |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

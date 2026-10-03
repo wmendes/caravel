@@ -186,10 +186,9 @@ pub fn attributes(
             }
             Value::Map(accounts)
         }),
-        (
-            "token".to_string(),
-            map([(
-                "settlement",
+        ("token".to_string(), {
+            let mut tokens = BTreeMap::from([(
+                "settlement".to_string(),
                 map([
                     ("address", s(strkey(&a.token))),
                     (
@@ -201,8 +200,36 @@ pub fn attributes(
                             }),
                     ),
                 ]),
-            )]),
-        ),
+            )]);
+            // Declared tokens (C-19): their issuer as a key, when known.
+            for (name, t) in &m.env.tokens {
+                let issuer = match t.issuer.as_str() {
+                    "admin" => Some(keys.admin),
+                    i => keys.accounts.get(i).copied().or_else(|| {
+                        stellar_strkey::ed25519::PublicKey::from_string(i)
+                            .ok()
+                            .map(|k| k.0)
+                    }),
+                };
+                if let Some(issuer) = issuer {
+                    let contract = crate::address::asset_contract_id(
+                        m.env.network.passphrase(),
+                        &t.code,
+                        &issuer,
+                    );
+                    tokens.insert(
+                        name.clone(),
+                        map([
+                            ("address", s(strkey(&contract))),
+                            ("asset", s(format!("{}:{}", t.code, g(&issuer)))),
+                            ("code", s(&t.code)),
+                            ("issuer", s(g(&issuer))),
+                        ]),
+                    );
+                }
+            }
+            Value::Map(tokens)
+        }),
         (
             "contract".to_string(),
             map([(

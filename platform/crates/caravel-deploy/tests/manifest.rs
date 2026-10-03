@@ -654,11 +654,11 @@ fn declared_accounts_are_checked() {
     let bad = |table: &str| err(&format!("{ENV}\n{table}"));
     assert!(bad("[env.testnet.accounts.admin]\n").contains("the deployment's own account"));
     assert!(bad("[env.testnet.accounts.x]\ntrustlines = [\"USDC\"]\n")
-        .contains("is \"settlement\" or CODE:ISSUER"));
+        .contains("is \"settlement\", a declared token's name, or CODE:ISSUER"));
     assert!(bad(
         "[env.testnet.accounts.x]\ntrustlines = [\"settlement\"]\nbalances = { xlm = \"1\" }\n"
     )
-    .contains("only the settlement token can be topped up"));
+    .contains("\"settlement\" or a declared token's name"));
     assert!(bad("[env.testnet.accounts.x]\ntrustlines = [\"settlement\"]\nbalances = { settlement = \"1.5x\" }\n")
         .contains("an amount in token units"));
     assert!(
@@ -683,4 +683,54 @@ fn declared_accounts_are_checked() {
         "{contract}\n[env.testnet.accounts.x]\ntrustlines = [\"settlement\"]\n"
     ));
     assert!(e.contains("no trustline to it"), "{e}");
+}
+
+#[test]
+fn declared_tokens_are_checked_and_can_settle_a_lane() {
+    let tokens = "[env.testnet.tokens.usd]\ncode = \"USD\"\nissuer = \"admin\"\n\n[env.testnet.tokens.eur]\ncode = \"EUR\"\nissuer = \"treasury\"\n\n[env.testnet.accounts.treasury]\n\n[env.testnet.accounts.alice]\ntrustlines = [\"usd\", \"eur\"]\nbalances = { usd = \"10\", eur = \"2\" }\n";
+    let m = Manifest::parse(&file(&format!("{ENV}\n{tokens}")), "testnet").unwrap();
+    assert_eq!(m.env.tokens["eur"].issuer, "treasury");
+    // `token = "usd"`: the admin issues it, so it reads as `{ local = "USD" }`
+    // (CODE:<admin>), on testnet too.
+    let env = ENV.replace("token = \"circle-usdc\"", "token = \"usd\"");
+    let m = Manifest::parse(&file(&format!("{env}\n{tokens}")), "testnet").unwrap();
+    assert_eq!(
+        m.env.token,
+        Token::Local {
+            local: "USD".into()
+        }
+    );
+    // A settlement token must be the admin's or a G… issuer's.
+    let env = ENV.replace("token = \"circle-usdc\"", "token = \"eur\"");
+    assert!(err(&format!("{env}\n{tokens}")).contains("issued by the admin or a G… address"));
+    let g = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
+    let env = ENV.replace("token = \"circle-usdc\"", "token = \"x\"");
+    let m = Manifest::parse(
+        &file(&format!(
+            "{env}\n[env.testnet.tokens.x]\ncode = \"USDC\"\nissuer = \"{g}\"\n"
+        )),
+        "testnet",
+    )
+    .unwrap();
+    assert_eq!(
+        m.env.token,
+        Token::Asset {
+            asset: format!("USDC:{g}")
+        }
+    );
+    let bad = |table: &str| err(&format!("{ENV}\n{table}"));
+    assert!(
+        bad("[env.testnet.tokens.settlement]\ncode = \"X\"\nissuer = \"admin\"\n")
+            .contains("not `settlement`")
+    );
+    assert!(
+        bad("[env.testnet.tokens.t]\ncode = \"TOO-LONG-CODE\"\nissuer = \"admin\"\n")
+            .contains("1–12 letters or digits")
+    );
+    assert!(
+        bad("[env.testnet.tokens.t]\ncode = \"T\"\nissuer = \"nobody\"\n")
+            .contains("a declared account's name, or a G… address")
+    );
+    assert!(bad("[env.testnet.accounts.x]\nbalances = { usd = \"1\" }\n[env.testnet.tokens.usd]\ncode = \"USD\"\nissuer = \"admin\"\n")
+        .contains("add \"usd\" to its trustlines"));
 }

@@ -171,6 +171,7 @@ A lane settles in the token its `[env]` names:
 | `{ asset = "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5" }` | Any Stellar asset, through its Stellar Asset Contract. `apply` deploys that contract when the network has none |
 | `{ contract = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA" }` | Any SEP-41 token contract |
 | `{ local = "USDC" }` | A test asset issued by the admin, on a local network |
+| `"usd"` | A token the deployment declares (`[env.<name>.tokens.usd]`, [`docs/LANE_FILE.md`](docs/LANE_FILE.md#declared-tokens)) |
 
 The two examples above are the same token, Circle's testnet USDC, written both ways.
 
