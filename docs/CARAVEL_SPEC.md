@@ -2210,7 +2210,7 @@ The plan of record is `~/.claude/plans/understand-this-project-and-zesty-zephyr.
 | C-12 | Users' Stellar flows: `account create/fund`, `balance`, `deposit` (waits for the credit) (DEC-084) | C-11 | review |
 | C-13 | Lane transactions: `tx`, `withdraw`, `claim`, `force-withdraw`, `escape` (DEC-085) | C-12 | review |
 | C-14 | The e2e on the CLI only; README, landing quickstart, RUNBOOK, `docs/LANE_FILE.md` — **Gate G3** (DEC-086) | C-13 | review |
-| C-15 | The resource graph, with identical plans (goldens byte for byte) | C-14 | todo |
+| C-15 | The resource graph, with identical plans (goldens byte for byte) (DEC-087) | C-14 | review |
 | C-16 | Addresses in plans; `plan --json`; `graph`; `depends_on`, `--target`, `--replace` | C-15 | todo |
 | C-17 | Saved plans: `plan --out`, `apply <planfile>` refused when anything moved — **Gate G4** | C-16 | todo |
 | C-18 | Accounts: funding, trustlines, balances topped up | C-17 | todo |
@@ -2800,6 +2800,24 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - the RUNBOOK uses the CLI for the e2e, the rotation check, the freeze drill and replay;
   - the landing page's quickstart matches the README, in the repo only until approved;
   - `docs/SOURCES.md` has `stellar keys add --public-key` | The quickstart was a set of commands and a loop, and the e2e reached past the CLI for half its steps, so neither showed that the CLI is enough | Shell completions (`caravel completions`), left out: they would add `clap_complete` |
+| DEC-087 | **M0.6 (C-15).** The plan comes from a graph of resources (`caravel_deploy::graph`); every plan is the same as before.
+- **Resources** have an address and a kind:
+  - `account.admin` and `account.relayer`;
+  - `token.settlement`, `wasm.settlement`, `contract.settlement` and `signers.settlement`;
+  - `host`, `host.data` and `release`;
+  - `file.<path>` for each generated file;
+  - `node.<name>` for each node, and for a running node the lane file no longer names.
+
+  Each resource compares the lane file with Stellar and the host and gives its steps and problems. This is the same comparison `diff` made, split up by resource.
+- **Edges:**
+  - `Order` edges carry what a resource reads or must follow. The admin, token and Wasm come before the contract. The contract comes before the host's data and before the nodes, which check against it. The validators come before the signer rotation, and the rotation before the sequencer. Funding the relayer comes before the relayer node.
+  - `Restart` edges run from each file to the nodes that read it, and from the release and a wiped store to every node. This replaces the `nodes_of` restart map.
+- **Order:** steps come out in a topological order (Kahn's algorithm). Ties go to the kind's rank (Stellar, the host's checks and data, the release, files, nodes and the signer set, orphans), then to declaration order. That reproduces the fixed order step for step. Problems come out in declaration order. A cycle is an error that names its resources, which matters once `depends_on` arrives (C-16).
+- **Checked:**
+  - the 10 plan goldens and every plan test pass unchanged;
+  - a property test compares the graph's plan with the old fixed-order `diff` (kept under `cfg(test)` until C-16) on 2,000 random states of the deployment, Stellar and the host per run, and mutating the code makes it fail;
+  - lane #1's read-only plan is still "No changes.".
+- **Still no state file:** every resource is read back from the lane file, Stellar and the host. `Graph::dot` is there for `caravel graph` (C-16) | Accounts, tokens, contracts, modules and several hosts (C-16 to C-25) are new kinds of resources with their own edges, and a fixed step order can't take them | — |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

@@ -266,26 +266,27 @@ pub fn target_epoch(d: &Desired, chain: &Chain) -> u64 {
     }
 }
 
-fn hex(k: &[u8]) -> String {
+pub(crate) fn hex(k: &[u8]) -> String {
     k.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn short(k: &Key) -> String {
+pub(crate) fn short(k: &Key) -> String {
     hex(&k[..4]) + "…"
 }
 
-fn g_short(k: &Key) -> String {
+pub(crate) fn g_short(k: &Key) -> String {
     let s = stellar_strkey::ed25519::PublicKey(*k).to_string();
     let s = s.as_str();
     format!("{}…{}", &s[..4], &s[s.len() - 4..])
 }
 
-fn c_short(k: &Key) -> String {
+pub(crate) fn c_short(k: &Key) -> String {
     let s = strkey(k);
     format!("{}…{}", &s[..4], &s[s.len() - 4..])
 }
 
 /// The nodes a changed file restarts.
+#[cfg(test)]
 fn nodes_of(path: &str, all: &[String]) -> Vec<String> {
     match path {
         "lane.toml" => all.to_vec(),
@@ -305,8 +306,16 @@ fn nodes_of(path: &str, all: &[String]) -> Vec<String> {
     }
 }
 
-/// The plan for `d` against what the chain and the host have.
+/// The plan for `d` against what the chain and the host have, from the
+/// deployment's resource graph ([`crate::graph`]).
 pub fn diff(d: &Desired, chain: &Chain, host: &Host) -> Plan {
+    crate::graph::diff(d, chain, host)
+}
+
+/// The fixed-order diff the graph replaced (C-15), kept as the reference the
+/// graph's plans are checked against until C-16 changes the plan's lines.
+#[cfg(test)]
+pub(crate) fn legacy_diff(d: &Desired, chain: &Chain, host: &Host) -> Plan {
     let mut steps = Vec::new();
     let mut problems = Vec::new();
 
