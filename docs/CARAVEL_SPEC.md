@@ -3078,7 +3078,7 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
   - `scripts/check-docs.sh` holds the copy to spec §2 (no "trustless", "audited" only as "not audited", "mainnet" only as refused, no production-ready claims, the IaC tool never named, no em dashes);
   - `check-versions.mjs` covers the docs site's exact pins and npm 10 lock;
   - CI's apps job runs typecheck and build.
-- **Look:** the landing page's palette and type: coral lane, teal Stellar, the dark harbor ground and its light theme, self-hosted Schibsted Grotesk. Admonitions have even borders, never a side stripe. There is a docs share image, and an announcement bar that can't be dismissed: testnet software, not audited.
+- **Look:** a quieter palette than the landing page's, by the human's call: white and a near-black charcoal with neutral greys. The landing page's coral (links, the active page, cautions) and teal (notes, markers) appear only as accents, with self-hosted Schibsted Grotesk. Admonitions have even borders, never a side stripe. There is a docs share image, and an announcement bar that can't be dismissed: testnet software, not audited.
 - **Search:** `@easyops-cn/docusaurus-search-local` 0.55.3 (lunr, built at build time; its `open-ask-ai` peer is optional and not installed). Algolia DocSearch can replace it later. | The landing page's job became attracting visitors; the docs were team-facing Markdown with no navigation or search, and the lane-file reference lived in one 30 KB file | Versioned docs (after the first tagged release), DocSearch, a custom domain |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
