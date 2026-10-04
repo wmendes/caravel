@@ -3,6 +3,7 @@
 //! artifact (`--release-dir`, the build of record, DEC-033) or from this
 //! checkout's builds, for local lanes.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
@@ -20,6 +21,34 @@ pub struct Release {
     /// The template's web app, served at the host's public URL, if it has one.
     pub web: Option<PathBuf>,
     pub commit: String,
+    /// The release's container images by role (`<template>-node`,
+    /// `relayer`, `<template>-web`, `caddy`), from its `IMAGES` file
+    /// (`scripts/build-images.sh`, DEC-111). Empty when it has none: the
+    /// docker runtime then refuses it.
+    pub images: BTreeMap<String, String>,
+}
+
+/// Parses an `IMAGES` file: one `<role> <image ref>` per line; blank lines
+/// and `#` comments are skipped.
+pub fn parse_images(text: &str) -> Result<BTreeMap<String, String>> {
+    let mut out = BTreeMap::new();
+    for (i, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut parts = line.split_whitespace();
+        let (Some(role), Some(image), None) = (parts.next(), parts.next(), parts.next()) else {
+            bail!(
+                "IMAGES line {}: expected \"<role> <image>\", got {line:?}",
+                i + 1
+            );
+        };
+        if out.insert(role.to_string(), image.to_string()).is_some() {
+            bail!("IMAGES line {}: {role} is listed twice", i + 1);
+        }
+    }
+    Ok(out)
 }
 
 /// `caravel-<template>-node`.
@@ -66,6 +95,11 @@ impl Release {
             feeds: feeds.exists().then_some(feeds),
             web,
             commit: commit.chars().take(12).collect(),
+            images: match std::fs::read_to_string(dir.join("IMAGES")) {
+                Ok(text) => parse_images(&text)
+                    .with_context(|| format!("reading {}", dir.join("IMAGES").display()))?,
+                Err(_) => BTreeMap::new(),
+            },
         };
         r.check()?;
         Ok(r)
@@ -83,6 +117,10 @@ impl Release {
             feeds: feeds.join("dist").exists().then_some(feeds),
             web: web.join("index.html").exists().then_some(web),
             commit: String::new(),
+            images: match std::fs::read_to_string(repo.join("target/images/IMAGES")) {
+                Ok(text) => parse_images(&text)?,
+                Err(_) => BTreeMap::new(),
+            },
         };
         r.check().context("build first: ./scripts/build-contracts.sh, cargo build --release, and npm ci + npm run build in platform/relayer (and the template's relayer-feeds)")?;
         let mut all = hash_file(&r.node_binary)?.to_vec();
