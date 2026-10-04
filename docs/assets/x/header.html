@@ -1,0 +1,40 @@
+<!doctype html>
+<!-- X header, 1500x500. Nothing depends on where the profile picture lands: the left third stays empty
+     (the avatar's corner on web and phones), and everything sits in the middle band (y 100-400), which
+     phones never crop. It matches the avatar by its shapes: the mark's coral sails become the lane's
+     blocks, its teal hull becomes Stellar's ledgers. -->
+<html><meta charset="utf-8"><style>
+@font-face { font-family: "Schibsted Grotesk"; src: url("../../../site/fonts/schibsted-grotesk-latin.woff2") format("woff2"); font-weight: 400 900; }
+html, body { margin: 0; width: 1500px; height: 500px; background: #081E22; overflow: hidden; }
+body { position: relative; font-family: "Schibsted Grotesk", system-ui, sans-serif; color: #F3EEE4; }
+.copy { position: absolute; left: 520px; top: 112px; width: 560px; }
+h1 { margin: 0; font-size: 60px; line-height: 1.02; letter-spacing: -0.03em; font-weight: 700; }
+h1 span { color: #FF8C7C; }
+p { margin: 18px 0 0; font-size: 22px; color: #A8BAB8; line-height: 1.35; }
+.url { margin-top: 18px; font: 500 17px ui-monospace, "SF Mono", Menlo, monospace; color: #45B5AE; }
+/* The mark's language, opened out: sails (lane blocks) above, a hull-shaped ledger line below */
+.chart { position: absolute; right: 70px; top: 150px; width: 300px; height: 200px; }
+.lane { position: absolute; right: 0; top: 30px; display: flex; gap: 6px; }
+.lane i { width: 22px; height: 26px; border-radius: 4px; background: #FF8C7C; }
+.lane i:nth-child(1) { opacity: .15 } .lane i:nth-child(2) { opacity: .3 } .lane i:nth-child(3) { opacity: .5 } .lane i:nth-child(4) { opacity: .75 }
+.ledger { position: absolute; right: 0; top: 112px; display: flex; gap: 6px; }
+.ledger i { width: 108px; height: 26px; border-radius: 4px; background: #26958F; }
+.ledger i:nth-child(1) { opacity: .45 }
+.ledger i:last-child { clip-path: polygon(0 0, 100% 0, 92% 100%, 0 100%); border-radius: 4px 0 0 4px; }
+.cp { position: absolute; top: 58px; width: 2px; height: 52px; background: #45B5AE; }
+.cp::after { content: ""; position: absolute; left: -5px; bottom: -5px; width: 12px; height: 12px; border-radius: 50%; background: #45B5AE; }
+.k { position: absolute; right: 0; font: 600 12px ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: .1em; text-transform: uppercase; color: #A8BAB8; }
+</style><body>
+<div class="copy">
+  <h1>For Stellar apps that need <span>their own rules.</span></h1>
+  <p>Your block time, fees, members and validators.<br>Your users' money stays on Stellar.</p>
+  <div class="url">caravel-tau.vercel.app</div>
+</div>
+<div class="chart" aria-hidden="true">
+  <span class="k" style="top:0">Your lane</span>
+  <div class="lane"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+  <div class="cp" style="right:113px"></div><div class="cp" style="right:-1px"></div>
+  <div class="ledger"><i></i><i></i></div>
+  <span class="k" style="top:154px">Stellar</span>
+</div>
+</body></html>

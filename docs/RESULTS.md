@@ -204,3 +204,79 @@ Lane #1's deployment is now the `[env.testnet]` table of its lane file (DEC-070)
 | Replay | `caravel replay --prove-escape` | OK over 15 checkpoints from Stellar data alone, with the same escape proof as `exit.json` |
 
 The same script passed on a local network for both templates (perps in 251 s, payments in 182 s), and `scripts/check-quickstart.sh` ran the README's quickstart as written, from `install.sh` to `caravel escape`, on macOS. Lane #1's read-only `caravel plan --exit-code` with its CI release still printed "No changes." the same day.
+
+## Performance baseline (M0.9 F-03, 2026-10-04)
+
+What the lane costs before the M0.9 fixes (spec §20.8), as the reference for F-14. Measured with `scripts/soak-lane.sh` (F-02):
+
+```sh
+BLOCK_MS=500 TPS=45 ACCOUNTS=32 INFLIGHT=2 DURATION=600 ./scripts/soak-lane.sh
+```
+
+**Conditions:**
+- **Lane:** the perps template from `caravel init`, deployed with `caravel apply` on a local Stellar network (quickstart, 1 s ledgers): the sequencer, 3 validators (threshold 2) and the relayer with fixed-price feeds, all as processes on one laptop (Apple M-series, 16 cores). One checkpoint a minute (`checkpoint_every_blocks = 60000 / block_time_ms`), unless a batch fills first.
+- **Load:** 32 accounts that deposited 1,000 USDC each through the settlement contract, 2 requests in flight per account, the load generator's usual mix (60% resting orders, 25% IOC, 12% cancel-all, 3% withdrawals of 1 USDC). 10 minutes a run.
+- **Storage:** the bytes each SQLite store's live pages hold (WAL included, free pages left out), growth over the run, per block and per day. All four stores grow alike before F-08.
+- **Timings:** each node's `/v1/status` `perf` (F-01), p50 / p99 over the last 1,024 samples.
+
+| Measure | 500 ms, idle | 500 ms, 45 tx/s | 500 ms, 100 tx/s | 200 ms, idle | 200 ms, 45 tx/s | 200 ms, 100 tx/s |
+|---|---|---|---|---|---|---|
+| Blocks/s | 2.0 | 2.0 | 2.0 | 5.0 | 5.0 | 5.0 |
+| User tx/s, all OK or rejected by the engine | 0 | 45.0 | 100.0 | 0 | 45.0 | 100.0 |
+| Soft latency, p50 / p99 | – | 268 / 514 ms | 274 / 519 ms | – | 112 / 212 ms | 117 / 213 ms |
+| Hard latency, p50 / p99 | – | 8.7 / 13.7 s | 5.6 / 8.9 s | – | 8.5 / 13.3 s | 6.0 / 8.8 s |
+| Checkpoints accepted in the run | 10 | 72 | 156 | 10 | 78 | 156 |
+| Batch, p50 | 17,674 B | 88,100 B | 85,785 B | 40,894 B | 85,105 B | 87,235 B |
+| Store growth per block (each of 4) | 290 B | 7,302 B | 13,143 B | 238 B | 2,944 B | 5,500 B |
+| Store growth per day (each of 4) | 50 MB | 1.26 GB | 2.27 GB | 103 MB | 1.27 GB | 2.37 GB |
+| Host `cpu_insns` per block, p50 | – | 29.9M | 47.9M | – | 20.1M | 27.7M |
+| Sequencer: execute, p50 / p99 | 8.6 / 13.5 ms | 14.5 / 20.7 ms | 20.0 / 26.7 ms | 8.1 / 12.2 ms | 9.5 / 12.3 ms | 10.7 / 14.2 ms |
+| Sequencer: commit, p50 / p99 | 0.5 / 3.0 ms | 0.5 / 4.5 ms | 0.5 / 6.8 ms | 0.5 / 2.8 ms | 0.5 / 1.0 ms | 0.4 / 1.1 ms |
+| Seal to signed, p50 | 2.00 s | 2.01 s | 2.01 s | 2.01 s | 2.01 s | 2.01 s |
+| Validator: fetch, p50 / p99 | 0.3 / 8.3 ms | 1.4 / 17.0 ms | 2.7 / 24.6 ms | 0.4 / 7.7 ms | 0.6 / 9.3 ms | 1.0 / 10.2 ms |
+| CPU, average (sequencer / a validator / relayer) | 1.4 / 1.2 / 0.2% | 4.0 / 2.1 / 0.6% | 7.1 / 2.9 / 1.5% | 3.7 / 3.6 / 0.3% | 6.7 / 4.6 / 0.5% | 9.1 / 5.0 / 0.8% |
+| Memory, max (sequencer / a validator / relayer) | 23 / 23 / 218 MB | 37 / 27 / 126 MB | 41 / 27 / 155 MB | 24 / 24 / 222 MB | 39 / 28 / 138 MB | 42 / 27 / 155 MB |
+
+The engine's rejections (0.5 to 0.8% of transactions) are `TOO_MANY_OPEN_ORDERS` (code 15) from the load mix. CPU is the percentage of one core.
+
+**Lane #1 on testnet, the same day:**
+- 432,883 blocks at 0.5 s;
+- ~280 B a block in each of the four stores (sequencer and 3 validators on one 20 GB disk), ~121 MB a store;
+- the sequencer's file at 261 MB, 120 MB of it free pages, since nothing ever gave space back;
+- ~190 MB a day across the four stores.
+
+Its traffic is mostly oracle updates, which is why it matches the idle column.
+
+**What the numbers say:**
+- **Storage is the first limit:**
+  - Idle, 200 ms blocks double the growth (238 B × 5 a second against 290 B × 2): about 410 MB a day across lane #1's four stores, a 20 GB disk in about 45 days.
+  - Under load, each transaction costs about 325 B in every store (its bytes in the block and its receipt), whatever the block time: 1.26 GB a day per store at 45 tx/s, 5 GB across four. F-07 and F-08 go after this.
+- **Every signature waits 2 s:** `seal to signed` is 2.0 s in every run. The sequencer asks for signatures as it seals, a validator that has not fetched the last block yet refuses, and the signer sleeps 2 s before asking again. That is a fixed 2 s in every hard latency (F-10).
+- **Block time is not a throughput limit:** 100 tx/s ran at both block times with nothing refused by the sequencer, and the sequencer used under 10% of one core. A 200 ms block executes in 11 ms (p50), not 20 ms, because it is smaller.
+- **Checkpoints are:** under load a batch fills to its 96,000-byte cap long before a minute's blocks, so checkpoints come every 4 to 9 s. On this local network the relayer kept up (1 s ledgers). On testnet, ledgers close about every 5 s, and the relayer submits one checkpoint after the other: about 87 KB of blocks per ledger. At ~325 B a transaction that is roughly 85 to 90 tx/s sustained, at any block time. The limits allow two such transactions per ledger (266,240 B of transactions a ledger, 132,096 B each, `docs/SOURCES.md`), which the relayer cannot use yet (F-14).
+- **An idle minute at 200 ms is a 41 KB batch** (17.7 KB at 500 ms): 300 blocks of headers and oracle updates. Still one Stellar transaction a minute.
+- **Soft latency is half a block plus the round trip:** about 270 ms at 500 ms blocks and 115 ms at 200 ms.
+
+## After the M0.9 fixes (F-14 gate, 2026-10-04)
+
+The same soak on the M0.9 stack (F-01 to F-14), same machine and settings as the baseline above. The 45 tx/s run used the relayer from before its retry fix (F-14), and its hard-latency p99 includes one checkpoint that waited out a dropped connection plus a 4 s backoff (36 receipts); the other runs have the fix and no relayer error under load.
+
+| Measure | 500 ms, idle | 500 ms, 45 tx/s | 500 ms, 100 tx/s | 200 ms, idle | 200 ms, 100 tx/s |
+|---|---|---|---|---|---|
+| Hard latency, p50 / p99 (baseline) | – | 5.6 / 18.3 s (8.7 / 13.7) | 3.1 / 5.2 s (5.6 / 8.9) | – | 3.7 / 6.0 s (6.0 / 8.8) |
+| Seal to signed, p50 (baseline 2.0 s) | 9 ms | 12 ms | 15 ms | 12 ms | 15 ms |
+| Soft latency, p50 / p99 | – | 267 / 512 ms | 275 / 521 ms | – | 117 / 217 ms |
+| Sequencer store growth per block (baseline) | 248 B (290) | 3,143 B (7,302) | 5,494 B (13,143) | 191 B (238) | 2,250 B (5,500) |
+| Sequencer store per day (baseline) | 43 MB (50) | 543 MB (1,261) | 949 MB (2,271) | 83 MB (103) | 973 MB (2,373) |
+| A validator's store at the end (baseline) | 0.27 MB (0.38) | 1.27 MB (9.2) | 1.22 MB (17.6) | 0.49 MB (0.77) | 1.60 MB (18.9) |
+| Validator commit, p50 / p99 (baseline) | 60 / 407 µs (308 / 3,232) | 79 / 478 µs (248 / 2,956) | 104 / 415 µs (260 / 7,890) | 89 / 638 µs (358 / 2,839) | 81 / 309 µs (208 / 1,005) |
+| CPU average, sequencer / a validator / relayer | 1.6 / 1.2 / 0.3% | 3.4 / 1.8 / 0.6% | 6.0 / 2.3 / 1.2% | 4.7 / 3.9 / 0.3% | 9.6 / 5.3 / 1.8% |
+| User tx OK / rejected by the engine | – | 26,896 / 139 | 59,586 / 468 | – | 59,567 / 467 |
+
+**What changed:**
+- **Hard latency fell by about 2.5 s at every load:** the 2 s signer retry is gone (seal to signed is now 9 to 15 ms), and the relayer picks up a signed checkpoint at once. The rest is the ledger: on this local network a checkpoint lands within a second or two of being signed.
+- **Validators stop growing:** they keep the blocks after their oldest kept snapshot, about four checkpoints' worth, so a validator's store stays near 1 to 2 MB under load instead of growing 2.3 GB a day. Of the four stores on lane #1's disk, three now stay flat.
+- **The sequencer's store grows 2.4× slower:** the blocks of old checkpoints are deflated into one archive row each. Under load that is about 135 B a transaction instead of 325 B.
+- **Validators write less per block:** commit p50 is 60 to 100 µs instead of 250 to 360 µs (a lazy head, `synchronous=NORMAL`).
+- **Unchanged:** soft latency (half a block plus the round trip), the engine's execute time (consensus is untouched), and the throughput limits of the baseline. A checkpoint is still one Stellar transaction at a time, so on testnet sustained load stays near 85 to 90 tx/s.
+- **For lane #1 at 200 ms:** idle, the four stores would grow about 83 MB a day together instead of about 410 MB (and less than today's 190 MB at 500 ms). CPU is the open question: a 200 ms block executes in about 10 ms on this laptop, and lane #1 runs four nodes on an e2-small, whose two shared vCPUs sustain about half a vCPU. That needs measuring on the VM (F-14 gate).
