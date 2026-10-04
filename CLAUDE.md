@@ -48,6 +48,7 @@ BENCH_ACCOUNTS=256 BENCH_ORDERS_PER_SIDE=128 BENCH_BLOCK_BYTES=12000 cargo run -
 CARAVEL_INTERNAL_TOKEN=$(openssl rand -hex 16) cargo run --release -p caravel-perps-node -- sequencer --config lanes/perps/config/sequencer.local.toml   # local sequencer (local lane, DEC-037)
 cargo run --release -p caravel-perps-node -- validator --config lanes/perps/config/validator-1.local.toml   # a validator (key in keys/, never in git)
 cargo run --release -p caravel-perps-node -- check-store --config lanes/perps/config/sequencer.local.toml   # replay a node's store through the Wasm
+cargo run --release -p caravel-perps-node -- compact --config <sequencer or validator toml>   # prune a stopped node's store and VACUUM it (DEC-105); nodes also prune as they run
 cargo run --release -p caravel-perps-node -- export-proofs --config <validator.toml> [--out exit.json]   # every escape and withdrawal proof a validator holds (DEC-065)
 DURATION=3600 TPS=50 ./scripts/soak-sequencer.sh   # T-007 soak: 1 s blocks, 50 tx/s, restart halfway
 cargo run --release -p caravel-perps-node -- replay --rpc <url> --network-passphrase <p> --settlement C... --genesis-config lanes/perps/config/lane.<lane>.toml --engine-wasm target/contracts/perps_engine.wasm [--prove-escape G...]   # replay from Stellar only

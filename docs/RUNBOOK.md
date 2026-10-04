@@ -308,7 +308,8 @@ The first JSON line is the report: `ok`, the checkpoints replayed and the final 
 ## 7. Data retention
 
 - **Stellar RPC** keeps transactions for about 7 days on testnet (120,959 ledgers, checked 2026-09-29). Replay needs every checkpoint transaction since genesis, so after 7 days it needs another source: the M1 plan is a Galexie ledger archive (`--from-archive` is not built in M0, DEC-042). Until then, the validators' stores are the lane's history. `caravel-perps-node check-store` re-executes a store and checks each header, and the header hashes on Stellar (`checkpoint(seq)`) anchor it.
-- **Node stores** (`/opt/caravel/data/*.sqlite`) keep every block, receipt, checkpoint and snapshot; nothing is pruned in M0. Back them up while the node runs with `sqlite3 <db> ".backup <file>"`. The growth rate is in `docs/RESULTS.md`.
+- **Node stores** (`/opt/caravel/data/*.sqlite`) keep every block and receipt, every checkpoint header and withdrawal leaf, and the snapshots of genesis and of the last accepted checkpoint, the 3 before it and any later ones. Each node prunes older snapshots and old accepted batch bytes every 30 s (DEC-105; the log says `store pruned`). Freed space is reused; to shrink a file, stop the node and run `caravel-perps-node compact --config <its toml>`. Back stores up while the node runs with `sqlite3 <db> ".backup <file>"`. The growth rate is in `docs/RESULTS.md`.
+- **Perps history** (`perps-history.sqlite` beside the sequencer's store, DEC-103): candles and recent fills for the web app. Display data only; delete it and the sequencer rebuilds the last day from its store at start.
 - **Relayer log** `/opt/caravel/data/relayer-checkpoints.jsonl`: one line per submitted checkpoint (fee, size), the input of `scripts/measure-report.mjs`.
 
 ## 8. Relayer XLM

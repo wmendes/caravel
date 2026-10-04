@@ -571,6 +571,7 @@ impl<A: LaneApp> Core<A> {
         let row = CheckpointRow {
             seq: header.seq,
             header: header_bytes.to_vec(),
+            batch_len: batch.len(),
             batch,
             first_height: first,
             last_height,

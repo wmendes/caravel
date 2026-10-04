@@ -19,3 +19,24 @@ pub mod validator;
 pub mod witness;
 
 pub use app::{FeedApi, NodeApp};
+
+/// How often a node prunes its store (DEC-105).
+pub(crate) const PRUNE_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
+/// Rows of each kind one prune pass may drop.
+pub(crate) const PRUNE_ROWS: usize = 200;
+
+pub(crate) fn log_pruned(
+    r: Result<
+        caravel_runtime::store::Result<caravel_runtime::store::Pruned>,
+        tokio::task::JoinError,
+    >,
+) {
+    match r {
+        Ok(Ok(p)) if p.snapshots + p.batches > 0 => {
+            tracing::info!(snapshots = p.snapshots, batches = p.batches, "store pruned")
+        }
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => tracing::warn!("pruning the store: {e}"),
+        Err(e) => tracing::warn!("prune task: {e}"),
+    }
+}

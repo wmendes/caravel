@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS checkpoints (
     epoch INTEGER,
     sigs TEXT,
     stellar_tx_hash TEXT,
-    stellar_ledger INTEGER
+    stellar_ledger INTEGER,
+    batch_len INTEGER
 );
 CREATE TABLE IF NOT EXISTS inbox (
     idx INTEGER PRIMARY KEY,
@@ -124,7 +125,10 @@ impl CheckpointStatus {
 pub struct CheckpointRow {
     pub seq: u64,
     pub header: Vec<u8>,
+    /// Empty once pruned (DEC-105): the batch is on Stellar and can be
+    /// rebuilt from the stored blocks. `batch_len` keeps its size.
     pub batch: Vec<u8>,
+    pub batch_len: usize,
     pub first_height: u64,
     pub last_height: u64,
     /// JSON `[[key_hex, amount], ...]` in leaf order.
@@ -135,6 +139,16 @@ pub struct CheckpointRow {
     pub sigs: Option<String>,
     pub stellar_tx_hash: Option<String>,
     pub stellar_ledger: Option<u32>,
+}
+
+/// Snapshots kept below the last accepted checkpoint (spec §14.4, §15, DEC-105).
+pub const KEEP_ACCEPTED_SNAPSHOTS: u64 = 3;
+
+/// What one [`Store::prune`] call dropped.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Pruned {
+    pub snapshots: usize,
+    pub batches: usize,
 }
 
 pub struct Store {
@@ -189,6 +203,7 @@ impl Store {
         conn.pragma_update(None, "synchronous", "FULL")?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch(SCHEMA)?;
+        migrate(&conn)?;
         let mut store = Self { conn };
         match store.meta("lane_id")? {
             Some(stored) => {
@@ -347,8 +362,8 @@ impl Store {
 
     pub fn insert_checkpoint(&mut self, row: &CheckpointRow) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO checkpoints (seq, header, batch, first_height, last_height, withdrawals, status, epoch, sigs, stellar_tx_hash, stellar_ledger)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT INTO checkpoints (seq, header, batch, first_height, last_height, withdrawals, status, epoch, sigs, stellar_tx_hash, stellar_ledger, batch_len)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 i(row.seq),
                 row.header,
@@ -360,7 +375,8 @@ impl Store {
                 row.epoch.map(i),
                 row.sigs,
                 row.stellar_tx_hash,
-                row.stellar_ledger
+                row.stellar_ledger,
+                row.batch.len() as i64
             ],
         )?;
         Ok(())
@@ -440,7 +456,7 @@ impl Store {
     pub fn checkpoint(&self, seq: u64) -> Result<Option<CheckpointRow>> {
         self.conn
             .query_row(
-                "SELECT seq, header, batch, first_height, last_height, withdrawals, status, epoch, sigs, stellar_tx_hash, stellar_ledger FROM checkpoints WHERE seq = ?1",
+                "SELECT seq, header, batch, first_height, last_height, withdrawals, status, epoch, sigs, stellar_tx_hash, stellar_ledger, COALESCE(batch_len, length(batch)) FROM checkpoints WHERE seq = ?1",
                 params![i(seq)],
                 row_of,
             )
@@ -451,7 +467,7 @@ impl Store {
     /// Checkpoints with `status`, lowest seq first.
     pub fn checkpoints_with(&self, status: CheckpointStatus) -> Result<Vec<CheckpointRow>> {
         let mut stmt = self.conn.prepare(
-            "SELECT seq, header, batch, first_height, last_height, withdrawals, status, epoch, sigs, stellar_tx_hash, stellar_ledger FROM checkpoints WHERE status = ?1 ORDER BY seq",
+            "SELECT seq, header, batch, first_height, last_height, withdrawals, status, epoch, sigs, stellar_tx_hash, stellar_ledger, COALESCE(batch_len, length(batch)) FROM checkpoints WHERE status = ?1 ORDER BY seq",
         )?;
         let rows = stmt.query_map(params![status.as_str()], row_of)?;
         let mut out = Vec::new();
@@ -459,6 +475,57 @@ impl Store {
             out.push(row??);
         }
         Ok(out)
+    }
+
+    /// `(seq, header, withdrawals)` of every checkpoint accepted on Stellar,
+    /// lowest first, without the batch: what withdrawal proofs need.
+    pub fn accepted_withdrawals(&self) -> Result<Vec<(u64, Vec<u8>, String)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT seq, header, withdrawals FROM checkpoints WHERE status = 'accepted' ORDER BY seq",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                u(r.get::<_, i64>(0)?),
+                r.get::<_, Vec<u8>>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    /// Drops what the store no longer needs (DEC-105), at most `limit` rows
+    /// of each kind per call, so no call holds the store for long:
+    /// - snapshots older than the last accepted checkpoint minus
+    ///   [`KEEP_ACCEPTED_SNAPSHOTS`], except genesis (seq 0). The escape tree
+    ///   and `export-proofs` read the last accepted one; newer ones stay too.
+    /// - the batch bytes of accepted checkpoints older than that: the batch
+    ///   is on Stellar and can be rebuilt from `blocks`; `batch_len` keeps
+    ///   its size.
+    ///
+    /// Blocks, headers, withdrawal leaves and the inbox are never pruned.
+    pub fn prune(&mut self, limit: usize) -> Result<Pruned> {
+        let Some(accepted) = self.last_checkpoint_with(CheckpointStatus::Accepted)? else {
+            return Ok(Pruned::default());
+        };
+        let keep_from = accepted.saturating_sub(KEEP_ACCEPTED_SNAPSHOTS);
+        let tx = self.conn.transaction()?;
+        let snapshots = tx.execute(
+            "DELETE FROM snapshots WHERE seq IN (SELECT seq FROM snapshots WHERE seq > 0 AND seq < ?1 ORDER BY seq LIMIT ?2)",
+            params![i(keep_from), limit as i64],
+        )?;
+        let batches = tx.execute(
+            "UPDATE checkpoints SET batch_len = length(batch), batch = x'' WHERE seq IN (SELECT seq FROM checkpoints WHERE status = 'accepted' AND seq < ?1 AND length(batch) > 0 ORDER BY seq LIMIT ?2)",
+            params![i(keep_from), limit as i64],
+        )?;
+        tx.commit()?;
+        Ok(Pruned { snapshots, batches })
+    }
+
+    /// Gives the space freed by [`Store::prune`] back to the file system.
+    /// Rewrites the whole file: run it with the node stopped.
+    pub fn vacuum(&self) -> Result<()> {
+        self.conn.execute_batch("VACUUM")?;
+        Ok(())
     }
 
     /// The highest seq with `status`, if any.
@@ -640,6 +707,21 @@ impl Store {
     }
 }
 
+/// Brings a store made by an earlier release up to date, idempotently
+/// (DEC-105): the `batch_len` column of pruned batches, and the index the
+/// per-block checkpoint queries use.
+fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+    let has_len = conn
+        .prepare("SELECT 1 FROM pragma_table_info('checkpoints') WHERE name = 'batch_len'")?
+        .exists([])?;
+    if !has_len {
+        conn.execute_batch("ALTER TABLE checkpoints ADD COLUMN batch_len INTEGER")?;
+    }
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS checkpoints_status_seq ON checkpoints (status, seq)",
+    )
+}
+
 fn row_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<Result<CheckpointRow>> {
     let status: String = r.get(6)?;
     let epoch: Option<i64> = r.get(7)?;
@@ -652,11 +734,13 @@ fn row_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<Result<CheckpointRow>> {
     let sigs: Option<String> = r.get(8)?;
     let stellar_tx_hash: Option<String> = r.get(9)?;
     let stellar_ledger: Option<u32> = r.get(10)?;
+    let batch_len: i64 = r.get(11)?;
     Ok(
         CheckpointStatus::parse(&status).map(|status| CheckpointRow {
             seq: u(seq),
             header,
             batch,
+            batch_len: u(batch_len) as usize,
             first_height: u(first_height),
             last_height: u(last_height),
             withdrawals,
