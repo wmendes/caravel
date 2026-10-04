@@ -1,7 +1,8 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { ago, short, usdc } from "../format";
 import { Link, useRoute } from "../router";
+import { config } from "../config";
 import { useApp } from "../state";
 import { Chip, useNow } from "./ui";
 
@@ -29,12 +30,10 @@ export function Layout({ children }: { children: ReactNode }) {
           </Link>
           <Link to="/portfolio">Portfolio</Link>
           <Link to="/explorer">Explorer</Link>
-          {frozen && (
-            <Link to="/escape" className="escape">
-              Escape
-            </Link>
-          )}
-          <Link to="/about">About</Link>
+          <Link to="/escape" className={frozen ? "escape" : undefined}>
+            Exit
+          </Link>
+          <Link to="/about">How it works</Link>
         </nav>
         <div className="wallet">
           {address && account !== undefined && (
@@ -44,12 +43,7 @@ export function Layout({ children }: { children: ReactNode }) {
             </div>
           )}
           {address ? (
-            <button className="btn sm" onClick={disconnect} title="Forget this account in the app">
-              <span className="mono">{short(address, 4)}</span>
-              <span className="faint" aria-hidden>
-                ×
-              </span>
-            </button>
+            <WalletMenu address={address} onDisconnect={disconnect} />
           ) : (
             <button className="btn sm stellar" onClick={() => void connect()} disabled={connecting}>
               {connecting ? "Connecting…" : "Connect wallet"}
@@ -60,7 +54,7 @@ export function Layout({ children }: { children: ReactNode }) {
       <div>
         {frozen && (
           <div className="banner danger" role="alert">
-            <b>The settlement contract is frozen.</b> The lane no longer settles. Claim your last checkpointed equity on Stellar. <Link to="/escape">Go to Escape</Link>
+            <b>The settlement contract is frozen.</b> The lane no longer settles. Claim your last checkpointed equity on Stellar. <Link to="/escape">Go to Exit</Link>
           </div>
         )}
         {statusError && (
@@ -114,6 +108,73 @@ export function Layout({ children }: { children: ReactNode }) {
         </span>
         <span>Testnet only · not audited</span> {/* claims-ok: states it is not audited */}
       </footer>
+    </div>
+  );
+}
+
+/** The connected account: copy it, see it on Stellar, the trading key, disconnect. */
+function WalletMenu({ address, onDisconnect }: { address: string; onDisconnect: () => void }) {
+  const { key } = useApp();
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent | KeyboardEvent) => {
+      if (e instanceof KeyboardEvent ? e.key === "Escape" : !box.current?.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", close);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", close);
+    };
+  }, [open]);
+  return (
+    <div className="wallet-menu" ref={box}>
+      <button className="btn sm" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <span className="dot-ok" aria-hidden />
+        <span className="mono">{short(address, 4)}</span>
+        <svg className="caret" width="10" height="10" viewBox="0 0 10 10" aria-hidden>
+          <path d="M1.5 3.5 5 7l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+        </svg>
+      </button>
+      {open && (
+        <div className="menu wallet-pop" role="menu">
+          <div className="menu-head">
+            <span className="label">Connected on {config.networkName}</span>
+            <span className="mono">{short(address, 10)}</span>
+            <span className="faint">{key ? `Fast trading on until ${new Date(key.expiresAtMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Fast trading off: each order asks your wallet"}</span>
+          </div>
+          <button
+            role="menuitem"
+            onClick={() =>
+              void navigator.clipboard?.writeText(address).then(() => {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1200);
+              })
+            }
+          >
+            {copied ? "Copied" : "Copy address"}
+          </button>
+          <a role="menuitem" href={`${config.explorerUrl}/account/${address}`} target="_blank" rel="noreferrer">
+            View on stellar.expert ↗
+          </a>
+          <Link to="/portfolio" role="menuitem" onClick={() => setOpen(false)}>
+            Portfolio and funds
+          </Link>
+          <button
+            role="menuitem"
+            className="down"
+            onClick={() => {
+              setOpen(false);
+              onDisconnect();
+            }}
+          >
+            Disconnect
+          </button>
+        </div>
+      )}
     </div>
   );
 }

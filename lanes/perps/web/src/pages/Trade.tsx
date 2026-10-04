@@ -698,12 +698,12 @@ function AccountBox({ account, address, ids, hasKey, keyExpiry }: { account: Acc
           </li>
           <li className={`step ${step === 1 ? "now" : ""}`}>
             <div>
-              <b>Deposit testnet USDC on Stellar</b>
-              <span>It goes into the settlement contract; the lane credits it in seconds.</span>
+              <b>Get test USDC and deposit it</b>
+              <span>One signature buys testnet USDC with friendbot XLM; a second deposits it into the settlement contract.</span>
               {step === 1 && (
                 <div>
                   <Link to="/portfolio" className="btn stellar sm" style={{ textDecoration: "none" }}>
-                    Deposit
+                    Get test USDC
                   </Link>
                 </div>
               )}
