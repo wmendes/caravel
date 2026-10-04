@@ -14,7 +14,7 @@
 #   $PREFIX/share/caravel/<release>/              (what `caravel apply` installs on hosts)
 #   $PREFIX/share/caravel/current -> <release>
 #
-#   install.sh [--version vX.Y.Z] [--prefix DIR] [--no-stellar-cli]
+#   install.sh [--version vX.Y.Z] [--prefix DIR] [--no-stellar-cli] [--no-modify-path]
 #   install.sh --archive caravel-<version>-<target>.tar.gz [--prefix DIR]
 #   ./scripts/install.sh [--prefix DIR] [--templates "perps payments"] [--with-web]
 #                        [--wasm-dir DIR] [--skip-build]       (in a checkout: build it)
@@ -23,8 +23,14 @@
 # PREFIX defaults to $CARAVEL_HOME, else ~/.caravel. --wasm-dir takes the
 # contracts from the CI contracts-wasm artifact, the builds of record
 # (needed for testnet lanes when this machine isn't x86_64 Linux, DEC-033).
-# --with-web also builds each template's web app. Nothing outside PREFIX is
-# touched; add $PREFIX/bin to your PATH.
+# --with-web also builds each template's web app.
+#
+# PATH: unless $PREFIX/bin is already on it, the installer writes
+# $PREFIX/env (puts $PREFIX/bin first on PATH, once) and sources it from your
+# shell's startup files, the way rustup does: ~/.profile, ~/.bashrc and
+# ~/.bash_profile when they exist, zsh's .zshenv, and fish's conf.d. New
+# shells find caravel; this one needs `. "$PREFIX/env"`. --no-modify-path
+# (or CARAVEL_NO_MODIFY_PATH=1) leaves every file outside PREFIX alone.
 set -euo pipefail
 
 # The checkout this script is in, if any: piped from curl, it has none.
@@ -37,6 +43,8 @@ REPO="${CARAVEL_REPO:-wmendes/caravel}"
 # Must match versions.json "stellar_cli" (scripts/check-versions.mjs checks it).
 STELLAR_CLI_VERSION="28.1.0"
 PREFIX="${CARAVEL_HOME:-$HOME/.caravel}"
+MODIFY_PATH=1
+[[ "${CARAVEL_NO_MODIFY_PATH:-0}" == 1 ]] && MODIFY_PATH=0
 TEMPLATES=""
 WITH_WEB=0
 WASM_DIR=""
@@ -56,6 +64,7 @@ while [[ $# -gt 0 ]]; do
     --version) VERSION="$2"; shift 2 ;;
     --release) RELEASE=1; shift ;;
     --no-stellar-cli) STELLAR_CLI=0; shift ;;
+    --no-modify-path) MODIFY_PATH=0; shift ;;
     -h|--help) sed -n '2,29p' "${SRC:-$0}" 2> /dev/null | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "install: unknown option $1 (see --help)" >&2; exit 2 ;;
   esac
@@ -78,10 +87,45 @@ install_release() {
   done
   ln -sfn caravel "$PREFIX/bin/stellar-caravel"
   "$PREFIX/bin/caravel" version
-  case ":$PATH:" in
-    *":$PREFIX/bin:"*) ;;
-    *) printf '\nAdd Caravel to your PATH:\n  export PATH="%s/bin:$PATH"\n' "$PREFIX" ;;
-  esac
+  setup_path
+}
+
+# Puts $PREFIX/bin on PATH for new shells (see the header). Safe to run again:
+# each startup file gets one line, and env adds the directory once.
+ON_PATH=1
+setup_path() {
+  case ":$PATH:" in *":$PREFIX/bin:"*) return ;; esac
+  ON_PATH=0
+  if [[ "$MODIFY_PATH" != 1 ]]; then
+    printf '\nAdd Caravel to your PATH:\n  export PATH="%s/bin:$PATH"\n' "$PREFIX"
+    return
+  fi
+  cat > "$PREFIX/env" <<ENV
+# Caravel's bin directory first on PATH, once (written by install.sh).
+case ":\${PATH}:" in
+  *":$PREFIX/bin:"*) ;;
+  *) export PATH="$PREFIX/bin:\$PATH" ;;
+esac
+ENV
+  local line=". \"$PREFIX/env\"" changed=() f
+  local files=("$HOME/.profile")
+  for f in "$HOME/.bashrc" "$HOME/.bash_profile"; do [[ -f "$f" ]] && files+=("$f"); done
+  if [[ -n "${ZDOTDIR:-}" || "${SHELL:-}" == */zsh || -f "$HOME/.zshrc" ]]; then files+=("${ZDOTDIR:-$HOME}/.zshenv"); fi
+  for f in "${files[@]}"; do
+    if ! grep -qsF "$line" "$f"; then
+      printf '\n# Caravel\n%s\n' "$line" >> "$f"
+      changed+=("$f")
+    fi
+  done
+  if [[ "${SHELL:-}" == */fish || -d "$HOME/.config/fish" ]]; then
+    f="$HOME/.config/fish/conf.d/caravel.fish"
+    mkdir -p "$(dirname "$f")"
+    printf '# Caravel (written by install.sh)\nfish_add_path --prepend %s\n' "$PREFIX/bin" > "$f"
+    changed+=("$f")
+  fi
+  if (( ${#changed[@]} )); then
+    printf '\nAdded %s/bin to your PATH in: %s\n' "$PREFIX" "${changed[*]/#$HOME/~}"
+  fi
 }
 
 # The pinned Stellar CLI next to caravel, checked against GitHub's published
@@ -110,6 +154,14 @@ stellar_cli() {
   if command -v stellar > /dev/null && [[ "$(command -v stellar)" != "$PREFIX/bin/stellar" ]]; then
     echo "install: note: $PREFIX/bin/stellar ($STELLAR_CLI_VERSION) comes first once $PREFIX/bin is first on PATH" >&2
   fi
+}
+
+# What to run now, and in this shell first if PATH changed only for new ones.
+next_steps() {
+  if [[ "$ON_PATH" == 0 && "$MODIFY_PATH" == 1 ]]; then
+    printf '\nOpen a new terminal, or run this to use caravel in this one:\n  . "%s/env"\n' "$PREFIX"
+  fi
+  printf '\nNext: caravel init payments my-lane && cd my-lane && caravel apply\n'
 }
 
 # A release from GitHub for this machine: its archive and the release's
@@ -161,7 +213,7 @@ if [[ -n "$ARCHIVE" ]]; then
   if [[ -n "${DL:-}" && -f "$DL/IMAGES" ]]; then cp "$DL/IMAGES" "$dir/IMAGES"; fi
   [[ "$STELLAR_CLI" == 1 ]] && stellar_cli
   install_release "$dir"
-  printf '\nNext: caravel init payments my-lane && cd my-lane && caravel apply\n'
+  next_steps
   if [[ -f "$PREFIX/share/caravel/current/IMAGES" ]]; then
     printf 'A lane on your machine needs Docker with Compose: its nodes run in containers. caravel doctor checks.\n'
   else
@@ -243,3 +295,4 @@ if [[ -n "$WASM_DIR" ]]; then
   fi
 fi
 install_release "$STAGE/release"
+next_steps
