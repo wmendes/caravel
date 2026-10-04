@@ -8,6 +8,7 @@ pub mod builder;
 pub mod checkpoint;
 pub mod executor;
 pub mod mempool;
+pub mod perf;
 pub mod sequencer;
 pub mod store;
 pub mod validator;

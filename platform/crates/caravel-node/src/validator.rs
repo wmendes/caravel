@@ -151,9 +151,15 @@ pub struct ValidatorNode<A: NodeApp> {
     sequencer_key: Option<[u8; 32]>,
     lane_name: String,
     identity: api::Identity,
+    /// Node-side timings (F-01): block fetch, lock wait, sign.
+    perf: Mutex<caravel_runtime::perf::Perf>,
 }
 
 impl<A: NodeApp> ValidatorNode<A> {
+    fn record(&self, phase: &'static str, took: Duration) {
+        self.perf.lock().expect("perf lock").record(phase, took);
+    }
+
     fn with<T>(&self, f: impl FnOnce(&mut Follower<A>) -> T) -> T {
         f(&mut self.follower.lock().expect("follower lock"))
     }
@@ -216,6 +222,7 @@ pub async fn start<A: NodeApp>(
             engine_wasm_hash: cfg.engine_wasm_hash,
             network_passphrase: cfg.network_passphrase.clone(),
         },
+        perf: Mutex::new(caravel_runtime::perf::Perf::new()),
     });
     let router = router(node.clone(), &cfg.cors_origins);
     tokio::spawn(follow_loop(
@@ -306,8 +313,13 @@ async fn follow_loop<A: NodeApp>(app: Arc<ValidatorNode<A>>, sequencer: String, 
             continue;
         }
         let next = height + 1;
-        let record = match fetch_block(&http, &sequencer, next).await {
-            Ok(Some(r)) => r,
+        let t_fetch = std::time::Instant::now();
+        let fetched = fetch_block(&http, &sequencer, next).await;
+        let record = match fetched {
+            Ok(Some(r)) => {
+                app.record("fetch", t_fetch.elapsed());
+                r
+            }
             Ok(None) => {
                 tokio::time::sleep(Duration::from_millis(poll_ms)).await;
                 continue;
@@ -319,8 +331,13 @@ async fn follow_loop<A: NodeApp>(app: Arc<ValidatorNode<A>>, sequencer: String, 
             }
         };
         let a = app.clone();
-        let result =
-            tokio::task::spawn_blocking(move || a.with(|f| f.apply(&record, now_ms()))).await;
+        let result = tokio::task::spawn_blocking(move || {
+            let t_lock = std::time::Instant::now();
+            let mut f = a.follower.lock().expect("follower lock");
+            a.record("lock_wait", t_lock.elapsed());
+            f.apply(&record, now_ms())
+        })
+        .await;
         match result {
             Ok(Ok(applied)) => {
                 for flag in &applied.flags {
@@ -478,11 +495,13 @@ async fn sign<A: NodeApp>(
     let header = api::unhex(&j.header, "header")?;
     let batch = api::unhex(&j.batch, "batch")?;
     let a = app.clone();
+    let t_sign = std::time::Instant::now();
     let result = tokio::task::spawn_blocking(move || {
         a.with(|f| f.sign(&header, &batch).map(|sig| (sig, f.public_key())))
     })
     .await
     .map_err(ApiError::internal)?;
+    app.record("sign", t_sign.elapsed());
     match result {
         Ok((sig, key)) => {
             ok(json!({ "signer_key": views::g_address(&key), "signature": hex(&sig) }))
@@ -520,6 +539,7 @@ async fn status<A: NodeApp>(State(app): AppState<A>) -> ApiResult {
                 "accepted": last(CheckpointStatus::Accepted)?.map(|s| s.to_string()),
             },
             "last_signed_seq": store.last_signed_seq().map_err(ApiError::internal)?.map(|s| s.to_string()),
+            "perf": crate::sequencer::perf_json(&f.perf, &app.perf.lock().expect("perf lock")),
         });
         app.identity.extend(&mut body);
         ok(body)

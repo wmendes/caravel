@@ -481,6 +481,46 @@ async fn validators_follow_sign_and_refuse_a_tampered_chain() {
         )
         .await;
     assert_eq!(accepted["checkpoints"]["accepted"], "1");
+
+    // F-01: both nodes report per-phase timings, in microseconds.
+    let phases = |v: &Value| v["perf"]["phases"].clone();
+    let vp = phases(&accepted);
+    assert_eq!(accepted["perf"]["unit"], "us");
+    for phase in [
+        "fetch",
+        "lock_wait",
+        "execute",
+        "decode",
+        "commit",
+        "checkpoint",
+        "sign",
+    ] {
+        assert!(
+            vp[phase]["n"].as_u64().unwrap_or(0) > 0,
+            "validator phase {phase}: {vp}"
+        );
+        assert!(vp[phase]["p50_us"].as_u64().unwrap() <= vp[phase]["max_us"].as_u64().unwrap());
+    }
+    let (_, seq_status) = c.get(&format!("{seq_url}/v1/status")).await;
+    let sp = phases(&seq_status);
+    for phase in [
+        "lock_wait",
+        "queue_read",
+        "build",
+        "execute",
+        "decode",
+        "commit",
+        "seal",
+        "publish",
+        "sign_collect",
+        "seal_to_signed",
+    ] {
+        assert!(
+            sp[phase]["n"].as_u64().unwrap_or(0) > 0,
+            "sequencer phase {phase}: {sp}"
+        );
+    }
+
     let (s, proof) = c
         .get(&format!("{}/v1/proofs/escape?account={}", urls[0], g(0x41)))
         .await;
