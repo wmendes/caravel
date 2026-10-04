@@ -1,6 +1,7 @@
 /**
- * Oracle feeder (spec §17.3): every 2 s per market, a USD price from the
- * first fresh source, converted to stroops per lot, snapped to the tick,
+ * Oracle feeder (spec §17.3): on every tick of the relayer's feed loop
+ * (`intervalMs`, 500 ms on testnet), for every market at once, a USD price
+ * from the first fresh source, converted to stroops per lot, snapped to the tick,
  * signed with the oracle key and posted to the sequencer's feed route. A
  * publish is skipped if the price moved less than one tick and less than
  * 10 s passed.
@@ -50,16 +51,17 @@ export class OracleFeeder {
 
   /** One round over every market; returns what was published. Errors are per market. */
   async tick(): Promise<{ published: Published[]; errors: string[] }> {
+    // Markets in parallel: a slow fallback source for one does not hold up the others.
+    const results = await Promise.allSettled(this.markets.map((m) => this.one(m)));
     const published: Published[] = [];
     const errors: string[] = [];
-    for (const m of this.markets) {
-      try {
-        const p = await this.one(m);
-        if (p) published.push(p);
-      } catch (e) {
-        errors.push(`market ${m.info.market_id}: ${String(e)}`);
+    results.forEach((r, i) => {
+      if (r.status === "fulfilled") {
+        if (r.value) published.push(r.value);
+      } else {
+        errors.push(`market ${this.markets[i]!.info.market_id}: ${String(r.reason)}`);
       }
-    }
+    });
     return { published, errors };
   }
 

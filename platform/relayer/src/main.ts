@@ -29,13 +29,20 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) {
   });
 }
 
-/** Runs `step` every `everyMs`, never overlapping; `fatal` errors stop the loop. */
+/**
+ * Runs `step` every `everyMs`, never overlapping: a step that took part of
+ * the interval waits only for the rest, so a 500 ms feed publishes every
+ * 500 ms. `fatal` errors stop the loop; others back off up to 30 s.
+ */
 async function loop(name: string, everyMs: number, step: () => Promise<void>, fatal: (e: unknown) => boolean): Promise<void> {
   let backoff = everyMs;
   while (!stopping) {
+    const started = Date.now();
     try {
       await step();
       backoff = everyMs;
+      await sleep(Math.max(0, everyMs - (Date.now() - started)));
+      continue;
     } catch (e) {
       if (fatal(e)) {
         log("error", `${name}: stopped`, { error: String(e) });

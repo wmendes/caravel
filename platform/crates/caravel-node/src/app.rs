@@ -16,6 +16,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use axum::Router;
 use caravel_runtime::sequencer::Produced;
+use caravel_runtime::store::Store;
 use caravel_runtime::LaneApp;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -70,6 +71,21 @@ pub trait NodeApp: LaneApp + Clone {
         cache: &mut Self::Cache,
         produced: &Produced<Self::State>,
     ) -> Self::BlockView;
+
+    /// Once, before the node serves: rebuilds the cache, from whatever the
+    /// app keeps beside the store (`db` is the store's path) and the stored
+    /// blocks up to `height`, the head whose state is `state`. Without it the
+    /// cache starts empty on every restart. An error is logged, not fatal.
+    fn warm(
+        &self,
+        _cache: &mut Self::Cache,
+        _db: &std::path::Path,
+        _store: &Store,
+        _state: &Self::State,
+        _height: u64,
+    ) -> Result<()> {
+        Ok(())
+    }
 
     /// The app's public routes (perps: `/v1/markets*`).
     fn routes(&self) -> Router<Arc<SequencerNode<Self>>> {

@@ -5,7 +5,7 @@ use caravel_perps::margin::{account_margin, upnl};
 use caravel_types::receipts::{Event, Receipts};
 use caravel_types::state::StateV1;
 use caravel_types::tx::Side;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use caravel_runtime::views::g_address;
 
@@ -265,14 +265,14 @@ pub fn book(st: &StateV1, market_id: u16, depth: usize) -> Option<BookView> {
     })
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct FillView {
     pub height: String,
     pub timestamp_ms: String,
     pub market_id: u16,
     pub price: String,
     pub lots: i64,
-    pub taker_side: &'static str,
+    pub taker_side: String,
     pub maker_order_id: String,
     pub maker: String,
     pub taker: String,
@@ -305,7 +305,7 @@ pub fn fills(st: &StateV1, height: u64, timestamp_ms: u64, receipts: &Receipts) 
                 market_id: *market,
                 price: price.to_string(),
                 lots: *lots,
-                taker_side: side(*taker_side),
+                taker_side: side(*taker_side).to_string(),
                 maker_order_id: maker_order_id.to_string(),
                 maker: key(*maker_idx),
                 taker: key(*taker_idx),

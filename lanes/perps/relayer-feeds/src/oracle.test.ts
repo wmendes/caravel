@@ -58,6 +58,22 @@ describe("oracle feeder (spec §17.3)", () => {
     expect(r.published.map((p) => [p.marketId, p.price])).toEqual([[2, 35_000_000n]]);
     expect(r.errors[0]).toMatch(/market 1: .*down/);
   });
+  it("does not let a slow market hold up the others", async () => {
+    const posted: number[] = [];
+    let release!: () => void;
+    const slow: PriceSource = {
+      name: "slow",
+      quote: () => new Promise((r) => (release = () => r({ usd: parseDecimal("65000"), observedAt: Math.floor(Date.now() / 1000), source: "slow" }))),
+    };
+    const eth = { ...market, market_id: 2, display_lot_base_units: 100_000 };
+    const feeder = new OracleFeeder(async (h) => { const u = fromHex(h); posted.push(u[0]! | (u[1]! << 8)); }, oracle, LANE_ID, [{ info: market, sources: [slow] }, { info: eth, sources: [new FixedPrice("3500")] }], 900);
+    const tick = feeder.tick();
+    await new Promise((r) => setTimeout(r, 10));
+    expect(posted).toEqual([2]); // ETH went out while BTC's source was still waiting
+    release();
+    const r = await tick;
+    expect(r.published.map((p) => p.marketId)).toEqual([1, 2]);
+  });
 });
 
 describe("the feed module (DEC-053)", () => {

@@ -618,6 +618,7 @@ dependencies = [
  "futures-util",
  "proptest",
  "reqwest",
+ "rusqlite",
  "serde",
  "serde_json",
  "soroban-env-host",
