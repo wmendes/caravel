@@ -1,0 +1,39 @@
+<!doctype html>
+<!-- The pinned launch post's image, 1600x900 (16:9, X's in-feed size). -->
+<html><meta charset="utf-8"><style>
+@font-face { font-family: "Schibsted Grotesk"; src: url("../../../site/fonts/schibsted-grotesk-latin.woff2") format("woff2"); font-weight: 400 900; }
+html, body { margin: 0; width: 1600px; height: 900px; background: #081E22; overflow: hidden; }
+body { font-family: "Schibsted Grotesk", system-ui, sans-serif; color: #F3EEE4; display: grid; grid-template-columns: 1fr 640px; gap: 72px; align-items: center; padding: 0 96px; box-sizing: border-box; }
+.brand { display: flex; align-items: center; gap: 16px; font-size: 34px; font-weight: 700; letter-spacing: -0.02em; }
+.brand svg { width: 52px; height: 52px; }
+h1 { margin: 40px 0 0; font-size: 88px; line-height: 1.0; letter-spacing: -0.035em; font-weight: 700; }
+h1 span { color: #FF8C7C; }
+p { margin: 28px 0 0; font-size: 30px; line-height: 1.35; color: #A8BAB8; max-width: 20em; }
+p b { color: #F3EEE4; font-weight: 600; }
+.file { background: #102C31; border: 1px solid #1C3B41; border-radius: 20px; overflow: hidden; }
+.fhead { display: flex; justify-content: space-between; padding: 18px 28px; border-bottom: 1px solid #1C3B41; font-size: 20px; color: #A8BAB8; }
+.fhead span:first-child { font-family: ui-monospace, "SF Mono", Menlo, monospace; color: #F3EEE4; }
+pre { margin: 0; padding: 26px 28px; font: 22px/1.75 ui-monospace, "SF Mono", Menlo, monospace; color: #A8BAB8; }
+pre b { color: #FF8C7C; }
+.stay { display: flex; gap: 14px; align-items: center; padding: 18px 28px; border-top: 1px solid #1C3B41; background: #0F3B3F; font-size: 21px; }
+.stay i { width: 16px; height: 16px; border-radius: 4px; background: #26958F; flex: none; }
+</style><body>
+<div>
+  <div class="brand"><svg viewBox="0 0 48 48" aria-hidden="true"><g transform="translate(4.8 4.4) scale(0.8)"><rect x="10" y="4" width="8" height="6" rx="1.5" fill="#FF8C7C"/><rect x="10" y="12" width="16" height="6" rx="1.5" fill="#FF8C7C"/><rect x="10" y="20" width="24" height="6" rx="1.5" fill="#FF8C7C"/><rect x="10" y="28" width="32" height="6" rx="1.5" fill="#FF8C7C"/><path d="M4 37h40l-4.6 7.2a1.6 1.6 0 0 1-1.35.8H9.95a1.6 1.6 0 0 1-1.35-.8Z" fill="#26958F"/></g></svg>Caravel</div>
+  <h1>For Stellar apps that need <span>their own rules.</span></h1>
+  <p>Run your app as a lane: <b>your block time, fees, members and validators</b>, in one file. Open source.</p>
+</div>
+<div class="file">
+  <div class="fhead"><span>lane.toml</span><span>example</span></div>
+<pre>[node]
+<b>block_time_ms = 500</b>      # every 0.5 s
+[access]
+<b>mode = "allowlist"</b>       # members only
+[[perps.markets]]
+<b>maker_fee_bps = 0</b>        # your fees
+[env.testnet]
+<b>threshold = 2</b>            # your validators
+<b>token = "circle-usdc"</b>    # settles in USDC</pre>
+  <div class="stay"><i></i>Your users' money stays on Stellar.</div>
+</div>
+</body></html>
