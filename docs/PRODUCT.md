@@ -13,7 +13,7 @@ Teams building an app on Stellar whose product needs rules the shared network ca
 - a card program paying just in time from non-custodial wallets;
 - a members-only payment network;
 - a game economy;
-- an agent marketplace.
+- agents paying per request for APIs and services, faster than a ledger and settled in batches.
 
 They're developers and technical founders, comfortable with a CLI and a config file. Many come through the Stellar ecosystem (Meridian, hackathons, SDF programs). They read the page on a laptop, deciding in a minute whether this is worth an afternoon.
 
