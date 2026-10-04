@@ -22,6 +22,7 @@ pub mod attrs;
 pub mod chain;
 pub mod cli;
 pub mod deploy;
+pub mod docker;
 pub mod flows;
 pub mod graph;
 pub mod host;

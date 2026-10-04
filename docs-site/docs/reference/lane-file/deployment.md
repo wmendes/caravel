@@ -42,9 +42,20 @@ provider = "local"                 # or "ssh"
 - `validator_polling = { sequencer_ms, stellar_secs }`.
 - `sequencer = { port, cors_origins, production }`.
 - `relayer = { account, feed_keys, feeds, intervals_ms }`. `feeds` are the template's feed modules; `feed_keys` maps an env var to an identity whose secret a feed reads.
-- `host = { provider, address, transport, project, zone, public_url, root, private_address, namespace }` (or `hosts`, [below](./hosts.md#several-hosts)):
+- `host = { provider, address, transport, project, zone, public_url, root, private_address, namespace, runtime }` (or `hosts`, [below](./hosts.md#several-hosts)):
   - `address` is `user@host` for ssh, or the VM name with `transport = "gcloud-iap"`;
-  - `public_url` is where the lane's API is served, and the user commands use it.
+  - `public_url` is where the lane's API is served, and the user commands use it;
+  - `runtime` is how the nodes run: `"process"` (the `local` default), `"systemd"` (the `ssh` default) or `"docker"`, [below](#containers).
+
+### Containers
+
+With `runtime = "docker"`, on this machine or an ssh host, each node runs in a container from the release's images (one per node template, the relayer, and the web app with Caddy). The host keeps the same files under its root, plus `config/compose.yml` and, with a `public_url`, the `config/Caddyfile` of the `web` container, which serves the API and the web app on ports 80 and 443. `caravel render` shows both.
+
+- The host needs Docker with the Compose plugin; an ssh host also needs passwordless `sudo`. Nothing else: no Node.js, no Caddy.
+- Plans work as for the other runtimes: a node restarts only when its configs or the release change, and `caravel logs`, `status`, `destroy` and `escape` work the same.
+- The containers run read-only, without capabilities, as uid 10001 on an ssh host and as you on this machine. Each sees only its own key.
+- A container reaches a local Stellar network at `host.docker.internal`; `caravel` writes that into the node configs for you.
+- The release names its images in `IMAGES`. A release from CI or `install.sh` has it; for this checkout's builds, `scripts/build-images.sh` makes the images and the file.
 
 **Settlement tokens:**
 
