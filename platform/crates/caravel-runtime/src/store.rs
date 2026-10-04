@@ -144,6 +144,9 @@ pub struct CheckpointRow {
 /// Snapshots kept below the last accepted checkpoint (spec §14.4, §15, DEC-105).
 pub const KEEP_ACCEPTED_SNAPSHOTS: u64 = 3;
 
+/// What the WAL file is truncated to after SQLite checkpoints it.
+const WAL_LIMIT_BYTES: i64 = 4 * 1024 * 1024;
+
 /// What one [`Store::prune`] call dropped.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Pruned {
@@ -199,8 +202,14 @@ impl Store {
         config_hash: &[u8; 32],
         genesis_state: &[u8],
     ) -> Result<Self> {
+        // Free pages go back to the file system as the store prunes (F-06).
+        // It takes effect on a new file; `compact` converts an older store
+        // with its VACUUM.
+        conn.pragma_update(None, "auto_vacuum", "INCREMENTAL")?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "FULL")?;
+        // The WAL file shrinks back to this after a checkpoint of SQLite's.
+        conn.pragma_update(None, "journal_size_limit", WAL_LIMIT_BYTES)?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch(SCHEMA)?;
         migrate(&conn)?;
@@ -273,24 +282,23 @@ impl Store {
         state: &[u8],
         checkpoint_seq: Option<u64>,
     ) -> Result<()> {
+        // Cached statements: these run on every block (F-06).
         let tx = self.conn.transaction()?;
-        let head: i64 = tx.query_row("SELECT height FROM head WHERE id = 0", [], |r| r.get(0))?;
+        let head: i64 = tx
+            .prepare_cached("SELECT height FROM head WHERE id = 0")?
+            .query_row([], |r| r.get(0))?;
         if u(head) + 1 != height {
             return Err(StoreError::Conflict("block height is not head + 1"));
         }
-        tx.execute(
+        tx.prepare_cached(
             "INSERT INTO blocks (height, input, state_hash_after, receipts) VALUES (?1, ?2, ?3, ?4)",
-            params![i(height), record.input, record.state_hash_after.as_slice(), receipts],
-        )?;
-        tx.execute(
-            "UPDATE head SET height = ?1, state = ?2 WHERE id = 0",
-            params![i(height), state],
-        )?;
+        )?
+        .execute(params![i(height), record.input, record.state_hash_after.as_slice(), receipts])?;
+        tx.prepare_cached("UPDATE head SET height = ?1, state = ?2 WHERE id = 0")?
+            .execute(params![i(height), state])?;
         if let Some(seq) = checkpoint_seq {
-            tx.execute(
-                "INSERT INTO snapshots (seq, height, state) VALUES (?1, ?2, ?3)",
-                params![i(seq), i(height), state],
-            )?;
+            tx.prepare_cached("INSERT INTO snapshots (seq, height, state) VALUES (?1, ?2, ?3)")?
+                .execute(params![i(seq), i(height), state])?;
         }
         tx.commit()?;
         Ok(())
@@ -300,11 +308,12 @@ impl Store {
     pub fn block(&self, height: u64) -> Result<Option<(BlockRecordV1, Vec<u8>)>> {
         let row: Option<(Vec<u8>, Vec<u8>, Vec<u8>)> = self
             .conn
-            .query_row(
+            .prepare_cached(
                 "SELECT input, state_hash_after, receipts FROM blocks WHERE height = ?1",
-                params![i(height)],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )
+            )?
+            .query_row(params![i(height)], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })
             .optional()?;
         row.map(|(input, hash, receipts)| {
             Ok((
@@ -477,6 +486,27 @@ impl Store {
         Ok(out)
     }
 
+    /// The lowest-seq checkpoint with `status`: what the signer and the
+    /// relayer take next, without reading the others' batches (F-06).
+    pub fn first_checkpoint_with(&self, status: CheckpointStatus) -> Result<Option<CheckpointRow>> {
+        self.conn
+            .prepare_cached(
+                "SELECT seq, header, batch, first_height, last_height, withdrawals, status, epoch, sigs, stellar_tx_hash, stellar_ledger, COALESCE(batch_len, length(batch)) FROM checkpoints WHERE status = ?1 ORDER BY seq LIMIT 1",
+            )?
+            .query_row(params![status.as_str()], row_of)
+            .optional()?
+            .transpose()
+    }
+
+    /// How many checkpoints have `status`.
+    pub fn count_checkpoints_with(&self, status: CheckpointStatus) -> Result<usize> {
+        let n: i64 = self
+            .conn
+            .prepare_cached("SELECT COUNT(*) FROM checkpoints WHERE status = ?1")?
+            .query_row(params![status.as_str()], |r| r.get(0))?;
+        Ok(n as usize)
+    }
+
     /// `(seq, header, withdrawals)` of every checkpoint accepted on Stellar,
     /// lowest first, without the batch: what withdrawal proofs need.
     pub fn accepted_withdrawals(&self) -> Result<Vec<(u64, Vec<u8>, String)>> {
@@ -503,6 +533,8 @@ impl Store {
     ///   its size.
     ///
     /// Blocks, headers, withdrawal leaves and the inbox are never pruned.
+    /// Cleared flags go too, and with an incremental store the free pages
+    /// go back to the file system (F-06).
     pub fn prune(&mut self, limit: usize) -> Result<Pruned> {
         let Some(accepted) = self.last_checkpoint_with(CheckpointStatus::Accepted)? else {
             return Ok(Pruned::default());
@@ -517,8 +549,26 @@ impl Store {
             "UPDATE checkpoints SET batch_len = length(batch), batch = x'' WHERE seq IN (SELECT seq FROM checkpoints WHERE status = 'accepted' AND seq < ?1 AND length(batch) > 0 ORDER BY seq LIMIT ?2)",
             params![i(keep_from), limit as i64],
         )?;
+        tx.execute("DELETE FROM flags WHERE cleared = 1", [])?;
         tx.commit()?;
+        self.release_free_pages()?;
         Ok(Pruned { snapshots, batches })
+    }
+
+    /// Hands the free pages (from pruning, and from the head row rewritten
+    /// every block) back to the file system. A no-op on a store made before
+    /// F-06 until `compact` converts it.
+    fn release_free_pages(&self) -> Result<()> {
+        let free: i64 = self
+            .conn
+            .query_row("PRAGMA freelist_count", [], |r| r.get(0))?;
+        if free > 0 {
+            // One page per step: step through them all.
+            let mut stmt = self.conn.prepare("PRAGMA incremental_vacuum")?;
+            let mut rows = stmt.query([])?;
+            while rows.next()?.is_some() {}
+        }
+        Ok(())
     }
 
     /// Gives the space freed by [`Store::prune`] back to the file system.
@@ -751,4 +801,123 @@ fn row_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<Result<CheckpointRow>> {
             stellar_ledger,
         }),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const STATE: usize = 64 * 1024;
+
+    fn pragma(s: &Store, name: &str) -> i64 {
+        s.conn
+            .query_row(&format!("PRAGMA {name}"), [], |r| r.get(0))
+            .unwrap()
+    }
+
+    /// 40 blocks, a checkpoint (with a 64 KiB batch and snapshot) every 4,
+    /// all accepted on Stellar.
+    fn fill(s: &mut Store) {
+        for h in 1..=40u64 {
+            let record = BlockRecordV1 {
+                input: vec![h as u8; 100],
+                state_hash_after: [h as u8; 32],
+            };
+            let end = (h % 4 == 0).then_some(h / 4);
+            s.commit_block(h, &record, &[1; 10], &vec![h as u8; STATE], end)
+                .unwrap();
+            if let Some(seq) = end {
+                s.insert_checkpoint(&CheckpointRow {
+                    seq,
+                    header: vec![1; 100],
+                    batch: vec![2; STATE],
+                    batch_len: STATE,
+                    first_height: h - 3,
+                    last_height: h,
+                    withdrawals: "[]".into(),
+                    status: CheckpointStatus::Sequenced,
+                    epoch: None,
+                    sigs: None,
+                    stellar_tx_hash: None,
+                    stellar_ledger: None,
+                })
+                .unwrap();
+            }
+        }
+        assert_eq!(
+            s.count_checkpoints_with(CheckpointStatus::Sequenced)
+                .unwrap(),
+            10
+        );
+        assert_eq!(
+            s.first_checkpoint_with(CheckpointStatus::Sequenced)
+                .unwrap()
+                .map(|r| r.seq),
+            Some(1)
+        );
+        for seq in 1..=10 {
+            s.set_signed(seq, 1, "[]").unwrap();
+            s.set_accepted(seq, &format!("{seq:064x}"), seq as u32)
+                .unwrap();
+        }
+        assert_eq!(
+            s.count_checkpoints_with(CheckpointStatus::Accepted)
+                .unwrap(),
+            10
+        );
+        assert!(s
+            .first_checkpoint_with(CheckpointStatus::Sequenced)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn a_new_store_shrinks_as_it_prunes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Store::open(&dir.path().join("s.sqlite"), &[1; 32], &[2; 32], &[0; 8]).unwrap();
+        assert_eq!(pragma(&s, "auto_vacuum"), 2, "incremental");
+        fill(&mut s);
+        let pages = pragma(&s, "page_count");
+        s.flag_block(3, "test").unwrap();
+        s.clear_flags(3).unwrap();
+        while s.prune(100).unwrap() != Pruned::default() {}
+        assert_eq!(pragma(&s, "freelist_count"), 0, "free pages went back");
+        assert!(
+            pragma(&s, "page_count") < pages * 2 / 3,
+            "{} of {pages} pages left",
+            pragma(&s, "page_count")
+        );
+        let flags: i64 = s
+            .conn
+            .query_row("SELECT COUNT(*) FROM flags", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(flags, 0, "a cleared flag is dropped");
+    }
+
+    #[test]
+    fn compact_converts_an_older_store() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("old.sqlite");
+        {
+            // A store as releases before F-06 made it.
+            let c = Connection::open(&path).unwrap();
+            c.pragma_update(None, "journal_mode", "WAL").unwrap();
+            c.execute_batch(SCHEMA).unwrap();
+        }
+        let mut s = Store::open(&path, &[1; 32], &[2; 32], &[0; 8]).unwrap();
+        assert_eq!(
+            pragma(&s, "auto_vacuum"),
+            0,
+            "the setting waits for a VACUUM"
+        );
+        fill(&mut s);
+        while s.prune(100).unwrap() != Pruned::default() {}
+        assert!(
+            pragma(&s, "freelist_count") > 0,
+            "freed pages stay in the file"
+        );
+        s.vacuum().unwrap();
+        assert_eq!(pragma(&s, "auto_vacuum"), 2, "converted");
+        assert_eq!(pragma(&s, "freelist_count"), 0);
+    }
 }
