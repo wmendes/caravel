@@ -13,6 +13,12 @@
       "permanent": false
     }
   ],
+  "rewrites": [
+    {
+      "source": "/lane/status",
+      "destination": "https://35-224-76-64.sslip.io/v1/status"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",
@@ -54,6 +60,15 @@
         {
           "key": "Cache-Control",
           "value": "public, max-age=86400, stale-while-revalidate=604800"
+        }
+      ]
+    },
+    {
+      "source": "/lane/status",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
         }
       ]
     }
