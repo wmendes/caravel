@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="Appchains with their own rules, settled on Stellar. Declare a lane in one file, see the plan, apply it. Open source; testnet only, not audited.">
-<title>Caravel: appchains as code, settled on Stellar</title>
+<meta name="description" content="For Stellar apps that need their own rules: run your app as a lane with its own block time, fees, members and validators, while your users' money stays on Stellar. Open source; testnet only, not audited.">
+<title>Caravel: Stellar apps with their own rules</title>
 <link rel="canonical" href="https://caravel-tau.vercel.app/">
 <meta name="theme-color" content="#081E22" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#F3EEE4" media="(prefers-color-scheme: light)">
@@ -15,16 +15,16 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Caravel">
 <meta property="og:url" content="https://caravel-tau.vercel.app/">
-<meta property="og:title" content="Caravel: appchains as code, settled on Stellar">
-<meta property="og:description" content="Appchains with their own rules, settled on Stellar. Declare a lane in one file, see the plan, apply it. Open source; testnet only, not audited.">
+<meta property="og:title" content="Caravel: Stellar apps with their own rules">
+<meta property="og:description" content="For Stellar apps that need their own rules: run your app as a lane with its own block time, fees, members and validators, while your users' money stays on Stellar. Open source; testnet only, not audited.">
 <meta property="og:image" content="https://caravel-tau.vercel.app/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Caravel. Declare a lane. Plan it. Apply it. Appchains with their own rules, settled on Stellar.">
 <meta property="og:locale" content="en_US">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Caravel: appchains as code, settled on Stellar">
-<meta name="twitter:description" content="Appchains with their own rules, settled on Stellar. Declare a lane in one file, see the plan, apply it. Open source; testnet only, not audited.">
+<meta name="twitter:title" content="Caravel: Stellar apps with their own rules">
+<meta name="twitter:description" content="For Stellar apps that need their own rules: run your app as a lane with its own block time, fees, members and validators, while your users' money stays on Stellar. Open source; testnet only, not audited.">
 <meta name="twitter:image" content="https://caravel-tau.vercel.app/og.png">
 <meta name="twitter:image:alt" content="Caravel. Declare a lane. Plan it. Apply it. Appchains with their own rules, settled on Stellar.">
 <script>document.documentElement.classList.add("js");</script>
@@ -78,7 +78,6 @@ code { font-family: var(--mono); font-size: .9em; }
 .skip { position: absolute; left: 16px; top: -100px; z-index: 100; background: var(--lane); color: var(--on-lane); font-weight: 700; padding: 10px 16px; border-radius: 8px; text-decoration: none; }
 .skip:focus { top: 12px; }
 .wrap { max-width: var(--wrap); margin-inline: auto; padding-inline: clamp(16px, 4vw, 40px); }
-.eyebrow { font-size: .8125rem; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
 .lede { font-size: clamp(1.0625rem, 1.6vw, 1.25rem); color: var(--muted); max-width: 60ch; text-wrap: pretty; }
 .lede code { color: var(--ink); }
 .lane-t { color: var(--lane); }
@@ -115,12 +114,38 @@ code { font-family: var(--mono); font-size: .9em; }
 
 /* Hero */
 .hero { padding-block: clamp(40px, 6vw, 72px) clamp(32px, 5vw, 56px); }
-.hero .wrap { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: clamp(32px, 5vw, 64px); align-items: center; }
-@media (max-width: 960px) { .hero .wrap { grid-template-columns: minmax(0, 1fr); } }
-.hero h1 { font-size: clamp(2.5rem, 6vw, 4.75rem); line-height: 1.02; letter-spacing: -.025em; margin-top: 18px; }
-.hero .lede { margin-top: 22px; }
+.hero > .wrap:first-child { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr); gap: clamp(32px, 5vw, 72px); align-items: center; }
+@media (max-width: 960px) { .hero > .wrap:first-child { grid-template-columns: minmax(0, 1fr); } }
+.hero .for { font-size: .9375rem; font-weight: 600; color: var(--harbor-ink); }
+.hero h1 { font-size: clamp(2.5rem, 5.6vw, 4.5rem); line-height: 1.02; letter-spacing: -.03em; margin-top: 14px; max-width: 13ch; }
+/* "Like ..." under the headline: one example at a time, each sitting in the same cell so nothing below moves. */
+.like { margin-top: 18px; font-size: clamp(1.1875rem, 2.2vw, 1.5rem); line-height: 1.3; font-weight: 600; letter-spacing: -.01em; display: flex; gap: .3em; }
+.like .swap { display: grid; overflow: hidden; color: var(--lane); padding-block: .04em .2em; margin-block: -.04em -.2em; flex: 1; min-width: 0; }
+.like .swap > span { grid-area: 1 / 1; opacity: 0; transform: translateY(130%); transition: transform .55s var(--out), opacity .55s var(--out); }
+.like .swap > span.on { opacity: 1; transform: none; }
+.like .swap > span.out { opacity: 0; transform: translateY(-130%); }
+.like .swap > span.snap { transition: none; }
+.hero .lede { margin-top: 20px; }
+.hero .lede b { color: var(--ink); }
+.hero-note a { color: var(--ink); text-underline-offset: 3px; margin-left: 4px; }
+/* The example's lane file: the rules that make it that app, the line that sets each one */
+.rulecard { min-width: 0; }
+.rulecard .apps { margin: 0 0 10px; }
+.file { background: var(--raised); border: 1px solid var(--rule); border-radius: 14px; overflow: hidden; }
+.fhead { display: flex; justify-content: space-between; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--rule); font-size: .8125rem; color: var(--muted); }
+.fhead span:first-child { font-family: var(--mono); color: var(--ink); }
+.file pre.rules { margin: 0; padding: 18px 20px; font: .8125rem/1.75 var(--mono); color: var(--ink); overflow-x: auto; min-height: calc(9 * 1.75em + 36px); transition: opacity .25s var(--out); }
+.file pre.rules.fade { opacity: 0; }
+.rules .ln { display: block; }
+.rules .s { color: var(--muted); }
+@media (max-width: 560px) { .rules .pad { display: none; } .rules .c { display: block; padding-left: 2ch; } .file pre.rules { min-height: calc(13 * 1.75em + 36px); } }
+.rules .r { color: var(--lane); font-weight: 700; }
+.rules .c { color: var(--muted); }
+.fstay { display: flex; gap: 10px; align-items: center; padding: 12px 20px; border-top: 1px solid var(--rule); background: var(--harbor-soft); font-size: .875rem; }
+@media (prefers-reduced-motion: reduce) { .like .swap > span, .file pre.rules { transition: none; } }
 .cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
 .hero-note { margin-top: 18px; font-size: .875rem; color: var(--muted); }
+.hero .live { margin-top: clamp(32px, 5vw, 56px); }
 
 /* The hero run: plan lists the steps, apply fills them, then the lane runs on the track below */
 .clock { background: var(--raised); border: 1px solid var(--rule); border-radius: 14px; padding: clamp(18px, 3vw, 28px); min-width: 0; }
@@ -175,31 +200,60 @@ section.band { padding-block: clamp(48px, 6vw, 72px); border-top: 1px solid var(
 .head { display: grid; gap: 12px; max-width: 760px; }
 .head h2 { font-size: clamp(1.875rem, 4.2vw, 3rem); line-height: 1.06; letter-spacing: -.02em; }
 
-/* Who it's for: one sentence whose subject changes, and the four rules that app would set, each over the line that sets it */
-.who-for h2 { font-size: clamp(2rem, 7vw, 4.5rem); line-height: 1.04; letter-spacing: -.03em; }
-/* The subject is its own line. Every subject sits in the same cell, so the line keeps the size of the longest and nothing below moves; the clip box is padded so descenders aren't cut. */
-.who-for .swap { display: grid; overflow: hidden; color: var(--lane); padding-block: .04em .2em; margin-block: -.04em -.2em; }
-.who-for .swap > span { grid-area: 1 / 1; opacity: 0; transform: translateY(130%); transition: transform .55s var(--out), opacity .55s var(--out); }
-.who-for .swap > span.on { opacity: 1; transform: none; }
-.who-for .swap > span.out { opacity: 0; transform: translateY(-130%); }
-.who-for .swap > span.snap { transition: none; }
-.apps { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-top: 28px; }
+/* Example apps: tabs over the lane file */
+.apps { display: flex; flex-wrap: wrap; gap: 4px 20px; }
 .app { font: 700 .9375rem var(--font); color: var(--muted); background: none; border: 0; padding: 6px 0; min-height: 40px; cursor: pointer; border-bottom: 2px solid transparent; transition: color .2s ease, border-color .2s ease; }
 .app:hover { color: var(--ink); }
 .app[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--lane); }
-.rules4 { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 28px; margin-top: 36px; }
-@media (max-width: 960px) { .rules4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 520px) { .rules4 { grid-template-columns: minmax(0, 1fr); gap: 20px; } }
-.rules4 li { border-top: 2px solid var(--rule); padding-top: 14px; display: grid; gap: 6px; align-content: start; transition: opacity .45s var(--out), transform .45s var(--out); }
-.rules4 li b { font-size: 1.1875rem; line-height: 1.25; }
-.rules4 li code { font-size: .8125rem; color: var(--harbor-ink); overflow-wrap: anywhere; }
-/* Four across, the longest setting takes two lines: keep that room for every app so nothing below moves. */
-@media (min-width: 961px) { .rules4 li code { min-height: 3.1em; } }
-.rules4.fade li { opacity: 0; transform: translateY(6px); }
-.rules4 li:nth-child(2) { transition-delay: .04s; } .rules4 li:nth-child(3) { transition-delay: .08s; } .rules4 li:nth-child(4) { transition-delay: .12s; }
-.who-note { margin-top: 28px; display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: .9375rem; color: var(--muted); }
-.who-note .kind { color: var(--ink); font-weight: 700; }
-@media (prefers-reduced-motion: reduce) { .who-for .swap > span, .rules4 li, .app { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .app { transition: none; } }
+
+/* Why a lane: the shared network's rules next to a lane's own */
+.vs { width: 100%; border-collapse: collapse; margin-top: 36px; font-size: 1rem; }
+.vs th, .vs td { text-align: left; padding: 16px 20px 16px 0; border-bottom: 1px solid var(--rule); vertical-align: baseline; }
+.vs thead th { font-size: .8125rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding-top: 0; }
+.vs thead th.lane-t { color: var(--lane); }
+.vs tbody th { font-weight: 700; width: 22%; }
+.vs td:nth-child(2) { color: var(--muted); width: 33%; }
+.vs .n { display: block; font-size: .8125rem; color: var(--muted); margin-top: 2px; }
+.vs tr.keep th, .vs tr.keep td { color: var(--harbor-ink); }
+.vs tr.keep td b { color: var(--harbor-ink); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (max-width: 640px) { .vs thead { display: none; } .vs tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px 16px; padding: 14px 0; border-bottom: 1px solid var(--rule); } .vs th, .vs td { border: 0; padding: 0; width: auto !important; } .vs tbody th { grid-column: 1 / -1; } .vs td:nth-child(2)::before { content: "On Stellar: "; } .vs td:nth-child(3)::before { content: "On your lane: "; color: var(--lane); } }
+
+/* How it works: three steps beside the replayed run */
+.how { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1fr); gap: clamp(32px, 5vw, 64px); align-items: start; }
+@media (max-width: 960px) { .how { grid-template-columns: minmax(0, 1fr); } }
+.how h2 { font-size: clamp(1.875rem, 4.2vw, 3rem); line-height: 1.06; letter-spacing: -.02em; }
+.steps { list-style: none; padding: 0; margin-top: 28px; display: grid; gap: 22px; counter-reset: st; }
+.steps li { display: grid; grid-template-columns: 2.25rem minmax(0, 1fr); gap: 4px 14px; counter-increment: st; }
+.steps li::before { content: counter(st); grid-row: span 2; width: 2rem; height: 2rem; border-radius: 50%; border: 2px solid var(--lane); color: var(--lane); font-weight: 700; display: grid; place-items: center; font-size: .9375rem; }
+.steps b { font-size: 1.1875rem; }
+.steps p { color: var(--muted); max-width: 52ch; }
+.steps code { color: var(--ink); }
+
+/* Safety: the four ways out, then what they don't cover */
+.guar { list-style: none; padding: 0; margin-top: 36px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 48px; }
+@media (max-width: 760px) { .guar { grid-template-columns: minmax(0, 1fr); } }
+.guar li { border-top: 2px solid var(--harbor); padding-top: 14px; display: grid; gap: 6px; }
+.guar b { font-size: 1.1875rem; }
+.guar p { color: var(--muted); max-width: 56ch; }
+.caveat { margin-top: 32px; padding: 16px 20px; border: 1px solid var(--rule); border-radius: 12px; color: var(--muted); max-width: 90ch; }
+.caveat b { color: var(--ink); }
+
+/* Where it stands */
+.stand { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, .9fr); gap: clamp(28px, 4vw, 56px); margin-top: 36px; align-items: start; }
+@media (max-width: 960px) { .stand { grid-template-columns: minmax(0, 1fr); } }
+.stand h3 { font-size: 1.1875rem; padding-bottom: 12px; border-bottom: 2px solid var(--rule); }
+.meas { margin: 0; }
+.meas div { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--rule); }
+.meas dt { color: var(--muted); font-size: .9375rem; }
+.meas dd { margin: 0; font-weight: 700; font-size: 1.25rem; white-space: nowrap; }
+.stand .srcs { margin-top: 12px; }
+.stand .srcs a { color: var(--muted); }
+.notyet { list-style: none; padding: 0; }
+.notyet li { padding: 12px 0; border-bottom: 1px solid var(--rule); color: var(--muted); font-size: .9375rem; }
+.notyet b { color: var(--ink); }
+.open { margin-top: 12px; color: var(--muted); }
 
 /* Where it runs: three layers, the lane on top (coral, as everywhere on this page), then containers, then machines */
 .layers { list-style: none; padding: 0; margin: 36px 0 0; border-top: 1px solid var(--rule); }
@@ -228,7 +282,7 @@ section.band { padding-block: clamp(48px, 6vw, 72px); border-top: 1px solid var(
 @media (prefers-reduced-motion: reduce) { .live.on .dot { animation: none; } .live .stat .v, .live .stat .v.tick { transition: none; } }
 
 /* Quickstart */
-.join { background: var(--raised); border: 1px solid var(--rule); border-radius: 16px; padding: clamp(28px, 5vw, 56px); display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: clamp(24px, 4vw, 56px); align-items: center; }
+.join { background: var(--raised); border: 1px solid var(--rule); border-radius: 16px; padding: clamp(28px, 5vw, 56px); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: clamp(24px, 4vw, 48px); align-items: center; }
 @media (max-width: 860px) { .join { grid-template-columns: minmax(0, 1fr); } }
 .join h2 { font-size: clamp(2rem, 4.2vw, 3rem); line-height: 1.06; letter-spacing: -.02em; }
 .join .lede { margin-top: 14px; }
@@ -317,10 +371,10 @@ footer p { font-size: .875rem; color: var(--muted); }
       </svg>
     </a>
     <nav class="nav" aria-label="Sections">
-      <a href="#who">Who it's for</a>
-      <a href="#rules">Your rules</a>
-      <a href="#layers">Where it runs</a>
-      <a href="#start">Quickstart</a>
+      <a href="#why">Why a lane</a>
+      <a href="#how">How it works</a>
+      <a href="#exit">Safety</a>
+      <a href="#status">Status</a>
       <a href="https://caravel-docs.vercel.app" id="docs-link">Docs</a>
       <a class="btn btn-primary btn-sm" href="https://github.com/wmendes/caravel"><svg class="gh" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>GitHub</a>
     </nav>
@@ -330,17 +384,75 @@ footer p { font-size: .875rem; color: var(--muted); }
 <main id="top">
   <section class="hero" aria-labelledby="hero-h">
     <div class="wrap">
-      <div>
-        <p class="eyebrow">Infrastructure as code for Stellar appchains</p>
-        <h1 id="hero-h">Declare a lane.<br>Plan it.<br>Apply it.</h1>
-        <p class="lede">Caravel turns one lane file into an appchain that settles to Stellar in the token you choose. <code>plan</code> shows every change on Stellar and on your host before it's made, <code>apply</code> makes it, and <code>destroy</code> winds the lane down to an exit proof for every account.</p>
+      <div class="pitch">
+        <p class="for">Open source, for teams building on Stellar</p>
+        <h1 id="hero-h">For Stellar apps that need their own rules.</h1>
+        <p class="like" aria-live="off">Like <span class="swap" id="whoSwap"><span class="on">an exchange that matches every 0.5 s</span><span aria-hidden="true">a payment network for members only</span><span aria-hidden="true">a game economy with 200 ms turns</span><span aria-hidden="true">agents that pay each other, fee-free</span></span></p>
+        <p class="lede">Caravel runs your app as a <b>lane</b>: an appchain with its own block time, fees, members, limits and validators, declared in one file. Your users' money stays on Stellar, in the token you choose.</p>
         <div class="cta-row">
-          <a class="btn btn-primary" href="https://github.com/wmendes/caravel"><svg class="gh" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>View on GitHub</a>
-          <a class="btn btn-ghost" href="#start">Quickstart</a>
+          <a class="btn btn-primary" href="#start">Run a lane in 5 minutes</a>
+          <a class="btn btn-ghost" href="https://github.com/wmendes/caravel"><svg class="gh" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>View on GitHub</a>
         </div>
-        <p class="hero-note">Open source under MIT or Apache-2.0. Testnet only, not audited.</p>
+        <p class="hero-note">MIT or Apache-2.0. Testnet only, not audited. <a href="https://35-224-76-64.sslip.io">Try the live exchange</a></p>
       </div>
 
+      <div class="rulecard" id="who">
+        <div class="apps" role="tablist" aria-label="Example apps">
+          <button class="app" type="button" role="tab" aria-selected="true" aria-controls="whoFile" data-app="0">Exchange</button>
+          <button class="app" type="button" role="tab" aria-selected="false" aria-controls="whoFile" data-app="1" tabindex="-1">Payments</button>
+          <button class="app" type="button" role="tab" aria-selected="false" aria-controls="whoFile" data-app="2" tabindex="-1">Game</button>
+          <button class="app" type="button" role="tab" aria-selected="false" aria-controls="whoFile" data-app="3" tabindex="-1">Agents</button>
+        </div>
+        <div class="file" role="tabpanel" aria-label="Its lane file">
+          <p class="fhead"><span>lane.toml</span><span id="whoKind">Template: Perps, live on testnet</span></p>
+          <pre class="rules" id="whoFile"><span class="ln s">[node]</span><span class="ln"><span class="r">block_time_ms = 500</span><span class="pad">     </span><span class="c"># a block every half second</span></span><span class="ln s">[[perps.markets]]</span><span class="ln"><span class="r">maker_fee_bps = 0</span><span class="pad">       </span><span class="c"># no maker fees</span></span><span class="ln"><span class="r">imf_bps = 1000</span><span class="pad">          </span><span class="c"># up to 10x leverage</span></span><span class="ln s">[perps.oracle]</span><span class="ln"><span class="r">keys = ["GCRD…H37Q"]</span><span class="pad">    </span><span class="c"># its own price feed</span></span><span class="ln s">[env.testnet]</span><span class="ln"><span class="r">token = "circle-usdc"</span><span class="pad">   </span><span class="c"># settles in Circle's USDC</span></span></pre>
+          <p class="fstay"><i class="sw sw-harbor" aria-hidden="true"></i>Deposits, withdrawals and exits stay on Stellar, in the lane's settlement contract.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="wrap">
+      <div class="live" id="live" aria-live="off">
+        <div class="who"><b><span class="dot" aria-hidden="true"></span>Live: Caravel Perps, lane #1</b><a href="https://35-224-76-64.sslip.io" id="liveNote">Running in containers on testnet</a></div>
+        <div class="stat"><span class="k">Height</span><span class="v num" id="lvH">419,000+</span></div>
+        <div class="stat"><span class="k">Block time</span><span class="v num" id="lvB">0.5 s</span></div>
+        <div class="stat"><span class="k">Checkpoints</span><span class="v num" id="lvC">6,700+</span></div>
+        <div class="stat"><span class="k">Last block</span><span class="v num" id="lvA">live</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="why" aria-labelledby="why-h">
+    <div class="wrap">
+      <div class="head">
+        <h2 id="why-h">Stellar gives every app the same rules.<br>Yours can have its own.</h2>
+        <p class="lede">The shared network is right for most apps. Some need a different pace, a different fee, or a closed door, and still want their users' money on Stellar. That's what a lane is for.</p>
+      </div>
+      <table class="vs">
+        <thead><tr><th scope="col"><span class="sr">Rule</span></th><th scope="col">On Stellar</th><th scope="col" class="lane-t">On your lane</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Block time</th><td>A ledger about every 5 s</td><td>200 ms to 5 s, your choice <span class="n">lane #1 runs at 0.5 s</span></td></tr>
+          <tr><th scope="row">Fees</th><td>The network's fee on every transaction</td><td>Your fee per action, or none</td></tr>
+          <tr><th scope="row">Who can use it</th><td>Anyone</td><td>Anyone, or only an allowlist</td></tr>
+          <tr><th scope="row">Who signs</th><td>The network's validators</td><td>Your validators, at your threshold</td></tr>
+          <tr><th scope="row">Limits</th><td>The network's</td><td>Yours, per account and per block</td></tr>
+          <tr class="keep"><th scope="row">Your users' money</th><td>In their Stellar accounts</td><td><b>Still on Stellar</b>, in your lane's settlement contract, in the token you choose</td></tr>
+        </tbody>
+      </table>
+      <p class="srcs">Testnet ledgers closed every 5.0 s on average over a week of 2026 (<code>docs/SOURCES.md</code>). A lane needs no gas token of its own: it settles in a Stellar asset or any SEP-41 token.</p>
+    </div>
+  </section>
+
+  <section class="band" id="how" aria-labelledby="how-h">
+    <div class="wrap how">
+      <div>
+        <h2 id="how-h">Declare it. Plan it.<br>Apply it.</h2>
+        <ol class="steps">
+          <li><b>Declare</b><p>One <code>lane.toml</code> holds the lane's rules and every place it runs: your laptop, your servers, testnet.</p></li>
+          <li><b>Plan</b><p><code>caravel plan</code> lists every step on Stellar and on your hosts before anything is sent, down to the settlement contract's address.</p></li>
+          <li><b>Apply</b><p><code>caravel apply</code> deploys the contract, starts the sequencer, validators and relayer, and the lane starts checkpointing to Stellar. Run it again and nothing changes.</p></li>
+        </ol>
+      </div>
       <figure class="clock" id="run" aria-label="Replay of a real testnet run from 2026-09-30. caravel plan lists the steps for a new Payments lane, three on Stellar and four on the host. caravel apply runs them one by one, the lane starts making blocks and posting checkpoints to Stellar, and a second plan finds no changes." style="margin:0">
         <div class="clock-stats">
           <div class="stat"><span class="k harbor-t">Stellar steps</span><span class="v num" id="stN">3/3</span></div>
@@ -376,32 +488,11 @@ footer p { font-size: .875rem; color: var(--muted); }
     </div>
   </section>
 
-  <section class="band who-for" id="who" aria-labelledby="who-h">
-    <div class="wrap">
-      <p class="eyebrow">Who it's for</p>
-      <h2 id="who-h">Run <span class="swap" id="whoSwap"><span class="on">a trading venue</span><span aria-hidden="true">a payment network</span><span aria-hidden="true">a game economy</span><span aria-hidden="true">an agent marketplace</span></span> with its own rules.</h2>
-      <div class="apps" role="tablist" aria-label="Kinds of app">
-        <button class="app" type="button" role="tab" aria-selected="true" aria-controls="whoRules" data-app="0">Trading venue</button>
-        <button class="app" type="button" role="tab" aria-selected="false" aria-controls="whoRules" data-app="1" tabindex="-1">Payment network</button>
-        <button class="app" type="button" role="tab" aria-selected="false" aria-controls="whoRules" data-app="2" tabindex="-1">Game economy</button>
-        <button class="app" type="button" role="tab" aria-selected="false" aria-controls="whoRules" data-app="3" tabindex="-1">Agent marketplace</button>
-      </div>
-      <ol class="rules4" id="whoRules" role="tabpanel" aria-live="off">
-        <li><b>Zero maker fees</b><code>maker_fee_bps = 0</code></li>
-        <li><b>Up to 10x leverage</b><code>imf_bps = 1000</code></li>
-        <li><b>Its own price feed</b><code>[perps.oracle] keys = […]</code></li>
-        <li><b>Settles in Circle's USDC</b><code>token = "circle-usdc"</code></li>
-      </ol>
-      <p class="who-note"><span><span class="kind" id="whoKind">Template: Perps</span>, live on testnet</span><span>Deposits, withdrawals and exits stay on Stellar.</span></p>
-    </div>
-  </section>
-
   <section class="band" id="rules" aria-labelledby="rules-h">
     <div class="wrap">
       <div class="head">
-        <p class="eyebrow">Your rules</p>
         <h2 id="rules-h">Every rule is a line.<br>Every change gets a plan.</h2>
-        <p class="lede">On Stellar, every app shares the network's fees and rules. A lane sets its own in one file. Pick what you'd change: <code>plan</code> says what <code>apply</code> would do, before it does it.</p>
+        <p class="lede">Change a rule and run <code>plan</code>. Some changes are a restart, some a signer rotation on Stellar, and some the contract won't allow. Pick one to see what <code>plan</code> says.</p>
       </div>
       <div class="plangrid">
         <div class="groups" role="tablist" aria-label="What a change does">
@@ -431,10 +522,25 @@ footer p { font-size: .875rem; color: var(--muted); }
     </div>
   </section>
 
+  <section class="band" id="exit" aria-labelledby="exit-h">
+    <div class="wrap">
+      <div class="head">
+        <h2 id="exit-h">Your users can always leave.</h2>
+        <p class="lede">A lane runs off Stellar, so its rules can be yours. What it can't do is keep anyone's money.</p>
+      </div>
+      <ol class="guar">
+        <li><b>Checkpoints</b><p>The lane posts a checkpoint with its block data to Stellar every minute, or as often as you set. The settlement contract accepts it only with your validators' threshold signature.</p></li>
+        <li><b>Withdrawals</b><p>A withdrawal is a Merkle proof against an accepted checkpoint, claimed on Stellar.</p></li>
+        <li><b>Forced exits</b><p>If the lane stops checkpointing, or ignores a deposit or forced withdrawal sent through Stellar, anyone can freeze it. Users then take their last checkpointed balance back on Stellar.</p></li>
+        <li><b>Replay</b><p>Anyone can rebuild the lane from Stellar data alone and check every state hash.</p></li>
+      </ol>
+      <p class="caveat"><b>What this doesn't prevent:</b> if a threshold of validators collude with the sequencer, they can sign a wrong state. Replay shows it; it can't stop it. Choose validators you'd trust with that.</p>
+    </div>
+  </section>
+
   <section class="band" id="layers" aria-labelledby="layers-h">
     <div class="wrap">
       <div class="head">
-        <p class="eyebrow">Where it runs</p>
         <h2 id="layers-h">Same images on your laptop<br>and on your servers.</h2>
         <p class="lede">Every release ships its nodes as container images, for amd64 and arm64. A lane on your machine and a lane on a VM run the same ones, from the same lane file. Caravel doesn't make machines; the repository's infrastructure as code does, if you want it to.</p>
       </div>
@@ -443,12 +549,40 @@ footer p { font-size: .875rem; color: var(--muted); }
         <li><div class="ly"><b>Containers</b><span>Docker</span></div><p>The sequencer, each validator, the relayer and Caddy, each from an image pinned by digest. A host needs Docker and nothing else.</p><code>runtime = "docker"</code></li>
         <li><div class="ly"><b>Machines</b><span>OpenTofu</span></div><p>Optional. Modules for a Google Cloud VM with Docker, its firewall and a budget cap. Their outputs become the lane file's vars.</p><code>tofu output caravel_vars</code></li>
       </ol>
-      <div class="live" id="live" aria-live="off">
-        <div class="who"><b><span class="dot" aria-hidden="true"></span>Caravel Perps, lane #1</b><a href="https://35-224-76-64.sslip.io" id="liveNote">Running in containers on testnet</a></div>
-        <div class="stat"><span class="k">Height</span><span class="v num" id="lvH">417,000+</span></div>
-        <div class="stat"><span class="k">Block time</span><span class="v num" id="lvB">0.5 s</span></div>
-        <div class="stat"><span class="k">Checkpoints</span><span class="v num" id="lvC">6,600+</span></div>
-        <div class="stat"><span class="k">Last block</span><span class="v num" id="lvA">live</span></div>
+    </div>
+  </section>
+
+  <section class="band" id="status" aria-labelledby="status-h">
+    <div class="wrap">
+      <div class="head">
+        <h2 id="status-h">Where it stands.</h2>
+        <p class="lede">Real runs, the edges that aren't done, and everything in the open.</p>
+      </div>
+      <div class="stand">
+        <div>
+          <h3>Measured on lane #1</h3>
+          <dl class="meas">
+            <div><dt>Soft confirmation, p50</dt><dd class="num">648 ms</dd></div>
+            <div><dt>Settled on Stellar, p50</dt><dd class="num">12.4 s</dd></div>
+            <div><dt>Stellar fees per 1,000 lane transactions</dt><dd class="num">0.842 XLM</dd></div>
+            <div><dt>A Payments lane's whole life on testnet, from apply to replay</dt><dd class="num">215 s</dd></div>
+          </dl>
+          <p class="srcs">45 tx/s for 5 minutes at 1 s blocks, 2026-09-29; the Payments run 2026-09-30 (<a href="https://github.com/wmendes/caravel/blob/main/docs/RESULTS.md">docs/RESULTS.md</a>).</p>
+        </div>
+        <div>
+          <h3>Not yet</h3>
+          <ul class="notyet">
+            <li><b>Testnet only.</b> The tool refuses mainnet.</li>
+            <li><b>Not audited.</b> There's a security review, not an audit.</li>
+            <li><b>One operator for lane #1.</b> Its three validators run on one machine, run by the Caravel team.</li>
+            <li><b>Admin powers on testnet.</b> A lane's admin can still upgrade its contract and rotate its validators.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Open source</h3>
+          <p class="open">MIT or Apache-2.0, built in the open: the spec with every decision, the measured results, the security review and the runbook for the live lane.</p>
+          <p class="doclinks"><a href="https://github.com/wmendes/caravel/blob/main/docs/CARAVEL_SPEC.md">Spec</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/SECURITY.md">Security review</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/RUNBOOK.md">Runbook</a> · <a href="https://github.com/wmendes/caravel/blob/main/CONTRIBUTING.md">Contributing</a></p>
+        </div>
       </div>
     </div>
   </section>
@@ -457,12 +591,11 @@ footer p { font-size: .875rem; color: var(--muted); }
     <div class="wrap">
       <div class="join">
         <div>
-          <p class="eyebrow">Open source</p>
-          <h2 id="start-h">Start on your laptop.<br>Run it on your servers.</h2>
-          <p class="lede">The lane file you try locally is the one you deploy: over ssh, on one host or several, with validators on hosts of their own, against Stellar testnet. Same commands, same plan.</p>
-          <p class="small">A lane on your machine needs only Docker. The installer brings the rest, for Linux and macOS.</p>
-          <div class="cta-row"><a class="btn btn-primary" href="https://github.com/wmendes/caravel"><svg class="gh" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>View on GitHub</a><a class="btn btn-ghost" href="https://caravel-docs.vercel.app/getting-started/first-lane">Read the quickstart</a></div>
-          <p class="doclinks"><a href="https://github.com/wmendes/caravel/blob/main/docs/CARAVEL_SPEC.md">Spec</a> · <a href="https://caravel-docs.vercel.app">Docs</a> · <a href="https://caravel-docs.vercel.app/reference/lane-file">Lane file</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/RUNBOOK.md">Runbook</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/RESULTS.md">Results</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/SECURITY.md">Security review</a> · <a href="https://github.com/wmendes/caravel/blob/main/CONTRIBUTING.md">Contributing</a></p>
+          <h2 id="start-h">Run a lane in five minutes.</h2>
+          <p class="lede">Install the CLI and <code>caravel apply</code> brings up a lane on a local Stellar network, its nodes in containers. Deposit, transfer, withdraw, then take it down. The same file deploys to your servers.</p>
+          <p class="small">You need Docker. The installer brings the rest, for Linux and macOS.</p>
+          <div class="cta-row"><a class="btn btn-primary" href="https://caravel-docs.vercel.app/getting-started/first-lane">Read the quickstart</a><a class="btn btn-ghost" href="https://github.com/wmendes/caravel"><svg class="gh" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>View on GitHub</a></div>
+          <p class="doclinks"><a href="https://caravel-docs.vercel.app">Docs</a> · <a href="https://caravel-docs.vercel.app/reference/lane-file">Lane file</a> · <a href="https://github.com/wmendes/caravel/releases/latest">Latest release</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/RESULTS.md">Results</a></p>
         </div>
         <pre class="lanefile" aria-label="From a local lane to your servers"><span class="c"># install the latest release, into ~/.caravel</span>
 curl -fsSL https://caravel-tau.vercel.app/install.sh | bash
@@ -657,21 +790,23 @@ const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   });
 })();
 
-/* Who it's for: the subject and its rules change every few seconds until someone picks one. */
+/* Who it's for: the example app and its lane file turn every few seconds until someone picks one. */
 (() => {
+  // Each line: [section] or [rule, comment]. Keys are real lane-file keys (lanes/*/config).
   const APPS = [
-    { name: "a trading venue", kind: "Template: Perps", tail: ", live on testnet", rules: [["Zero maker fees", "maker_fee_bps = 0"], ["Up to 10x leverage", "imf_bps = 1000"], ["Its own price feed", "[perps.oracle] keys = […]"], ["Settles in Circle's USDC", 'token = "circle-usdc"']] },
-    { name: "a payment network", kind: "Template: Payments", tail: "", rules: [["A flat fee per transfer", "transfer_fee = 100000"], ["Members only", 'mode = "allowlist"'], ["2-of-3 validators", "threshold = 2"], ["Settles in its own token", 'token = "usd"']] },
-    { name: "a game economy", kind: "Your engine", tail: ", on the app SDK", rules: [["200 ms blocks", "block_time_ms = 200"], ["Players only", 'mode = "allowlist"'], ["50 moves per block", "max_txs_per_account_per_block = 50"], ["Its own in-game token", 'token = "gold"']] },
-    { name: "an agent marketplace", kind: "Template: Payments", tail: "", rules: [["No fee between agents", "transfer_fee = 0"], ["Session keys per agent", "max_session_keys = 4"], ["Up to 256 agents", "max_accounts = 256"], ["Settles in USDC", 'token = "circle-usdc"']] },
+    { kind: "Template: Perps, live on testnet", file: [["[node]"], ["block_time_ms = 500", "a block every half second"], ["[[perps.markets]]"], ["maker_fee_bps = 0", "no maker fees"], ["imf_bps = 1000", "up to 10x leverage"], ["[perps.oracle]"], ['keys = ["GCRD…H37Q"]', "its own price feed"], ["[env.testnet]"], ['token = "circle-usdc"', "settles in Circle's USDC"]] },
+    { kind: "Template: Payments", file: [["[access]"], ['mode = "allowlist"', "members only"], ["[payments]"], ["transfer_fee = 100000", "0.01 per transfer"], ["[env.testnet]"], ["threshold = 2", "2 of 3 validators sign"], ['token = "usd"', "its own token"]] },
+    { kind: "Your engine, on the app SDK", file: [["[node]"], ["block_time_ms = 200", "200 ms turns"], ["[access]"], ['mode = "allowlist"', "players only"], ["[limits]"], ["max_txs_per_account_per_block = 50", "50 moves"], ["[env.testnet]"], ['token = "gold"', "its own in-game token"]] },
+    { kind: "Template: Payments", file: [["[payments]"], ["transfer_fee = 0", "no fee between agents"], ["[limits]"], ["max_accounts = 256", "up to 256 agents"], ["max_session_keys = 4", "a key per running task"], ["[env.testnet]"], ['token = "circle-usdc"', "settles in USDC"]] },
   ];
-  const swap = document.getElementById("whoSwap"), list = document.getElementById("whoRules"), kind = document.getElementById("whoKind");
-  const tabs = Array.from(document.querySelectorAll("#who .app"));
-  if (!swap || !list || !tabs.length) return;
+  const swap = document.getElementById("whoSwap"), pre = document.getElementById("whoFile"), kind = document.getElementById("whoKind");
+  const card = document.getElementById("who"), tabs = Array.from(card ? card.querySelectorAll(".app") : []);
+  if (!swap || !pre || !tabs.length) return;
   swap.firstElementChild.removeAttribute("aria-hidden");
-  const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   let cur = 0, timer = null, picked = false, seen = false;
   const esc = (t) => t.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const render = (a) => { const w = Math.max(...a.file.filter((l) => l.length > 1).map(([k]) => k.length)) + 3; return a.file.map(([k, c]) => (c === undefined ? `<span class="ln s">${esc(k)}</span>` : `<span class="ln"><span class="r">${esc(k)}</span><span class="pad">${" ".repeat(w - k.length)}</span><span class="c"># ${esc(c)}</span></span>`)).join(""); };
+  pre.innerHTML = render(APPS[0]);
   function show(i, focus) {
     if (i === cur) return;
     const a = APPS[i];
@@ -679,18 +814,16 @@ const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     tabs.forEach((t, k) => { t.setAttribute("aria-selected", String(k === i)); t.tabIndex = k === i ? 0 : -1; });
     if (focus) tabs[i].focus();
     kind.textContent = a.kind;
-    kind.nextSibling.textContent = a.tail;
-    const fill = () => { list.innerHTML = a.rules.map(([b, c]) => `<li><b>${esc(b)}</b><code>${esc(c)}</code></li>`).join(""); };
     const words = Array.from(swap.children);
     words.forEach((w, k) => w.setAttribute("aria-hidden", String(k !== i)));
     const old = words.find((w) => w.classList.contains("on")), nu = words[i];
-    if (still) { old.classList.remove("on"); nu.classList.add("on"); fill(); return; }
-    // The new subject rises from below while the old one leaves upwards.
+    if (REDUCE) { old.classList.remove("on"); nu.classList.add("on"); pre.innerHTML = render(a); return; }
+    // The new example rises from below while the old one leaves upwards; the file fades over.
     nu.classList.add("snap"); nu.classList.remove("out"); void nu.offsetWidth; nu.classList.remove("snap");
     old.classList.remove("on"); old.classList.add("out"); nu.classList.add("on");
     setTimeout(() => { if (!old.classList.contains("on")) { old.classList.add("snap"); old.classList.remove("out"); void old.offsetWidth; old.classList.remove("snap"); } }, 600);
-    list.classList.add("fade");
-    setTimeout(() => { fill(); void list.offsetWidth; list.classList.remove("fade"); }, 260);
+    pre.classList.add("fade");
+    setTimeout(() => { pre.innerHTML = render(a); pre.classList.remove("fade"); }, 250);
   }
   const stop = () => { clearInterval(timer); timer = null; };
   const pick = () => { picked = true; stop(); };
@@ -701,13 +834,13 @@ const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       if (d) { e.preventDefault(); pick(); show((cur + d + APPS.length) % APPS.length, true); }
     });
   });
-  if (!still) {
-    const sec = document.getElementById("who");
-    // It turns while in view, pauses under the pointer or focus, and stops once someone picks.
-    const go = () => { if (!timer && !picked && seen) timer = setInterval(() => show((cur + 1) % APPS.length), 3800); };
-    sec.addEventListener("mouseenter", stop); sec.addEventListener("mouseleave", go);
-    sec.addEventListener("focusin", stop);
-    if ("IntersectionObserver" in window) new IntersectionObserver((es) => es.forEach((e) => { seen = e.isIntersecting; seen ? go() : stop(); }), { threshold: 0.4 }).observe(sec);
+  if (!REDUCE) {
+    const hero = card.closest("section");
+    // It turns while the hero is in view, pauses under the pointer or focus, and stops once someone picks.
+    const go = () => { if (!timer && !picked && seen) timer = setInterval(() => show((cur + 1) % APPS.length), 4200); };
+    card.addEventListener("mouseenter", stop); card.addEventListener("mouseleave", go);
+    card.addEventListener("focusin", stop);
+    if ("IntersectionObserver" in window) new IntersectionObserver((es) => es.forEach((e) => { seen = e.isIntersecting; seen ? go() : stop(); }), { threshold: 0.3 }).observe(hero);
     else { seen = true; go(); }
   }
 })();
