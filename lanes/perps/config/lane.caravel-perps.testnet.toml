@@ -104,6 +104,29 @@ max_position_lots = 100000
 max_oi_lots = 1000000
 impact_lots = 1000                         # 10,000 XLM
 
+# Lane #1's machine (DEC-114). infra/opentofu/envs/caravel-testnet makes it, and
+# `tofu output -raw caravel_vars > hosts.vars.toml` writes these for --var-file.
+# The defaults are the same VM, so a plan without the file changes nothing.
+[vars.host_address]
+type = "string"
+default = "caravel-1"
+description = "the VM, reached over IAP ssh"
+
+[vars.host_project]
+type = "string"
+default = "caravel-testnet"
+description = "its GCP project"
+
+[vars.host_zone]
+type = "string"
+default = "us-central1-a"
+description = "its zone"
+
+[vars.public_url]
+type = "string"
+default = "https://35-224-76-64.sslip.io"
+description = "the HTTPS name Caddy serves"
+
 # Lane #1's deployment (M0.5 P-16): the contract deployed by
 # scripts/deploy-testnet.sh on 2026-09-29 and the VM caravel-1, now run by
 # `caravel plan|apply|status lanes/perps/config/lane.caravel-perps.testnet.toml --env testnet`.
@@ -164,7 +187,7 @@ reflectorContract = "CCYOZJCOPG34LLQQ7N24YXBM7LL62R7ONMZ3G6WZAAYPB5OYKOMJRN63"
 [env.testnet.host]
 provider = "ssh"
 transport = "gcloud-iap"
-address = "caravel-1"
-project = "caravel-testnet"
-zone = "us-central1-a"
-public_url = "https://35-224-76-64.sslip.io"
+address = "${var.host_address}"
+project = "${var.host_project}"
+zone = "${var.host_zone}"
+public_url = "${var.public_url}"

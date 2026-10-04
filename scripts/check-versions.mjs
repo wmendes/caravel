@@ -107,6 +107,39 @@ if (!/^stellar\/quickstart:[\w.-]+@sha256:[0-9a-f]{64}$/.test(versions.images?.s
   fail("versions.json images.stellar_quickstart must be stellar/quickstart:<tag>@sha256:<digest>");
 }
 
+// --- Machines as code (M0.8, D-04): OpenTofu, its providers and the host's Docker, all pinned.
+{
+  const tofu = versions.opentofu ?? {};
+  const files = (dir) => readdirSync(join(root, dir), { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? (e.name.startsWith(".") ? [] : files(join(dir, e.name))) : [join(dir, e.name)]);
+  const all = existsSync(join(root, "infra/opentofu")) ? files("infra/opentofu") : [];
+  if (!all.length) fail("infra/opentofu is missing");
+  for (const f of all.filter((f) => f.endsWith(".tf"))) {
+    const text = read(f);
+    const req = text.match(/required_version\s*=\s*"([^"]+)"/)?.[1];
+    if (req !== undefined && req !== `~> ${tofu.version}`) fail(`${f} requires OpenTofu ${req}, versions.json says ~> ${tofu.version}`);
+    for (const m of text.matchAll(/source\s*=\s*"([\w-]+\/[\w-]+)"\s*\n\s*version\s*=\s*"([^"]+)"/g)) {
+      if (tofu.providers?.[m[1]] !== m[2]) fail(`${f} pins provider ${m[1]} ${m[2]}, versions.json says ${tofu.providers?.[m[1]]}`);
+    }
+  }
+  const locks = all.filter((f) => f.endsWith(".lock.hcl"));
+  if (!locks.length) fail("infra/opentofu: no provider lock file committed");
+  for (const f of locks) {
+    for (const m of read(f).matchAll(/provider "registry\.opentofu\.org\/([^"]+)" \{\s*version\s*=\s*"([^"]+)"/g)) {
+      if (tofu.providers?.[m[1]] !== m[2]) fail(`${f} locks provider ${m[1]} ${m[2]}, versions.json says ${tofu.providers?.[m[1]]}`);
+    }
+  }
+  const ci = read(".github/workflows/ci.yml");
+  if (ci.match(/TOFU_VERSION: "([^"]+)"/)?.[1] !== tofu.version) fail(`ci.yml TOFU_VERSION must be ${tofu.version}`);
+  if (ci.match(/TOFU_SHA256: "([^"]+)"/)?.[1] !== tofu.sha256_linux_amd64) fail("ci.yml TOFU_SHA256 must match versions.json opentofu.sha256_linux_amd64");
+  const host = versions.docker_host ?? {};
+  const startup = read("infra/opentofu/modules/caravel-host-gcp/startup.sh");
+  for (const [v, key] of [["DOCKER_VERSION", "docker_ce"], ["COMPOSE_VERSION", "compose_plugin"], ["CONTAINERD_VERSION", "containerd"], ["DOCKER_KEY_FPR", "apt_key_fingerprint"]]) {
+    const got = startup.match(new RegExp(`^${v}="([^"]+)"`, "m"))?.[1];
+    if (!host[key] || got !== host[key]) fail(`startup.sh ${v}=${got}, versions.json docker_host.${key} says ${host[key]}`);
+  }
+}
+
 // --- npm: exact pins in package.json and package-lock.json ------------------
 // npm apps: the platform relayer, the perps feed module and web app (M0.5 layout), and the docs site (H-12).
 const apps = ["platform/relayer", "lanes/perps/relayer-feeds", "lanes/perps/web", "docs-site"].filter((d) => existsSync(join(root, d, "package.json")));

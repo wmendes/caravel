@@ -19,6 +19,9 @@ env:
   # Must match versions.json "stellar_cli"; the digest is GitHub's published sha256 for the asset.
   STELLAR_CLI_VERSION: "28.1.0"
   STELLAR_CLI_SHA256: "c1680deee94301d33ada7a17f98411e642a4248c727afbd2e43050d345746462"
+  # Must match versions.json "opentofu"; the digest is from the release's SHA256SUMS.
+  TOFU_VERSION: "1.13.1"
+  TOFU_SHA256: "378ada19d4bc70c43732004e8159be771b23b9a5afdf059e5f8a2b3fa2c70a69"
 
 jobs:
   versions:
@@ -37,10 +40,37 @@ jobs:
       - run: ./scripts/check-e2e.sh
       # Copy rule (spec §20.3): one well-known IaC tool is never named in the
       # repo. The pattern avoids spelling the word, so it doesn't match itself.
+      # OpenTofu's own syntax and file names need it, so infra/opentofu is
+      # exempt (DEC-114); its docs and comments still follow the rule.
       - name: Copy rule
-        run: "! git grep -I -n -i -E 'terra[f]orm'"
+        run: "! git grep -I -n -i -E 'terra[f]orm' -- . ':!infra/opentofu'"
       # The docs site's copy: honest claims, no em dashes (H-12).
       - run: ./scripts/check-docs.sh
+
+  # Machines as code (M0.8, D-04): every OpenTofu root and module is formatted
+  # and valid, offline (no backend, no cloud credentials).
+  infra:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenTofu
+        run: |
+          curl -sSfL -o tofu.tar.gz \
+            "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_amd64.tar.gz"
+          echo "${TOFU_SHA256}  tofu.tar.gz" | sha256sum -c -
+          mkdir -p "$HOME/.local/bin"
+          tar xzf tofu.tar.gz -C "$HOME/.local/bin" tofu
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: tofu fmt -check -recursive -diff infra/opentofu
+      - name: Validate
+        run: |
+          for d in infra/opentofu/envs/* infra/opentofu/modules/*; do
+            echo "== $d"
+            if [[ "$d" == */envs/* ]]; then lock=-lockfile=readonly; else lock=; fi
+            tofu -chdir="$d" init -backend=false -input=false $lock > /dev/null
+            tofu -chdir="$d" validate
+          done
+      - run: for f in infra/opentofu/modules/caravel-host-gcp/startup.sh infra/opentofu/bootstrap-state.sh; do bash -n "$f"; done
 
   rust:
     runs-on: ubuntu-latest
