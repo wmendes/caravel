@@ -95,6 +95,11 @@ pub struct SequencerNode<A: NodeApp> {
     perf: Mutex<caravel_runtime::perf::Perf>,
     /// When each checkpoint was sealed, until it is signed.
     sealed_at: Mutex<BTreeMap<u64, std::time::Instant>>,
+    /// The height of the last published block, for long polls (F-11).
+    height: tokio::sync::watch::Sender<u64>,
+    /// A read-only connection to the store, for raw blocks outside the core
+    /// lock (F-11); `None` for a store in memory.
+    reader: Option<Mutex<Store>>,
 }
 
 impl<A: NodeApp> SequencerNode<A> {
@@ -127,6 +132,7 @@ impl<A: NodeApp> SequencerNode<A> {
         let view = self.app.on_block(&mut self.cache(), &produced);
         *self.snapshot.write().expect("snapshot lock") = produced.state.clone();
         *self.last_metering.lock().expect("metering lock") = (produced.height, produced.metering);
+        self.height.send_replace(produced.height);
         if let Some(cp) = &produced.checkpoint {
             self.sealed_at
                 .lock()
@@ -214,6 +220,7 @@ pub async fn start<A: NodeApp>(
         mempool_max_per_account: cfg.mempool_max_per_account,
     };
     let core = Core::open(app.clone(), exec, store, config_hash, core_cfg)?;
+    let start_height = core.height();
     tracing::info!(height = core.height(), state_hash = %hex(&core.state_hash()), lane = %cfg.lane.lane.name, template = A::TEMPLATE, "sequencer starting");
     if cfg.signers.is_none() {
         tracing::warn!("no [signers]: checkpoints are sealed but never signed");
@@ -260,6 +267,8 @@ pub async fn start<A: NodeApp>(
         },
         perf: Mutex::new(caravel_runtime::perf::Perf::new()),
         sealed_at: Mutex::new(BTreeMap::new()),
+        height: tokio::sync::watch::Sender::new(start_height),
+        reader: Store::open_read_only(&cfg.db).ok().map(Mutex::new),
     });
     let router = router(node.clone(), &cfg.cors_origins);
     tokio::spawn(block_loop(node.clone(), config_hash));
@@ -582,6 +591,7 @@ pub fn router<A: NodeApp>(app: Arc<SequencerNode<A>>, cors_origins: &[String]) -
         .route("/v1/status", get(status::<A>))
         .route("/v1/accounts/{account}", get(account::<A>))
         .route("/v1/blocks/{height}", get(block::<A>))
+        .route("/v1/blocks/{height}/raw", get(block_raw::<A>))
         .route("/v1/checkpoints/{seq}", get(checkpoint::<A>))
         .route("/v1/proofs/withdrawals", get(withdrawal_proofs::<A>))
         .route("/v1/proofs/escape", get(escape_proof::<A>))
@@ -725,6 +735,45 @@ async fn account<A: NodeApp>(State(app): AppState<A>, Path(account): Path<String
 
 async fn block<A: NodeApp>(State(app): AppState<A>, Path(height): Path<u64>) -> ApiResult {
     app.store(|s| api::block_json(&app.app, s, height))
+}
+
+#[derive(Deserialize)]
+struct RawQuery {
+    wait_ms: Option<u64>,
+}
+
+/// The longest `/v1/blocks/{h}/raw?wait_ms=` holds a request.
+const RAW_WAIT_MAX: Duration = Duration::from_secs(5);
+
+/// `GET /v1/blocks/{h}/raw` (F-11): the `BlockRecordV1` bytes, what a
+/// validator follows, read without the core lock. With `wait_ms`, a block
+/// not made yet is answered as soon as it is, or 404 after the wait.
+async fn block_raw<A: NodeApp>(
+    State(app): AppState<A>,
+    Path(height): Path<u64>,
+    Query(q): Query<RawQuery>,
+) -> Result<Response, ApiError> {
+    let wait = Duration::from_millis(q.wait_ms.unwrap_or(0)).min(RAW_WAIT_MAX);
+    if !wait.is_zero() && *app.height.borrow() < height {
+        let mut rx = app.height.subscribe();
+        let _ = tokio::time::timeout(wait, rx.wait_for(|h| *h >= height)).await;
+    }
+    let a = app.clone();
+    let block = tokio::task::spawn_blocking(move || match &a.reader {
+        Some(r) => r.lock().expect("reader lock").block(height),
+        None => a.store(|s| s.block(height)),
+    })
+    .await
+    .map_err(ApiError::internal)?
+    .map_err(ApiError::internal)?;
+    match block {
+        Some((record, _)) => Ok((
+            [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
+            record.encode(),
+        )
+            .into_response()),
+        None => Err(ApiError::not_found(format!("no block {height}"))),
+    }
 }
 
 async fn checkpoint<A: NodeApp>(State(app): AppState<A>, Path(seq): Path<u64>) -> ApiResult {
