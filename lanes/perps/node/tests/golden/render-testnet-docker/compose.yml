@@ -18,6 +18,7 @@ services:
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     restart: unless-stopped
+    logging: { driver: local, options: { max-size: "10m", max-file: "3" } }
     labels: { caravel.lane: "caravel-perps-testnet-0", caravel.env: "testnet", caravel.node: "sequencer" }
   validator-1:
     image: "ghcr.io/wmendes/caravel-perps-node@sha256:1111111111111111111111111111111111111111111111111111111111111111"
@@ -36,6 +37,7 @@ services:
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     restart: unless-stopped
+    logging: { driver: local, options: { max-size: "10m", max-file: "3" } }
     labels: { caravel.lane: "caravel-perps-testnet-0", caravel.env: "testnet", caravel.node: "validator-1" }
   validator-2:
     image: "ghcr.io/wmendes/caravel-perps-node@sha256:1111111111111111111111111111111111111111111111111111111111111111"
@@ -54,6 +56,7 @@ services:
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     restart: unless-stopped
+    logging: { driver: local, options: { max-size: "10m", max-file: "3" } }
     labels: { caravel.lane: "caravel-perps-testnet-0", caravel.env: "testnet", caravel.node: "validator-2" }
   validator-3:
     image: "ghcr.io/wmendes/caravel-perps-node@sha256:1111111111111111111111111111111111111111111111111111111111111111"
@@ -72,6 +75,7 @@ services:
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     restart: unless-stopped
+    logging: { driver: local, options: { max-size: "10m", max-file: "3" } }
     labels: { caravel.lane: "caravel-perps-testnet-0", caravel.env: "testnet", caravel.node: "validator-3" }
   relayer:
     image: "ghcr.io/wmendes/caravel-relayer@sha256:2222222222222222222222222222222222222222222222222222222222222222"
@@ -88,6 +92,7 @@ services:
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     restart: unless-stopped
+    logging: { driver: local, options: { max-size: "10m", max-file: "3" } }
     labels: { caravel.lane: "caravel-perps-testnet-0", caravel.env: "testnet", caravel.node: "relayer" }
   web:
     image: "ghcr.io/wmendes/caravel-perps-web@sha256:3333333333333333333333333333333333333333333333333333333333333333"
@@ -103,4 +108,5 @@ services:
     cap_drop: [ALL]
     cap_add: [NET_BIND_SERVICE]
     restart: unless-stopped
+    logging: { driver: local, options: { max-size: "10m", max-file: "3" } }
     labels: { caravel.lane: "caravel-perps-testnet-0", caravel.env: "testnet", caravel.node: "web" }
