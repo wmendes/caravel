@@ -44,7 +44,8 @@ pub enum StreamEvent<A: NodeApp> {
     Block {
         produced: Arc<Produced<A::State>>,
         view: A::BlockView,
-        config_hash: [u8; 32],
+        /// What every subscriber's messages share, built once (F-13).
+        frame: Arc<BlockFrame>,
     },
     Checkpoint {
         seq: u64,
@@ -59,14 +60,58 @@ impl<A: NodeApp> Clone for StreamEvent<A> {
             Self::Block {
                 produced,
                 view,
-                config_hash,
+                frame,
             } => Self::Block {
                 produced: produced.clone(),
                 view: view.clone(),
-                config_hash: *config_hash,
+                frame: frame.clone(),
             },
             Self::Checkpoint { seq, status } => Self::Checkpoint { seq: *seq, status },
         }
+    }
+}
+
+/// The parts of a block's stream messages that are the same for every
+/// subscriber (F-13): built once in `publish`, not once per socket.
+pub struct BlockFrame {
+    /// The `block` message, serialized.
+    block: String,
+    /// Each user transaction's `receipt` message, with its account.
+    receipts: Vec<([u8; 32], Value)>,
+}
+
+impl BlockFrame {
+    fn new<A: NodeApp>(app: &A, p: &Produced<A::State>, config_hash: &[u8; 32]) -> Self {
+        let input = BlockInputV1::decode(&p.record.input).ok();
+        let block = json!({
+            "type": "block",
+            "height": p.height.to_string(),
+            "timestamp_ms": input.as_ref().map(|b| b.timestamp_ms.to_string()),
+            "entries": input.as_ref().map_or(0, |b| b.entries.len()),
+            "checkpoint_end": input.as_ref().is_some_and(|b| b.checkpoint_end),
+            "state_hash": hex(&p.record.state_hash_after),
+        })
+        .to_string();
+        let mut receipts = Vec::new();
+        if let Some(input) = &input {
+            let events = app.render_events(&p.receipts_bytes).unwrap_or_default();
+            for (i, rc) in p.receipts.receipts.iter().enumerate() {
+                if let Some(Entry::User(tx)) = input.entries.get(rc.entry_index as usize) {
+                    receipts.push((
+                        tx.account,
+                        json!({
+                            "type": "receipt",
+                            "height": p.height.to_string(),
+                            "tx_hash": hex(&tx_hash(tx, config_hash)),
+                            "nonce": tx.nonce.to_string(),
+                            "code": rc.code,
+                            "events": events.get(i).cloned().unwrap_or_default(),
+                        }),
+                    ));
+                }
+            }
+        }
+        Self { block, receipts }
     }
 }
 
@@ -147,10 +192,11 @@ impl<A: NodeApp> SequencerNode<A> {
             self.sealed.notify_one();
         }
         let checkpoint = produced.checkpoint.as_ref().map(|c| c.seq);
+        let frame = Arc::new(BlockFrame::new(&self.app, &produced, &config_hash));
         let _ = self.events.send(StreamEvent::Block {
             produced: Arc::new(produced),
             view,
-            config_hash,
+            frame,
         });
         if let Some(seq) = checkpoint {
             let _ = self.events.send(StreamEvent::Checkpoint {
@@ -1049,7 +1095,7 @@ async fn serve_stream<A: NodeApp>(app: Arc<SequencerNode<A>>, mut socket: WebSoc
                 let msgs = messages(&app.app, &ev, &sub, account.as_ref());
                 app.record("ws_frame", t_frame.elapsed());
                 for m in msgs {
-                    if socket.send(Message::Text(m.to_string().into())).await.is_err() {
+                    if socket.send(Message::Text(m.into())).await.is_err() {
                         return;
                     }
                 }
@@ -1058,56 +1104,43 @@ async fn serve_stream<A: NodeApp>(app: Arc<SequencerNode<A>>, mut socket: WebSoc
     }
 }
 
-/// The stream messages one event gives a subscriber: `block` and
-/// `checkpoint`, the account's `receipt`s, and the app's (perps: `fill`,
-/// `book` and `account`), in the order the app gives.
+/// The stream messages one event gives a subscriber, serialized: `block`
+/// and `checkpoint`, the account's `receipt`s, and the app's (perps:
+/// `fill`, `book` and `account`), in the order the app gives. The shared
+/// parts come from the event's [`BlockFrame`].
 fn messages<A: NodeApp>(
     app: &A,
     ev: &StreamEvent<A>,
     sub: &Subscription<A::Subscription>,
     account: Option<&[u8; 32]>,
-) -> Vec<Value> {
+) -> Vec<String> {
     let mut out = Vec::new();
     match ev {
-        StreamEvent::Checkpoint { seq, status } => {
-            out.push(json!({ "type": "checkpoint", "seq": seq.to_string(), "status": status }))
-        }
+        StreamEvent::Checkpoint { seq, status } => out.push(
+            json!({ "type": "checkpoint", "seq": seq.to_string(), "status": status }).to_string(),
+        ),
         StreamEvent::Block {
             produced,
             view,
-            config_hash,
+            frame,
         } => {
-            let p = produced.as_ref();
-            let input = BlockInputV1::decode(&p.record.input).ok();
             if sub.blocks {
-                out.push(json!({
-                    "type": "block",
-                    "height": p.height.to_string(),
-                    "timestamp_ms": input.as_ref().map(|b| b.timestamp_ms.to_string()),
-                    "entries": input.as_ref().map_or(0, |b| b.entries.len()),
-                    "checkpoint_end": input.as_ref().is_some_and(|b| b.checkpoint_end),
-                    "state_hash": hex(&p.record.state_hash_after),
-                }));
+                out.push(frame.block.clone());
             }
-            let mut receipts = Vec::new();
-            if let (Some(key), Some(input)) = (account, &input) {
-                let events = app.render_events(&p.receipts_bytes).unwrap_or_default();
-                for (i, rc) in p.receipts.receipts.iter().enumerate() {
-                    if let Some(Entry::User(tx)) = input.entries.get(rc.entry_index as usize) {
-                        if tx.account == *key {
-                            receipts.push(json!({
-                                "type": "receipt",
-                                "height": p.height.to_string(),
-                                "tx_hash": hex(&tx_hash(tx, config_hash)),
-                                "nonce": tx.nonce.to_string(),
-                                "code": rc.code,
-                                "events": events.get(i).cloned().unwrap_or_default(),
-                            }));
-                        }
-                    }
-                }
-            }
-            out.extend(app.stream(p, view, &sub.app, account, receipts));
+            let receipts = match account {
+                Some(key) => frame
+                    .receipts
+                    .iter()
+                    .filter(|(a, _)| a == key)
+                    .map(|(_, r)| r.clone())
+                    .collect(),
+                None => Vec::new(),
+            };
+            out.extend(
+                app.stream(produced, view, &sub.app, account, receipts)
+                    .into_iter()
+                    .map(|v| v.to_string()),
+            );
         }
     }
     out
