@@ -151,6 +151,9 @@ pub struct Core<A: LaneApp> {
     budget: BatchBudget,
     last_header_hash: [u8; 32],
     backpressure: bool,
+    /// Per-phase timings of block production (F-01): build, execute, decode,
+    /// commit, seal.
+    pub perf: crate::perf::Perf,
 }
 
 impl<A: LaneApp> Core<A> {
@@ -232,6 +235,7 @@ impl<A: LaneApp> Core<A> {
             budget,
             last_header_hash,
             backpressure: false,
+            perf: crate::perf::Perf::new(),
         })
     }
 
@@ -388,6 +392,7 @@ impl<A: LaneApp> Core<A> {
             if self.backpressure {
                 byte_budget = byte_budget.min(max_block / 4);
             }
+            let t_build = std::time::Instant::now();
             let mut built = builder::build(&BuildInput {
                 app: &self.app,
                 state: &self.state,
@@ -413,7 +418,11 @@ impl<A: LaneApp> Core<A> {
                 .block
                 .encode()
                 .map_err(|_| CoreError::Corrupt("block encoding"))?;
-            match self.exec.step(&self.app, &self.state_bytes, &bytes) {
+            self.perf.record("build", t_build.elapsed());
+            let t_exec = std::time::Instant::now();
+            let stepped = self.exec.step(&self.app, &self.state_bytes, &bytes);
+            self.perf.record("execute", t_exec.elapsed());
+            match stepped {
                 Ok((out, metering)) => return self.accept(built, bytes, out, metering, incidents),
                 Err(ExecError::BudgetExceeded) => {
                     let users = built
@@ -491,6 +500,7 @@ impl<A: LaneApp> Core<A> {
         metering: Metering,
         mut incidents: Vec<Incident>,
     ) -> Result<Produced<A::State>, CoreError> {
+        let t_decode = std::time::Instant::now();
         let new_state = self
             .app
             .decode_state(&out.state)
@@ -509,8 +519,11 @@ impl<A: LaneApp> Core<A> {
         };
         let end = built.block.checkpoint_end;
         let seq = end.then_some(new_frame.checkpoint_seq);
+        self.perf.record("decode", t_decode.elapsed());
+        let t_commit = std::time::Instant::now();
         self.store
             .commit_block(height, &record, &out.receipts, &out.state, seq)?;
+        self.perf.record("commit", t_commit.elapsed());
 
         self.prev_block_hash = block_hash(&record);
         self.budget.add(record.input.len());
@@ -523,7 +536,9 @@ impl<A: LaneApp> Core<A> {
         self.frame = new_frame;
 
         let checkpoint = if end {
+            let t_seal = std::time::Instant::now();
             let row = self.seal(height, &mut incidents)?;
+            self.perf.record("seal", t_seal.elapsed());
             self.budget.reset();
             Some(row)
         } else {

@@ -90,9 +90,17 @@ pub struct SequencerNode<A: NodeApp> {
     token: String,
     production: bool,
     identity: api::Identity,
+    /// Node-side timings (F-01): lock wait, the signed-queue read, publish,
+    /// signature collection, seal-to-signed and each WebSocket frame.
+    perf: Mutex<caravel_runtime::perf::Perf>,
+    /// When each checkpoint was sealed, until it is signed.
+    sealed_at: Mutex<BTreeMap<u64, std::time::Instant>>,
 }
 
 impl<A: NodeApp> SequencerNode<A> {
+    fn record(&self, phase: &'static str, took: Duration) {
+        self.perf.lock().expect("perf lock").record(phase, took);
+    }
     pub fn store<T>(&self, f: impl FnOnce(&Store) -> T) -> T {
         f(self.core.lock().expect("core lock").store())
     }
@@ -120,6 +128,10 @@ impl<A: NodeApp> SequencerNode<A> {
         *self.snapshot.write().expect("snapshot lock") = produced.state.clone();
         *self.last_metering.lock().expect("metering lock") = (produced.height, produced.metering);
         if let Some(cp) = &produced.checkpoint {
+            self.sealed_at
+                .lock()
+                .expect("sealed_at lock")
+                .insert(cp.seq, std::time::Instant::now());
             tracing::info!(
                 seq = cp.seq,
                 first = cp.first_height,
@@ -244,6 +256,8 @@ pub async fn start<A: NodeApp>(
             engine_wasm_hash: cfg.engine_wasm_hash,
             network_passphrase: cfg.network_passphrase.clone(),
         },
+        perf: Mutex::new(caravel_runtime::perf::Perf::new()),
+        sealed_at: Mutex::new(BTreeMap::new()),
     });
     let router = router(node.clone(), &cfg.cors_origins);
     tokio::spawn(block_loop(node.clone(), config_hash));
@@ -281,17 +295,25 @@ async fn block_loop<A: NodeApp>(app: Arc<SequencerNode<A>>, config_hash: [u8; 32
         tick.tick().await;
         let a = app.clone();
         let result = tokio::task::spawn_blocking(move || {
+            let t_lock = std::time::Instant::now();
             let mut core = a.core.lock().expect("core lock");
+            a.record("lock_wait", t_lock.elapsed());
+            let t_queue = std::time::Instant::now();
             let waiting = core
                 .store()
                 .checkpoints_with(CheckpointStatus::Signed)
                 .map_or(0, |v| v.len());
+            a.record("queue_read", t_queue.elapsed());
             core.set_queue_len(waiting);
             core.produce_block(now_ms())
         })
         .await;
         match result {
-            Ok(Ok(produced)) => app.publish(produced, config_hash),
+            Ok(Ok(produced)) => {
+                let t_publish = std::time::Instant::now();
+                app.publish(produced, config_hash);
+                app.record("publish", t_publish.elapsed());
+            }
             Ok(Err(e)) => {
                 tracing::error!("block production halted: {e}");
                 *app.halted.lock().expect("halted lock") = Some(e.to_string());
@@ -361,7 +383,8 @@ async fn signer_loop<A: NodeApp>(app: Arc<SequencerNode<A>>) {
             }
             continue;
         }
-        match collect(
+        let t_collect = std::time::Instant::now();
+        let collected = collect(
             &client,
             app.request_key.as_ref(),
             &signers,
@@ -369,9 +392,18 @@ async fn signer_loop<A: NodeApp>(app: Arc<SequencerNode<A>>) {
             &row.batch,
             &prior_signatures(&row),
         )
-        .await
-        {
+        .await;
+        app.record("sign_collect", t_collect.elapsed());
+        match collected {
             Ok(sigs) => {
+                if let Some(at) = app
+                    .sealed_at
+                    .lock()
+                    .expect("sealed_at lock")
+                    .remove(&row.seq)
+                {
+                    app.record("seal_to_signed", at.elapsed());
+                }
                 let json = serde_json::to_string(&sigs).expect("json");
                 let stored = app.core.lock().expect("core lock").store_mut().set_signed(
                     row.seq,
@@ -393,6 +425,19 @@ async fn signer_loop<A: NodeApp>(app: Arc<SequencerNode<A>>) {
             Err(e) => tracing::warn!(seq = row.seq, "collecting signatures: {e}; retrying"),
         }
     }
+}
+
+/// `/v1/status` `perf` (F-01): each phase's p50 / p99 / max in microseconds,
+/// over the last `perf::WINDOW` samples, from the core and the node.
+pub(crate) fn perf_json(
+    core: &caravel_runtime::perf::Perf,
+    node: &caravel_runtime::perf::Perf,
+) -> Value {
+    json!({
+        "unit": "us",
+        "window": caravel_runtime::perf::WINDOW,
+        "phases": core.merged(node),
+    })
 }
 
 /// Signatures a checkpoint already holds from before a rotation (the row
@@ -615,6 +660,7 @@ async fn status<A: NodeApp>(State(app): AppState<A>) -> ApiResult {
         },
         "mempool": core.mempool.len(),
         "host_metering": metering,
+        "perf": perf_json(&core.perf, &app.perf.lock().expect("perf lock")),
         "backpressure": core.backpressure(),
         "signers": app.signers.as_ref().map(|s| json!({
             "epoch": s.epoch.to_string(),
@@ -879,7 +925,10 @@ async fn serve_stream<A: NodeApp>(app: Arc<SequencerNode<A>>, mut socket: WebSoc
                     }
                     Err(_) => return,
                 };
-                for m in messages(&app.app, &ev, &sub, account.as_ref()) {
+                let t_frame = std::time::Instant::now();
+                let msgs = messages(&app.app, &ev, &sub, account.as_ref());
+                app.record("ws_frame", t_frame.elapsed());
+                for m in msgs {
                     if socket.send(Message::Text(m.to_string().into())).await.is_err() {
                         return;
                     }

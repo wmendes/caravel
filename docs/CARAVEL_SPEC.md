@@ -2335,7 +2335,7 @@ Branches are `f-0x-short-name`. Gates: F-04, F-09 and F-14.
 
 | ID | Task | Depends | Status |
 |---|---|---|---|
-| F-01 | **Per-phase metrics.** Lock wait, build, execute, decode, commit, seal, sign-collect and fan-out timings (p50/p99), in `/v1/status` and `caravel status --json` | M0.8 | todo |
+| F-01 | **Per-phase metrics.** Lock wait, build, execute, decode, commit, seal, sign-collect and fan-out timings (p50/p99), in `/v1/status` and `caravel status --json`. Node-side only (`caravel-runtime::perf`, a 1,024-sample window per phase); validators also report fetch, checkpoint and sign, the sequencer seal-to-signed | M0.8 | review |
 | F-02 | **Load tooling.** `loadgen` past 255 accounts with several requests in flight and a target rate; a local full-stack soak (sequencer, validators, relayer) at 500 and 200 ms | F-01 | todo |
 | F-03 | **Baseline report.** Soak at 500/200 ms (idle, 45 and 100 tx/s) plus lane #1's growth; RESULTS "Performance baseline"; network limits in SOURCES | F-02 | todo |
 | F-04 | **CI, fast path** (DEC-119) — **Gate.** Both workspaces cached; no disk cleanup; four parallel Rust jobs; parity gates concurrent and both gates threaded; nextest; main-only cache saves; release built once for the e2e; no cancelled main runs | M0.8 | review |

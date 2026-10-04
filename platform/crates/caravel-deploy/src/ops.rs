@@ -123,6 +123,8 @@ impl Prepared {
             })).collect::<Vec<_>>(),
             "epoch": oc.map(|o| o.epoch),
             "height": seq.as_ref().and_then(|s| s["height"].as_str().map(str::to_string)),
+            // The sequencer's per-phase timings (F-01), when it reports them.
+            "perf": seq.as_ref().map(|s| s["perf"].clone()).filter(|p| !p.is_null()),
             "last_checkpoint": self.extra.last_checkpoint.map(|(seq, at)| json!({ "seq": seq, "accepted_at": at, "age_secs": now().saturating_sub(at) })),
             "freeze_possible_at": self.freeze_possible_at(),
             "relayer_xlm": self.extra.relayer_balance.map(|b| format!("{}.{:07}", b / 10_000_000, b % 10_000_000)),
@@ -152,6 +154,12 @@ impl Prepared {
         );
         if let Some(h) = s["height"].as_str() {
             o += &format!("  height {h}, signer epoch {}\n", s["epoch"]);
+        }
+        if let Some(p) = s["perf"]["phases"].as_object() {
+            let phase = |n: &str| p.get(n).and_then(|v| v["p50_us"].as_u64());
+            if let (Some(e), Some(c)) = (phase("execute"), phase("commit")) {
+                o += &format!("  block p50: execute {} µs, commit {} µs\n", e, c);
+            }
         }
         match &s["last_checkpoint"] {
             Value::Null => o += "  no checkpoint accepted yet\n",

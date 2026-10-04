@@ -136,6 +136,8 @@ pub struct Follower<A: LaneApp> {
     /// First height of the open batch.
     batch_start: u64,
     halted: Option<String>,
+    /// Per-phase timings of following (F-01): execute, decode, commit, checkpoint, sign.
+    pub perf: crate::perf::Perf,
 }
 
 impl<A: LaneApp> Follower<A> {
@@ -185,6 +187,7 @@ impl<A: LaneApp> Follower<A> {
             last_header_hash,
             batch_start,
             halted: None,
+            perf: crate::perf::Perf::new(),
         })
     }
 
@@ -251,10 +254,14 @@ impl<A: LaneApp> Follower<A> {
             )));
         }
         // 2. Execute it ourselves; 3. same state.
-        let (out, _) = match self.exec.step(&self.app, &self.state_bytes, &record.input) {
+        let t_exec = std::time::Instant::now();
+        let stepped = self.exec.step(&self.app, &self.state_bytes, &record.input);
+        self.perf.record("execute", t_exec.elapsed());
+        let (out, _) = match stepped {
             Ok(o) => o,
             Err(e) => return Err(self.halt(format!("block {height} does not execute: {e:?}"))),
         };
+        let t_decode = std::time::Instant::now();
         let state_hash = sha256(&out.state);
         if state_hash != record.state_hash_after {
             return Err(self.halt(format!(
@@ -278,8 +285,11 @@ impl<A: LaneApp> Follower<A> {
             state_hash_after: state_hash,
         };
         let seq = input.checkpoint_end.then_some(new_frame.checkpoint_seq);
+        self.perf.record("decode", t_decode.elapsed());
+        let t_commit = std::time::Instant::now();
         self.store
             .commit_block(height, &own, &out.receipts, &out.state, seq)?;
+        self.perf.record("commit", t_commit.elapsed());
         for f in &flags {
             self.store.flag_block(height, f)?;
         }
@@ -288,7 +298,10 @@ impl<A: LaneApp> Follower<A> {
         self.state = Arc::new(new_state);
         self.frame = new_frame;
         let checkpoint = if input.checkpoint_end {
-            Some(self.compute_checkpoint(height)?)
+            let t_ck = std::time::Instant::now();
+            let seq = self.compute_checkpoint(height)?;
+            self.perf.record("checkpoint", t_ck.elapsed());
+            Some(seq)
         } else {
             None
         };
