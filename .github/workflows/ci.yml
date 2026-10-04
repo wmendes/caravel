@@ -50,13 +50,13 @@ jobs:
           EVENT: ${{ github.event_name }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
-          BEFORE: ${{ github.event.before }}
         run: |
           all='["platform/relayer","lanes/perps/relayer-feeds","lanes/perps/web","docs-site"]'
+          # Main runs everything: when several merges land together, GitHub
+          # drops the queued runs between them, so a diff from the last push
+          # would skip code that never ran on main (F-15).
           if [[ "$EVENT" == pull_request ]]; then
             files="$(git diff --name-only "$BASE...$HEAD")"
-          elif [[ "$EVENT" == push && -n "$BEFORE" && ! "$BEFORE" =~ ^0+$ ]] && git cat-file -e "$BEFORE" 2> /dev/null; then
-            files="$(git diff --name-only "$BEFORE" "$GITHUB_SHA")"
           else
             { echo "code=true"; echo "apps=$all"; echo "infra=true"; } >> "$GITHUB_OUTPUT"
             echo "everything ($EVENT)"; exit 0
