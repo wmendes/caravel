@@ -110,10 +110,18 @@ pub fn unhex(s: &str, what: &'static str) -> Result<Vec<u8>, ApiError> {
 }
 
 pub fn block_json<A: LaneApp>(app: &A, store: &Store, height: u64) -> ApiResult {
-    let (record, receipts) = store
-        .block(height)
-        .map_err(ApiError::internal)?
-        .ok_or_else(|| ApiError::not_found(format!("no block {height}")))?;
+    let Some((record, receipts)) = store.block(height).map_err(ApiError::internal)? else {
+        // A validator keeps only recent blocks (F-08).
+        let first = store.first_block().map_err(ApiError::internal)?;
+        if height > 0 && first.is_some_and(|f| height < f) {
+            return Err(ApiError::new(
+                StatusCode::GONE,
+                "PRUNED",
+                format!("block {height} was pruned on this node: ask the sequencer, or replay from Stellar"),
+            ));
+        }
+        return Err(ApiError::not_found(format!("no block {height}")));
+    };
     ok(views::block(app, &record, &receipts)
         .ok_or_else(|| ApiError::internal("stored block does not decode"))?)
 }

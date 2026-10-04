@@ -19,6 +19,9 @@ use crate::lane_toml::LaneFile;
 #[derive(Serialize, Debug)]
 pub struct CheckReport {
     pub ok: bool,
+    /// Where re-execution started: 0 (genesis), or a validator's oldest
+    /// kept snapshot once its older blocks are dropped (F-08).
+    pub from_height: u64,
     pub height: u64,
     pub final_state_hash: String,
     pub checkpoints_checked: u64,
@@ -43,13 +46,26 @@ pub fn check_store<A: NodeApp>(
     // the tip is re-executed, and the head checked on the way.
     let (head, head_state) = store.head()?;
     let tip = store.tip()?;
-    let mut head_ok = head == 0 && head_state == genesis_state;
-    let mut state = genesis_state;
+    // A validator drops old blocks (F-08): start from the snapshot its
+    // first block follows.
+    let (mut height, mut state, mut prev_header) = match store.first_block()? {
+        Some(first) if first > 1 => {
+            let (seq, state) = store
+                .snapshot_at(first - 1)?
+                .with_context(|| format!("no snapshot at height {} to start from", first - 1))?;
+            let header = store
+                .checkpoint(seq)?
+                .with_context(|| format!("no checkpoint {seq}"))?
+                .header;
+            (first - 1, state, sha256(&header))
+        }
+        _ => (0, genesis_state, [0u8; 32]),
+    };
+    let from_height = height;
+    let mut head_ok = head == height && head_state == state;
     let mut batch: Vec<BlockRecordV1> = Vec::new();
-    let mut prev_header = [0u8; 32];
     let mut checkpoints = 0;
     let mut cpu_max = 0;
-    let mut height = 0;
     while height < tip {
         let to = (height + 500).min(tip);
         for (record, _) in store.blocks(height + 1, to)? {
@@ -93,6 +109,7 @@ pub fn check_store<A: NodeApp>(
     }
     Ok(CheckReport {
         ok: true,
+        from_height,
         height,
         final_state_hash: hex(&sha256(&state)),
         checkpoints_checked: checkpoints,

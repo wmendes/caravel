@@ -275,12 +275,13 @@ pub fn run<A: NodeApp>(app: A, command: Command) -> Result<()> {
         }
         Command::Compact { config } => {
             let text = std::fs::read_to_string(&config)?;
-            let (lane, db) = if text.contains("[sequencer]") {
+            // The sequencer archives old blocks; a validator drops them (F-08).
+            let (lane, db, history) = if text.contains("[sequencer]") {
                 let c = crate::node_config::SequencerConfig::load_offline(&config)?;
-                (c.lane, c.db)
+                (c.lane, c.db, caravel_runtime::store::History::Archive)
             } else {
                 let c = crate::validator::ValidatorConfig::load(&config)?;
-                (c.lane, c.db)
+                (c.lane, c.db, caravel_runtime::store::History::Drop)
             };
             let (_, config_bytes, genesis_state) = crate::lane_toml::genesis(&app, &lane)?;
             let before = std::fs::metadata(&db)?.len();
@@ -290,20 +291,26 @@ pub fn run<A: NodeApp>(app: A, command: Command) -> Result<()> {
                 &caravel_runtime::checkpoint::sha256(&config_bytes),
                 &genesis_state,
             )?;
-            let (mut snapshots, mut batches) = (0, 0);
+            let (mut snapshots, mut batches, mut checkpoints) = (0, 0, 0);
             loop {
                 let p = store.prune(10_000)?;
+                let h = store.prune_history(history, 1_000)?;
                 snapshots += p.snapshots;
                 batches += p.batches;
-                if p.snapshots + p.batches == 0 {
+                checkpoints += h;
+                if p.snapshots + p.batches + h == 0 {
                     break;
                 }
             }
             store.vacuum()?;
             drop(store);
             let after = std::fs::metadata(&db)?.len();
+            let blocks = match history {
+                caravel_runtime::store::History::Archive => "archived",
+                caravel_runtime::store::History::Drop => "dropped",
+            };
             println!(
-                "pruned {snapshots} snapshot(s) and {batches} batch(es); {} MB -> {} MB",
+                "pruned {snapshots} snapshot(s) and {batches} batch(es), {blocks} the blocks of {checkpoints} checkpoint(s); {} MB -> {} MB",
                 before / 1_000_000,
                 after / 1_000_000
             );
