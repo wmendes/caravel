@@ -304,12 +304,20 @@ pub async fn run<A: NodeApp>(app: A, cfg: ValidatorConfig) -> Result<()> {
     Ok(())
 }
 
-/// Catch-up and live follow: fetch `/v1/blocks/{h}` from our height on.
+/// How long a validator asks the sequencer to hold a fetch for a block not
+/// made yet (F-11).
+const FETCH_WAIT_MS: u64 = 2000;
+
+/// Catch-up and live follow: fetch `/v1/blocks/{h}/raw` from our height on,
+/// held by the sequencer until the block exists (F-11). A sequencer without
+/// the raw route (an older release) is followed through `/v1/blocks/{h}`
+/// every `poll_ms`.
 async fn follow_loop<A: NodeApp>(app: Arc<ValidatorNode<A>>, sequencer: String, poll_ms: u64) {
     let http = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
         .expect("http client");
+    let mut raw = true;
     loop {
         let (height, halted) = app.with(|f| (f.height(), f.halted().map(str::to_string)));
         if halted.is_some() {
@@ -318,14 +326,27 @@ async fn follow_loop<A: NodeApp>(app: Arc<ValidatorNode<A>>, sequencer: String, 
         }
         let next = height + 1;
         let t_fetch = std::time::Instant::now();
-        let fetched = fetch_block(&http, &sequencer, next).await;
+        let fetched = if raw {
+            fetch_raw(&http, &sequencer, next).await
+        } else {
+            fetch_block(&http, &sequencer, next)
+                .await
+                .map(Fetched::from)
+        };
         let record = match fetched {
-            Ok(Some(r)) => {
+            Ok(Fetched::Block(r)) => {
                 app.record("fetch", t_fetch.elapsed());
                 r
             }
-            Ok(None) => {
+            // The sequencer held the request: ask again at once.
+            Ok(Fetched::NotYet) if raw => continue,
+            Ok(Fetched::NotYet) => {
                 tokio::time::sleep(Duration::from_millis(poll_ms)).await;
+                continue;
+            }
+            Ok(Fetched::NoRawRoute) => {
+                tracing::info!("the sequencer has no raw block route; following its block views");
+                raw = false;
                 continue;
             }
             Err(e) => {
@@ -364,6 +385,44 @@ async fn follow_loop<A: NodeApp>(app: Arc<ValidatorNode<A>>, sequencer: String, 
             Err(e) => tracing::error!("apply task failed: {e}"),
         }
     }
+}
+
+enum Fetched {
+    Block(BlockRecordV1),
+    NotYet,
+    NoRawRoute,
+}
+
+impl From<Option<BlockRecordV1>> for Fetched {
+    fn from(r: Option<BlockRecordV1>) -> Self {
+        r.map_or(Fetched::NotYet, Fetched::Block)
+    }
+}
+
+async fn fetch_raw(http: &reqwest::Client, sequencer: &str, height: u64) -> Result<Fetched> {
+    let resp = http
+        .get(format!(
+            "{sequencer}/v1/blocks/{height}/raw?wait_ms={FETCH_WAIT_MS}"
+        ))
+        .send()
+        .await?;
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        // The route answers a missing block with an error body; an unknown
+        // route answers with none.
+        let body = resp.bytes().await?;
+        return Ok(if body.is_empty() {
+            Fetched::NoRawRoute
+        } else {
+            Fetched::NotYet
+        });
+    }
+    if !resp.status().is_success() {
+        bail!("status {}", resp.status());
+    }
+    let raw = resp.bytes().await?;
+    Ok(Fetched::Block(
+        BlockRecordV1::decode(&raw).map_err(|e| anyhow!("record does not decode: {e:?}"))?,
+    ))
 }
 
 async fn fetch_block(

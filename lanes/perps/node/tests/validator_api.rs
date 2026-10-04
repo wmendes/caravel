@@ -520,6 +520,52 @@ async fn validators_follow_sign_and_refuse_a_tampered_chain() {
             "sequencer phase {phase}: {sp}"
         );
     }
+    // F-11: the raw route serves the record's bytes, the same as the view's
+    // record_hex, and holds a request for the next block until it exists.
+    let (_, view) = c.get(&format!("{seq_url}/v1/blocks/1")).await;
+    let raw = c
+        .http
+        .get(format!("{seq_url}/v1/blocks/1/raw"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(raw.headers()["content-type"], "application/octet-stream");
+    assert_eq!(
+        hex(&raw.bytes().await.unwrap()),
+        view["record_hex"].as_str().unwrap()
+    );
+    let next = c.get(&format!("{seq_url}/v1/status")).await.1["height"]
+        .as_str()
+        .unwrap()
+        .parse::<u64>()
+        .unwrap()
+        + 1;
+    let t = std::time::Instant::now();
+    let held = c
+        .http
+        .get(format!("{seq_url}/v1/blocks/{next}/raw?wait_ms=3000"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(held.status(), 200, "block {next} arrived during the wait");
+    assert!(
+        t.elapsed() < std::time::Duration::from_millis(2500),
+        "{:?}",
+        t.elapsed()
+    );
+    let t = std::time::Instant::now();
+    let none = c
+        .http
+        .get(format!(
+            "{seq_url}/v1/blocks/{}/raw?wait_ms=300",
+            next + 1000
+        ))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(none.status(), 404);
+    assert!(t.elapsed() >= std::time::Duration::from_millis(300));
+
     // No fixed retry sleep between a seal and its signatures any more (F-10):
     // before, a validator one poll behind cost 2 s.
     assert!(

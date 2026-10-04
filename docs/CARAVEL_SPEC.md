@@ -1647,6 +1647,7 @@ All JSON uses:
 | `GET /v1/markets/{id}/trades?limit=100` | recent fills (from receipts), kept across restarts (DEC-103) |
 | `GET /v1/markets/{id}/candles?interval=1m\|5m\|15m\|1h&limit=500` | candles of the oracle price (the mark), built by the node from its blocks (DEC-103) |
 | `GET /v1/blocks/{height}` | record hex + decoded entries + receipts |
+| `GET /v1/blocks/{height}/raw[?wait_ms=N]` | the `BlockRecordV1` bytes (`application/octet-stream`), read outside the core lock; with `wait_ms` (at most 5,000) a block not made yet is answered as soon as it is, else 404 (F-11) |
 | `GET /v1/checkpoints/{seq}` | header (hex + decoded), batch hash, signatures, Stellar tx hash, status |
 | `GET /v1/proofs/withdrawals?account=G...` | all unclaimed withdrawal leaves for the account: `{seq, index, amount, proof[]}` |
 | `GET /v1/proofs/escape?account=G...` | leaf from the **last accepted** checkpoint: `{seq, index, equity, proof[]}` |
@@ -1702,7 +1703,7 @@ Rules:
   - its own SQLite path.
 - Startup:
   - build genesis state from the config file and check `H == genesis_state_hash`;
-  - catch up by fetching `/v1/blocks/{h}` from its last height.
+  - catch up by fetching `/v1/blocks/{h}/raw?wait_ms=2000` from its last height (F-11; `/v1/blocks/{h}` every `poll_ms` from a sequencer without the raw route).
 - Follow: for each new `BlockRecordV1`:
   1. Check `prev_block_hash`.
   2. Execute `BlockInputV1` with its own executor.
@@ -2345,7 +2346,7 @@ Branches are `f-0x-short-name`. Gates: F-04, F-09 and F-14.
 | F-08 | **Block history** (DEC-121). Validators drop the blocks of accepted checkpoints up to their oldest kept snapshot; the sequencer archives them as one deflated blob per checkpoint and serves them as before (spec §15 and DEC-105 change) | F-07 | review |
 | F-09 | **Checkpoint cadence by time** — **Gate.** Lane files keep about a checkpoint a minute at any block time: the lane-file reference says how (`checkpoint_every_blocks = 60000 / block_time_ms`), and `caravel validate` notes a deployment off the local network that would checkpoint more often than every 30 s. Lane #1's storage measured on the new code once the human approves its deploy | F-08 | doing |
 | F-10 | **Signing without the 2 s stall.** After a failed round the signer retries in 150 ms, doubling to 2 s (it slept 2 s every time); `/v1/sign` waits up to 1.5 s for the follower to reach the checkpoint before answering `NOT_CAUGHT_UP`, and that refusal is logged at debug. Measured: `seal_to_signed` was 2.01 s p50 on the soak; the API test's checkpoint now signs in well under 1.5 s (asserted) | F-09 | review |
-| F-11 | **Validator fetch path.** A raw block endpoint on a read-only connection, outside the core lock, with long-poll | F-10 | todo |
+| F-11 | **Validator fetch path.** `/v1/blocks/{h}/raw` serves the record bytes from a read-only SQLite connection, outside the core lock, instead of the JSON view a validator decoded only for `record_hex`; `?wait_ms=` holds the request on a height watch until the block exists, so a validator gets each block when it is committed instead of up to a poll later. An older sequencer without the route is followed as before | F-10 | review |
 | F-12 | **Locks and async hygiene.** Mempool and production split, status/views from a per-block snapshot, blocking work off the async runtime, an indexed mempool | F-11 | todo |
 | F-13 | **WebSocket fan-out once per block.** Shared tickers, books, block view and events; only account views per subscriber | F-12 | todo |
 | F-14 | **Relayer pipeline** — **Gate.** Event-driven pickup, no redundant simulation, cached sequence, two checkpoints in flight; soak again; the 200 ms decision for lane #1 | F-13 | todo |

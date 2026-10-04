@@ -277,6 +277,23 @@ impl Store {
         Self::init(conn, lane_id, config_hash, genesis_state)
     }
 
+    /// A read-only connection to a store a node already has open (F-11): it
+    /// reads blocks while the node writes, never waiting for its lock. The
+    /// lane is not checked; the node that opened the store did that.
+    pub fn open_read_only(path: &Path) -> Result<Self> {
+        let conn = Connection::open_with_flags(
+            path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
+        Ok(Self {
+            conn,
+            head_every: 1,
+            blocks: Durability::Full,
+            archive_cache: std::sync::Mutex::new(None),
+        })
+    }
+
     pub fn open_in_memory(
         lane_id: &[u8; 32],
         config_hash: &[u8; 32],
