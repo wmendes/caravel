@@ -171,7 +171,7 @@ html:not(.js) .plan li, html:not(.js) .pl li { opacity: 1; transform: none; }
 @media (prefers-reduced-motion: reduce) { .plan li, .pl li { transition: none; } }
 
 /* Sections */
-section.band { padding-block: clamp(48px, 6vw, 72px); border-top: 1px solid var(--rule); }
+section.band { padding-block: clamp(48px, 6vw, 72px); border-top: 1px solid var(--rule); scroll-margin-top: 64px; }
 .head { display: grid; gap: 12px; max-width: 760px; }
 .head h2 { font-size: clamp(1.875rem, 4.2vw, 3rem); line-height: 1.06; letter-spacing: -.02em; }
 
@@ -200,6 +200,32 @@ section.band { padding-block: clamp(48px, 6vw, 72px); border-top: 1px solid var(
 .who-note { margin-top: 28px; display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: .9375rem; color: var(--muted); }
 .who-note .kind { color: var(--ink); font-weight: 700; }
 @media (prefers-reduced-motion: reduce) { .who-for .swap > span, .rules4 li, .app { transition: none; } }
+
+/* Where it runs: three layers, the lane on top (coral, as everywhere on this page), then containers, then machines */
+.layers { list-style: none; padding: 0; margin: 36px 0 0; border-top: 1px solid var(--rule); }
+.layers li { display: grid; grid-template-columns: minmax(0, 15rem) minmax(0, 1fr) auto; gap: 8px 32px; align-items: baseline; padding: 22px 0; border-bottom: 1px solid var(--rule); }
+.layers .ly { display: flex; align-items: baseline; gap: 12px; }
+.layers .ly b { font-size: 1.25rem; letter-spacing: -.01em; }
+.layers .ly span { font-size: .8125rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.layers p { margin: 0; color: var(--muted); max-width: 58ch; text-wrap: pretty; }
+.layers li > code { font: .8125rem var(--mono); color: var(--ink); background: var(--raised); border: 1px solid var(--rule); border-radius: 6px; padding: 4px 8px; white-space: nowrap; }
+.layers li.top .ly b { color: var(--lane); }
+.layers li.top > code { color: var(--lane); }
+.layers p code { font: .9em var(--mono); color: var(--ink); }
+@media (max-width: 860px) { .layers li { grid-template-columns: minmax(0, 1fr); } .layers li > code { justify-self: start; white-space: normal; overflow-wrap: anywhere; } }
+/* Lane #1, read through /lane/status (a same-origin rewrite in vercel.json) */
+.live { margin-top: 40px; display: grid; grid-template-columns: auto repeat(4, minmax(0, 1fr)); gap: 16px 32px; align-items: end; padding: 22px 24px; background: var(--raised); border: 1px solid var(--rule); border-radius: 14px; }
+.live .who { display: grid; gap: 4px; }
+.live .who b { font-size: 1rem; }
+.live .who a { font-size: .875rem; color: var(--muted); }
+.live .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 8px; vertical-align: 1px; }
+.live.on .dot { background: var(--lane); box-shadow: 0 0 0 0 var(--lane); animation: pulse 2s var(--out) infinite; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--lane) 60%, transparent); } 100% { box-shadow: 0 0 0 10px transparent; } }
+.live .stat .v { font-size: clamp(1.25rem, 2.4vw, 1.625rem); }
+.live .stat .v.tick { color: var(--lane); transition: color 0s; }
+.live .stat .v { transition: color .8s var(--out); }
+@media (max-width: 860px) { .live { grid-template-columns: repeat(2, minmax(0, 1fr)); } .live .who { grid-column: 1 / -1; } }
+@media (prefers-reduced-motion: reduce) { .live.on .dot { animation: none; } .live .stat .v, .live .stat .v.tick { transition: none; } }
 
 /* Quickstart */
 .join { background: var(--raised); border: 1px solid var(--rule); border-radius: 16px; padding: clamp(28px, 5vw, 56px); display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: clamp(24px, 4vw, 56px); align-items: center; }
@@ -293,6 +319,7 @@ footer p { font-size: .875rem; color: var(--muted); }
     <nav class="nav" aria-label="Sections">
       <a href="#who">Who it's for</a>
       <a href="#rules">Your rules</a>
+      <a href="#layers">Where it runs</a>
       <a href="#start">Quickstart</a>
       <a href="https://caravel-docs.vercel.app" id="docs-link">Docs</a>
       <a class="btn btn-primary btn-sm" href="https://github.com/wmendes/caravel"><svg class="gh" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>GitHub</a>
@@ -404,6 +431,28 @@ footer p { font-size: .875rem; color: var(--muted); }
     </div>
   </section>
 
+  <section class="band" id="layers" aria-labelledby="layers-h">
+    <div class="wrap">
+      <div class="head">
+        <p class="eyebrow">Where it runs</p>
+        <h2 id="layers-h">Same images on your laptop<br>and on your servers.</h2>
+        <p class="lede">Every release ships its nodes as container images, for amd64 and arm64. A lane on your machine and a lane on a VM run the same ones, from the same lane file. Caravel doesn't make machines; the repository's infrastructure as code does, if you want it to.</p>
+      </div>
+      <ol class="layers">
+        <li class="top"><div class="ly"><b>The lane</b><span>caravel</span></div><p>Contracts on Stellar, keys, signers, node configs and releases. <code>plan</code> shows every step before <code>apply</code> takes it.</p><code>caravel apply</code></li>
+        <li><div class="ly"><b>Containers</b><span>Docker</span></div><p>The sequencer, each validator, the relayer and Caddy, each from an image pinned by digest. A host needs Docker and nothing else.</p><code>runtime = "docker"</code></li>
+        <li><div class="ly"><b>Machines</b><span>OpenTofu</span></div><p>Optional. Modules for a Google Cloud VM with Docker, its firewall and a budget cap. Their outputs become the lane file's vars.</p><code>tofu output caravel_vars</code></li>
+      </ol>
+      <div class="live" id="live" aria-live="off">
+        <div class="who"><b><span class="dot" aria-hidden="true"></span>Caravel Perps, lane #1</b><a href="https://35-224-76-64.sslip.io" id="liveNote">Running in containers on testnet</a></div>
+        <div class="stat"><span class="k">Height</span><span class="v num" id="lvH">417,000+</span></div>
+        <div class="stat"><span class="k">Block time</span><span class="v num" id="lvB">0.5 s</span></div>
+        <div class="stat"><span class="k">Checkpoints</span><span class="v num" id="lvC">6,600+</span></div>
+        <div class="stat"><span class="k">Last block</span><span class="v num" id="lvA">live</span></div>
+      </div>
+    </div>
+  </section>
+
   <section class="band" id="start" aria-labelledby="start-h">
     <div class="wrap">
       <div class="join">
@@ -411,7 +460,7 @@ footer p { font-size: .875rem; color: var(--muted); }
           <p class="eyebrow">Open source</p>
           <h2 id="start-h">Start on your laptop.<br>Run it on your servers.</h2>
           <p class="lede">The lane file you try locally is the one you deploy: over ssh, on one host or several, with validators on hosts of their own, against Stellar testnet. Same commands, same plan.</p>
-          <p class="small">A lane on your machine needs Docker and Node.js 22. The installer brings the rest, for Linux and macOS.</p>
+          <p class="small">A lane on your machine needs only Docker. The installer brings the rest, for Linux and macOS.</p>
           <div class="cta-row"><a class="btn btn-primary" href="https://github.com/wmendes/caravel"><svg class="gh" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>View on GitHub</a><a class="btn btn-ghost" href="https://caravel-docs.vercel.app/getting-started/first-lane">Read the quickstart</a></div>
           <p class="doclinks"><a href="https://github.com/wmendes/caravel/blob/main/docs/CARAVEL_SPEC.md">Spec</a> · <a href="https://caravel-docs.vercel.app">Docs</a> · <a href="https://caravel-docs.vercel.app/reference/lane-file">Lane file</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/RUNBOOK.md">Runbook</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/RESULTS.md">Results</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/SECURITY.md">Security review</a> · <a href="https://github.com/wmendes/caravel/blob/main/CONTRIBUTING.md">Contributing</a></p>
         </div>
@@ -424,8 +473,8 @@ caravel <span class="h">init</span> payments my-lane &amp;&amp; cd my-lane
 caravel <span class="h">plan</span>
 caravel <span class="h">apply</span>
 
-<span class="c"># on your servers: add [env.testnet]</span>
-<span class="c"># with provider = "ssh", then</span>
+<span class="c"># on your servers: add [env.testnet] with</span>
+<span class="c"># host = { provider = "ssh", runtime = "docker" }</span>
 caravel <span class="h">plan</span> --env testnet
 caravel <span class="h">apply</span> --env testnet
 caravel status --env testnet</pre>
@@ -661,6 +710,37 @@ const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if ("IntersectionObserver" in window) new IntersectionObserver((es) => es.forEach((e) => { seen = e.isIntersecting; seen ? go() : stop(); }), { threshold: 0.4 }).observe(sec);
     else { seen = true; go(); }
   }
+})();
+
+/* Lane #1, live: real numbers only, every 2 s while the tab is visible. */
+(function live() {
+  const box = document.getElementById("live"); if (!box) return;
+  const H = document.getElementById("lvH"), B = document.getElementById("lvB"), C = document.getElementById("lvC"), A = document.getElementById("lvA"), note = document.getElementById("liveNote");
+  const fmt = (n) => Number(n).toLocaleString("en-US");
+  const set = (e, s) => { if (e.textContent === s) return; e.textContent = s; if (!REDUCE) { e.classList.add("tick"); requestAnimationFrame(() => requestAnimationFrame(() => e.classList.remove("tick"))); } };
+  let timer = 0, fails = 0;
+  async function poll() {
+    try {
+      const r = await fetch("/lane/status", { cache: "no-store" });
+      if (!r.ok) throw new Error(r.status);
+      const s = await r.json();
+      fails = 0;
+      set(H, fmt(s.height));
+      if (s.block_time_ms) B.textContent = (s.block_time_ms / 1000) + " s";
+      if (s.checkpoints) set(C, fmt(s.checkpoints.accepted));
+      const age = Math.max(0, (Date.now() - Number(s.last_block_timestamp_ms)) / 1000);
+      A.textContent = age < 2 ? "just now" : age < 120 ? Math.round(age) + " s ago" : Math.round(age / 60) + " min ago";
+      const up = !s.halted && age < 30;
+      box.classList.toggle("on", up);
+      note.textContent = s.halted ? "Halted: " + s.halted : up ? "Running in containers on testnet" : "Not making blocks right now";
+    } catch (e) {
+      if (++fails >= 3) { box.classList.remove("on"); note.textContent = "Open the trading app"; }
+    }
+  }
+  function start() { if (!timer) { poll(); timer = setInterval(poll, 2000); } }
+  function stop() { clearInterval(timer); timer = 0; }
+  document.addEventListener("visibilitychange", () => (document.hidden ? stop() : start()));
+  if (!document.hidden) start();
 })();
 </script>
 </body>

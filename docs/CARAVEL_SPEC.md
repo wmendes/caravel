@@ -2308,6 +2308,7 @@ Branches are `d-0x-short-name`, stacked. Gates: after D-03 (lanes in Docker on a
 | D-10 | **A release with images.** With the human's OK: a `v*` tag, multi-arch images on GHCR, the draft checked and published, `install.sh` users get the docker runtime. **Done 2026-10-04:** `v0.2.0` on main `5d9ffbd` (CI green, both runtimes); archives for x86_64 and arm64 Linux and arm64 macOS; `caravel-{perps,payments}-node`, `caravel-relayer` and `caravel-perps-web` as one image each for amd64 and arm64, public on GHCR; published as latest. Checked on macOS from the one-line install: `IMAGES` installed, `caravel init` chose `runtime = "docker"`, and `caravel apply` brought a payments lane up from the published digests (checkpoint 0 accepted, five nodes up) | D-08 | done |
 | D-11 | **CI runs only what a change touches** (DEC-117). A `changes` job sorts the diff into code, npm apps and OpenTofu; docs-only changes skip the Rust build, e2e, quickstart and release; `[skip ci]` documented | D-10 | review |
 | D-12 | **The README, reorganized.** A header image in both themes (rendered from `docs/assets/readme-header.html`), a centered intro, a diagram of how the layers fit, Docker-only requirements, lane #1 at 0.5 s in containers, the details in collapsible blocks; the quickstart block unchanged | D-11 | review |
+| D-13 | **The landing page after M0.8.** A "Where it runs" band (the lane, containers, machines) with lane #1 live through a same-origin rewrite (`/lane/status`), Docker as the one requirement, the docs and site redeployed | D-12 | review |
 
 ---
 
