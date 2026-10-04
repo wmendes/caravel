@@ -21,7 +21,7 @@ Stellar apps that need their own rules. On Stellar, every app shares the network
 | A trading venue (the Perps template) | a block every half second, zero maker fees, its own leverage limits, its own price feed, settlement in Circle's USDC |
 | A payment network (the Payments template) | a flat fee per transfer, members only, its own validators, its own settlement token |
 | A game economy (your engine, on the app SDK) | 200 ms blocks, players only, a cap on moves per block, an in-game token |
-| An agent marketplace (Payments) | no fee between agents, session keys for each agent, a cap on accounts |
+| Agents paying for services (Payments) | 200 ms blocks to pay per request, thousands of payments in one checkpoint a minute, session keys so an agent never holds its owner's key, known agents and services only |
 
 Deposits, withdrawals and exits stay on Stellar. If Stellar's shared rules already fit your app, build on Stellar directly: a lane adds operators, validators and a relayer to run.
 

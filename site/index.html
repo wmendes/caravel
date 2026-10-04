@@ -335,7 +335,7 @@ footer p { font-size: .875rem; color: var(--muted); }
       <div class="pitch">
         <p class="for">Open source, for teams building on Stellar</p>
         <h1 id="hero-h">For Stellar apps that need their own rules.</h1>
-        <p class="like" aria-live="off">Like <span class="swap" id="whoSwap"><span class="on">an exchange that matches every 0.5 s</span><span aria-hidden="true">a payment network for members only</span><span aria-hidden="true">a game economy with 200 ms turns</span><span aria-hidden="true">agents that pay each other, fee-free</span></span></p>
+        <p class="like" aria-live="off">Like <span class="swap" id="whoSwap"><span class="on">an exchange that matches every 0.5 s</span><span aria-hidden="true">a payment network for members only</span><span aria-hidden="true">a game economy with 200 ms turns</span><span aria-hidden="true">agents that pay per request in 200 ms</span></span></p>
         <p class="lede">Caravel runs your app as a <b>lane</b>: an appchain with its own block time, fees, members, limits and validators, declared in one file. Your users' money stays on Stellar, in the token you choose.</p>
         <div class="cta-row">
           <a class="btn btn-primary" href="#start">Run a lane in 5 minutes</a>
@@ -662,7 +662,7 @@ const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     { kind: "Template: Perps, live on testnet", file: [["[node]"], ["block_time_ms = 500", "a block every half second"], ["[[perps.markets]]"], ["maker_fee_bps = 0", "no maker fees"], ["imf_bps = 1000", "up to 10x leverage"], ["[perps.oracle]"], ['keys = ["GCRD…H37Q"]', "its own price feed"], ["[env.testnet]"], ['token = "circle-usdc"', "settles in Circle's USDC"]] },
     { kind: "Template: Payments", file: [["[access]"], ['mode = "allowlist"', "members only"], ["[payments]"], ["transfer_fee = 100000", "0.01 per transfer"], ["[env.testnet]"], ["threshold = 2", "2 of 3 validators sign"], ['token = "usd"', "its own token"]] },
     { kind: "Your engine, on the app SDK", file: [["[node]"], ["block_time_ms = 200", "200 ms turns"], ["[access]"], ['mode = "allowlist"', "players only"], ["[limits]"], ["max_txs_per_account_per_block = 50", "50 moves"], ["[env.testnet]"], ['token = "gold"', "its own in-game token"]] },
-    { kind: "Template: Payments", file: [["[payments]"], ["transfer_fee = 0", "no fee between agents"], ["[limits]"], ["max_accounts = 256", "up to 256 agents"], ["max_session_keys = 4", "a key per running task"], ["[env.testnet]"], ['token = "circle-usdc"', "settles in USDC"]] },
+    { kind: "Template: Payments", file: [["[node]"], ["block_time_ms = 200", "pay per request"], ["checkpoint_every_blocks = 300", "settle once a minute"], ["[access]"], ['mode = "allowlist"', "known agents only"], ["[limits]"], ["max_session_keys = 4", "scoped agent keys"], ["[env.testnet]"], ['token = "circle-usdc"', "settles in USDC"]] },
   ];
   const swap = document.getElementById("whoSwap"), pre = document.getElementById("whoFile"), kind = document.getElementById("whoKind");
   const card = document.getElementById("who"), tabs = Array.from(card ? card.querySelectorAll(".app") : []);
