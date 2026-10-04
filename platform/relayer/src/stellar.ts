@@ -110,6 +110,8 @@ export class RpcContract {
 
 export class RpcSettlement implements SettlementApi {
   private readonly c: RpcContract;
+  /** The relayer's account after its last successful submission (F-14): building a transaction advances its sequence, so the next one needs no fetch. Any failure drops it. */
+  private account: Account | null = null;
 
   constructor(
     rpcUrl: string,
@@ -155,7 +157,8 @@ export class RpcSettlement implements SettlementApi {
   }
 
   async submitCheckpoint(p: PendingCheckpoint): Promise<SubmitResult> {
-    const account = await this.c.server.getAccount(this.relayer.publicKey());
+    const account = this.account ?? (await this.c.server.getAccount(this.relayer.publicKey()));
+    this.account = null;
     const args = [xdr.ScVal.scvBytes(Buffer.from(p.header)), xdr.ScVal.scvBytes(Buffer.from(p.batch)), u64(p.epoch), xdr.ScVal.scvVec(p.sigs.map(sigVal))];
     const raw = new TransactionBuilder(account, { fee: BASE_FEE, networkPassphrase: this.c.networkPassphrase })
       .addOperation(this.c.contract.call("submit_checkpoint", ...args))
@@ -168,8 +171,10 @@ export class RpcSettlement implements SettlementApi {
     const txSizeBytes = tx.toEnvelope().toXDR().length;
     const sent = await this.c.server.sendTransaction(tx);
     if (sent.status === "ERROR" || sent.status === "TRY_AGAIN_LATER") throw new Error(`submit_checkpoint ${p.seq}: send status ${sent.status}`);
-    const done = await this.c.server.pollTransaction(sent.hash, { attempts: 60 });
+    // Every 250 ms for a minute: a ledger closes about every 5 s.
+    const done = await this.c.server.pollTransaction(sent.hash, { attempts: 240, sleepStrategy: () => 250 });
     if (done.status !== rpc.Api.GetTransactionStatus.SUCCESS) throw new Error(`submit_checkpoint ${p.seq}: ${done.status} (${sent.hash})`);
+    this.account = account;
     return {
       hash: sent.hash,
       ledger: done.ledger,
