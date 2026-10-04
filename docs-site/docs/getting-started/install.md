@@ -12,10 +12,11 @@ On x86_64 or arm64 Linux and arm64 macOS:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/wmendes/caravel/main/scripts/install.sh | bash
-export PATH="$HOME/.caravel/bin:$PATH"
 ```
 
 The script downloads the release for your machine and checks it against the release's `SHA256SUMS`. It also brings the pinned Stellar CLI (28.1.0, checked against GitHub's published digest) unless the `stellar` on your PATH is already that version. `--version vX.Y.Z` picks a release; `--no-stellar-cli` skips the CLI.
+
+**Your PATH.** Like rustup, the installer writes `~/.caravel/env` and sources it from your shell's startup files (`~/.profile`, `~/.bashrc` and `~/.bash_profile` when they exist, zsh's `.zshenv`, and fish's `conf.d`), so new terminals find `caravel`. In the terminal you installed from, run `. ~/.caravel/env` once. `--no-modify-path` (or `CARAVEL_NO_MODIFY_PATH=1`) leaves those files alone and prints the line to add yourself. Running the installer again adds nothing twice.
 
 ## From a clone
 
@@ -24,7 +25,6 @@ You need Rust 1.93 with the `wasm32v1-none` target (both pinned in `rust-toolcha
 ```bash
 git clone https://github.com/wmendes/caravel && cd caravel
 ./scripts/install.sh
-export PATH="$HOME/.caravel/bin:$PATH"
 ```
 
 This builds the CLI, every template's node, the contracts and the relayer, and installs them as one release.

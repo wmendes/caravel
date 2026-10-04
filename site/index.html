@@ -599,7 +599,7 @@ footer p { font-size: .875rem; color: var(--muted); }
         </div>
         <pre class="lanefile" aria-label="From a local lane to your servers"><span class="c"># install the latest release, into ~/.caravel</span>
 curl -fsSL https://caravel-tau.vercel.app/install.sh | bash
-export PATH="$HOME/.caravel/bin:$PATH"
+<span class="c"># adds ~/.caravel/bin to your PATH; new terminals find caravel</span>
 
 <span class="c"># a lane on this machine</span>
 caravel <span class="h">init</span> payments my-lane &amp;&amp; cd my-lane

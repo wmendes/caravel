@@ -95,8 +95,9 @@ This brings up a Payments lane on your machine, against a local Stellar network,
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/wmendes/caravel/main/scripts/install.sh | bash
-export PATH="$HOME/.caravel/bin:$PATH"
 ```
+
+The installer puts `~/.caravel/bin` on your PATH for new terminals; to use `caravel` in the one you installed from, run `. ~/.caravel/env`. Pass `--no-modify-path` to manage PATH yourself.
 
 **Run a lane and use it:**
 
@@ -144,7 +145,6 @@ With Rust 1.93 and the `wasm32v1-none` target (both pinned in `rust-toolchain.to
 
 ```sh
 ./scripts/install.sh
-export PATH="$HOME/.caravel/bin:$PATH"
 ```
 
 To run your own changes in containers, build a Linux release and its images from the clone. `scripts/build-linux-release.sh` compiles inside the pinned Rust image, so it works on a Mac too:

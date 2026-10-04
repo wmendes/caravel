@@ -317,7 +317,7 @@ jobs:
       # The quickstart's install path, from the builds above.
       - name: Install it
         run: |
-          ./scripts/install.sh --skip-build --prefix "$RUNNER_TEMP/caravel"
+          ./scripts/install.sh --skip-build --no-modify-path --prefix "$RUNNER_TEMP/caravel"
           "$RUNNER_TEMP/caravel/bin/caravel" version
           # The runner's keystore has none of the lane's identities, so only the genesis is asserted.
           "$RUNNER_TEMP/caravel/bin/caravel" validate --json -f lanes/payments/config/lane.caravel-payments.local.toml > validate.json || true

@@ -116,7 +116,7 @@ jobs:
       - name: Install from the archive
         shell: bash
         run: |
-          ./scripts/install.sh --archive "dist/$NAME.tar.gz" --prefix "$RUNNER_TEMP/caravel"
+          ./scripts/install.sh --archive "dist/$NAME.tar.gz" --no-modify-path --prefix "$RUNNER_TEMP/caravel"
           "$RUNNER_TEMP/caravel/bin/caravel" version
       - uses: actions/upload-artifact@v4
         with:
