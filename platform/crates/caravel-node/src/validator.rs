@@ -199,8 +199,12 @@ pub async fn start<A: NodeApp>(
     if let Some(dir) = cfg.db.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let store = Store::open(&cfg.db, &cfg.lane.lane_id(), &config_hash, &genesis_state)
+    let mut store = Store::open(&cfg.db, &cfg.lane.lane_id(), &config_hash, &genesis_state)
         .context("opening the store")?;
+    // A validator fetches blocks again after a power loss; what it signed
+    // is always on disk first (F-07).
+    store.set_head_every(crate::head_every(cfg.lane.node.block_time_ms));
+    store.set_block_durability(caravel_runtime::store::Durability::Normal)?;
     let follower = Follower::open(
         app.clone(),
         Executor::Wasm(exec),

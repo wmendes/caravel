@@ -148,7 +148,8 @@ impl<A: LaneApp> Follower<A> {
         ids: HeaderIds,
         key: SigningKey,
     ) -> Result<Self, CoreError> {
-        let (height, state_bytes) = store.head()?;
+        let mut store = store;
+        let (height, state_bytes) = crate::sequencer::resume(&mut store, &app, &exec)?;
         let state = app
             .decode_state(&state_bytes)
             .ok_or(CoreError::Corrupt("head state"))?;

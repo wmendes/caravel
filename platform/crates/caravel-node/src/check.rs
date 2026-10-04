@@ -39,15 +39,19 @@ pub fn check_store<A: NodeApp>(
     let config_hash = sha256(&config_bytes);
     let store = Store::open(db, &lane.lane_id(), &config_hash, &genesis_state)
         .context("opening the store")?;
+    // The persisted head may be behind the last block (F-07): every block to
+    // the tip is re-executed, and the head checked on the way.
     let (head, head_state) = store.head()?;
+    let tip = store.tip()?;
+    let mut head_ok = head == 0 && head_state == genesis_state;
     let mut state = genesis_state;
     let mut batch: Vec<BlockRecordV1> = Vec::new();
     let mut prev_header = [0u8; 32];
     let mut checkpoints = 0;
     let mut cpu_max = 0;
     let mut height = 0;
-    while height < head {
-        let to = (height + 500).min(head);
+    while height < tip {
+        let to = (height + 500).min(tip);
         for (record, _) in store.blocks(height + 1, to)? {
             height += 1;
             let (out, metering) = exec
@@ -58,6 +62,9 @@ pub fn check_store<A: NodeApp>(
                 bail!("block {height}: state_hash_after differs from re-execution");
             }
             state = out.state;
+            if height == head {
+                head_ok = state == head_state;
+            }
             batch.push(record.clone());
             if BlockInputV1::decode(&record.input)
                 .map_err(|_| anyhow::anyhow!("block {height} does not decode"))?
@@ -81,7 +88,7 @@ pub fn check_store<A: NodeApp>(
             }
         }
     }
-    if state != head_state {
+    if !head_ok {
         bail!("the stored head state differs from re-execution");
     }
     Ok(CheckReport {

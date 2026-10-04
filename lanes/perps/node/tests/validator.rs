@@ -200,8 +200,13 @@ fn a_restarted_validator_resumes_and_keeps_its_signatures() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("validator.sqlite");
     let (state, config_hash) = genesis();
+    // As a validator node opens it (F-07): a lazy head, blocks not synced.
     let open = || {
-        let store = Store::open(&path, &config().lane_id, &config_hash, &state).unwrap();
+        let mut store = Store::open(&path, &config().lane_id, &config_hash, &state).unwrap();
+        store.set_head_every(4);
+        store
+            .set_block_durability(caravel_runtime::store::Durability::Normal)
+            .unwrap();
         Follower::open(
             PerpsApp,
             Executor::Native,

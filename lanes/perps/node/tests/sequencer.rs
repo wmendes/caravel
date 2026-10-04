@@ -136,6 +136,58 @@ fn restart_resumes_from_sqlite() {
         .any(|a| a.key == pk(seeds::C)));
 }
 
+/// A lazy head (F-07): stopped anywhere, the sequencer resumes at the same
+/// height and state by re-executing the blocks after its head, writes the
+/// head again, and goes on sealing the same checkpoints.
+#[test]
+fn a_lazy_head_resumes_wherever_the_node_stopped() {
+    let (state, config_hash) = genesis();
+    let mut lagged = 0;
+    for stop in [1, 6, 7, 9, 10, 11, 13, 17] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("lane.sqlite");
+        let open = || {
+            let mut s = Store::open(&path, &config().lane_id, &config_hash, &state).unwrap();
+            s.set_head_every(4);
+            s
+        };
+        let mut t = T::with(Executor::Native, open());
+        busy_lane(&mut t, stop);
+        let (hash, height, now) = (t.core.state_hash(), t.core.height(), t.now);
+        let head = t.core.store().head().unwrap().0;
+        assert_eq!(t.core.store().tip().unwrap(), height);
+        assert!(
+            head <= height && height - head < 4,
+            "stop {stop}: head {head}"
+        );
+        lagged += usize::from(head < height);
+        drop(t);
+
+        let mut t = T::with(Executor::Native, open());
+        assert_eq!(
+            (t.core.state_hash(), t.core.height()),
+            (hash, height),
+            "stop {stop}"
+        );
+        assert_eq!(
+            t.core.store().head().unwrap().0,
+            height,
+            "the head is written again"
+        );
+        t.now = now;
+        while t.core.height() < 20 {
+            t.block();
+        }
+        let (replayed, headers) = replay(t.core.store(), 20);
+        assert_eq!(replayed, t.core.state_hash(), "stop {stop}");
+        assert_eq!(
+            headers[1].encode().to_vec(),
+            t.core.store().checkpoint(2).unwrap().unwrap().header
+        );
+    }
+    assert!(lagged >= 4, "most stops left the head behind ({lagged})");
+}
+
 #[test]
 fn oracle_updates_need_a_configured_key_and_a_valid_signature() {
     let mut t = T::native();

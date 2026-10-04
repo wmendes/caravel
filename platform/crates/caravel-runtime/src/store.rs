@@ -156,6 +156,22 @@ pub struct Pruned {
 
 pub struct Store {
     conn: Connection,
+    /// The head (the full state) is written every this many blocks and at
+    /// every `CHECKPOINT_END` (F-07); 1 writes it with every block.
+    head_every: u64,
+    /// Block commits wait for the disk (`synchronous=FULL`) unless set to
+    /// [`Durability::Normal`] (F-07).
+    blocks: Durability,
+}
+
+/// How a block commit reaches the disk (F-07). In WAL mode `Normal` survives
+/// a crash of the node but may lose the last blocks to a power loss: right
+/// for a validator, which fetches them again, and never for the sequencer,
+/// which must not forget a block it has published.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Durability {
+    Full,
+    Normal,
 }
 
 fn i(v: u64) -> i64 {
@@ -213,7 +229,11 @@ impl Store {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch(SCHEMA)?;
         migrate(&conn)?;
-        let mut store = Self { conn };
+        let mut store = Self {
+            conn,
+            head_every: 1,
+            blocks: Durability::Full,
+        };
         match store.meta("lane_id")? {
             Some(stored) => {
                 if stored != lane_id.as_slice()
@@ -261,7 +281,32 @@ impl Store {
 
     // --- Blocks and state -------------------------------------------------------
 
-    /// `(height, state bytes)` after the last stored block.
+    /// Writes the head every `blocks` blocks (and at every checkpoint end)
+    /// instead of with every block (F-07). The blocks after it are re-executed
+    /// when the store is opened again.
+    pub fn set_head_every(&mut self, blocks: u64) {
+        self.head_every = blocks.max(1);
+    }
+
+    /// How block commits reach the disk (F-07). [`Store::record_signed`]
+    /// always waits for the disk.
+    pub fn set_block_durability(&mut self, d: Durability) -> Result<()> {
+        self.blocks = d;
+        self.sync(d)
+    }
+
+    fn sync(&self, d: Durability) -> Result<()> {
+        let mode = match d {
+            Durability::Full => "FULL",
+            Durability::Normal => "NORMAL",
+        };
+        self.conn.pragma_update(None, "synchronous", mode)?;
+        Ok(())
+    }
+
+    /// `(height, state bytes)` of the persisted head: the state after the
+    /// last stored block, or (F-07) after an earlier one, at most
+    /// `head_every` blocks back. [`Store::tip`] is the last stored block.
     pub fn head(&self) -> Result<(u64, Vec<u8>)> {
         let (h, s): (i64, Vec<u8>) =
             self.conn
@@ -271,9 +316,27 @@ impl Store {
         Ok((u(h), s))
     }
 
+    /// The height of the last stored block (0 before any).
+    pub fn tip(&self) -> Result<u64> {
+        let h: i64 = self
+            .conn
+            .prepare_cached("SELECT COALESCE(MAX(height), 0) FROM blocks")?
+            .query_row([], |r| r.get(0))?;
+        Ok(u(h))
+    }
+
+    /// Writes the head: `state` is the state after block `height`.
+    pub fn persist_head(&mut self, height: u64, state: &[u8]) -> Result<()> {
+        self.conn
+            .prepare_cached("UPDATE head SET height = ?1, state = ?2 WHERE id = 0")?
+            .execute(params![i(height), state])?;
+        Ok(())
+    }
+
     /// Stores block `height` with its receipts and the state it produced, in
     /// one transaction. `checkpoint_seq` is set for a `CHECKPOINT_END` block,
-    /// whose output state becomes that checkpoint's snapshot.
+    /// whose output state becomes that checkpoint's snapshot. The head is
+    /// written at a checkpoint end and every `head_every` blocks (F-07).
     pub fn commit_block(
         &mut self,
         height: u64,
@@ -284,18 +347,20 @@ impl Store {
     ) -> Result<()> {
         // Cached statements: these run on every block (F-06).
         let tx = self.conn.transaction()?;
-        let head: i64 = tx
-            .prepare_cached("SELECT height FROM head WHERE id = 0")?
+        let tip: i64 = tx
+            .prepare_cached("SELECT COALESCE(MAX(height), 0) FROM blocks")?
             .query_row([], |r| r.get(0))?;
-        if u(head) + 1 != height {
-            return Err(StoreError::Conflict("block height is not head + 1"));
+        if u(tip) + 1 != height {
+            return Err(StoreError::Conflict("block height is not tip + 1"));
         }
         tx.prepare_cached(
             "INSERT INTO blocks (height, input, state_hash_after, receipts) VALUES (?1, ?2, ?3, ?4)",
         )?
         .execute(params![i(height), record.input, record.state_hash_after.as_slice(), receipts])?;
-        tx.prepare_cached("UPDATE head SET height = ?1, state = ?2 WHERE id = 0")?
-            .execute(params![i(height), state])?;
+        if checkpoint_seq.is_some() || height.is_multiple_of(self.head_every) {
+            tx.prepare_cached("UPDATE head SET height = ?1, state = ?2 WHERE id = 0")?
+                .execute(params![i(height), state])?;
+        }
         if let Some(seq) = checkpoint_seq {
             tx.prepare_cached("INSERT INTO snapshots (seq, height, state) VALUES (?1, ?2, ?3)")?
                 .execute(params![i(seq), i(height), state])?;
@@ -725,10 +790,19 @@ impl Store {
                 "a different header was already signed for this seq",
             )),
             None => {
-                self.conn.execute(
+                // The equivocation guard: on disk before the signature
+                // leaves, whatever the blocks' durability (F-07).
+                if self.blocks != Durability::Full {
+                    self.sync(Durability::Full)?;
+                }
+                let r = self.conn.execute(
                     "INSERT INTO signed (seq, header_hash) VALUES (?1, ?2)",
                     params![i(seq), header_hash.as_slice()],
-                )?;
+                );
+                if self.blocks != Durability::Full {
+                    self.sync(self.blocks)?;
+                }
+                r?;
                 Ok(())
             }
         }

@@ -191,6 +191,8 @@ pub async fn start<A: NodeApp>(
     }
     let mut store = Store::open(&cfg.db, &lane_id, &config_hash, &genesis_state)
         .context("opening the store")?;
+    // Blocks stay synchronous: the sequencer never forgets a block it served.
+    store.set_head_every(crate::head_every(cfg.lane.node.block_time_ms));
     // After a rotation (`[signers] epoch` raised), checkpoints signed by the
     // old set and not accepted yet are signed again by the new one: an admin
     // rotation makes older epochs invalid at once (spec §13.2).
