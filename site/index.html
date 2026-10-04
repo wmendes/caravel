@@ -127,7 +127,6 @@ code { font-family: var(--mono); font-size: .9em; }
 .like .swap > span.snap { transition: none; }
 .hero .lede { margin-top: 20px; }
 .hero .lede b { color: var(--ink); }
-.hero-note a { color: var(--ink); text-underline-offset: 3px; margin-left: 4px; }
 /* The example's lane file: the rules that make it that app, the line that sets each one */
 .rulecard { min-width: 0; }
 .rulecard .apps { margin: 0 0 10px; }
@@ -144,7 +143,6 @@ code { font-family: var(--mono); font-size: .9em; }
 .fstay { display: flex; gap: 10px; align-items: center; padding: 12px 20px; border-top: 1px solid var(--rule); background: var(--harbor-soft); font-size: .875rem; }
 @media (prefers-reduced-motion: reduce) { .like .swap > span, .file pre.rules { transition: none; } }
 .cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
-.hero-note { margin-top: 18px; font-size: .875rem; color: var(--muted); }
 .hero .live { margin-top: clamp(32px, 5vw, 56px); }
 
 /* The hero run: plan lists the steps, apply fills them, then the lane runs on the track below */
@@ -207,19 +205,6 @@ section.band { padding-block: clamp(48px, 6vw, 72px); border-top: 1px solid var(
 .app[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--lane); }
 @media (prefers-reduced-motion: reduce) { .app { transition: none; } }
 
-/* Why a lane: the shared network's rules next to a lane's own */
-.vs { width: 100%; border-collapse: collapse; margin-top: 36px; font-size: 1rem; }
-.vs th, .vs td { text-align: left; padding: 16px 20px 16px 0; border-bottom: 1px solid var(--rule); vertical-align: baseline; }
-.vs thead th { font-size: .8125rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding-top: 0; }
-.vs thead th.lane-t { color: var(--lane); }
-.vs tbody th { font-weight: 700; width: 22%; }
-.vs td:nth-child(2) { color: var(--muted); width: 33%; }
-.vs .n { display: block; font-size: .8125rem; color: var(--muted); margin-top: 2px; }
-.vs tr.keep th, .vs tr.keep td { color: var(--harbor-ink); }
-.vs tr.keep td b { color: var(--harbor-ink); }
-.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-@media (max-width: 640px) { .vs thead { display: none; } .vs tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px 16px; padding: 14px 0; border-bottom: 1px solid var(--rule); } .vs th, .vs td { border: 0; padding: 0; width: auto !important; } .vs tbody th { grid-column: 1 / -1; } .vs td:nth-child(2)::before { content: "On Stellar: "; } .vs td:nth-child(3)::before { content: "On your lane: "; color: var(--lane); } }
-
 /* How it works: three steps beside the replayed run */
 .how { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1fr); gap: clamp(32px, 5vw, 64px); align-items: start; }
 @media (max-width: 960px) { .how { grid-template-columns: minmax(0, 1fr); } }
@@ -230,30 +215,6 @@ section.band { padding-block: clamp(48px, 6vw, 72px); border-top: 1px solid var(
 .steps b { font-size: 1.1875rem; }
 .steps p { color: var(--muted); max-width: 52ch; }
 .steps code { color: var(--ink); }
-
-/* Safety: the four ways out, then what they don't cover */
-.guar { list-style: none; padding: 0; margin-top: 36px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 48px; }
-@media (max-width: 760px) { .guar { grid-template-columns: minmax(0, 1fr); } }
-.guar li { border-top: 2px solid var(--harbor); padding-top: 14px; display: grid; gap: 6px; }
-.guar b { font-size: 1.1875rem; }
-.guar p { color: var(--muted); max-width: 56ch; }
-.caveat { margin-top: 32px; padding: 16px 20px; border: 1px solid var(--rule); border-radius: 12px; color: var(--muted); max-width: 90ch; }
-.caveat b { color: var(--ink); }
-
-/* Where it stands */
-.stand { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, .9fr); gap: clamp(28px, 4vw, 56px); margin-top: 36px; align-items: start; }
-@media (max-width: 960px) { .stand { grid-template-columns: minmax(0, 1fr); } }
-.stand h3 { font-size: 1.1875rem; padding-bottom: 12px; border-bottom: 2px solid var(--rule); }
-.meas { margin: 0; }
-.meas div { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--rule); }
-.meas dt { color: var(--muted); font-size: .9375rem; }
-.meas dd { margin: 0; font-weight: 700; font-size: 1.25rem; white-space: nowrap; }
-.stand .srcs { margin-top: 12px; }
-.stand .srcs a { color: var(--muted); }
-.notyet { list-style: none; padding: 0; }
-.notyet li { padding: 12px 0; border-bottom: 1px solid var(--rule); color: var(--muted); font-size: .9375rem; }
-.notyet b { color: var(--ink); }
-.open { margin-top: 12px; color: var(--muted); }
 
 /* Where it runs: three layers, the lane on top (coral, as everywhere on this page), then containers, then machines */
 .layers { list-style: none; padding: 0; margin: 36px 0 0; border-top: 1px solid var(--rule); }
@@ -371,10 +332,9 @@ footer p { font-size: .875rem; color: var(--muted); }
       </svg>
     </a>
     <nav class="nav" aria-label="Sections">
-      <a href="#why">Why a lane</a>
       <a href="#how">How it works</a>
-      <a href="#exit">Safety</a>
-      <a href="#status">Status</a>
+      <a href="#rules">Your rules</a>
+      <a href="#layers">Where it runs</a>
       <a href="https://caravel-docs.vercel.app" id="docs-link">Docs</a>
       <a class="btn btn-primary btn-sm" href="https://github.com/wmendes/caravel"><svg class="gh" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>GitHub</a>
     </nav>
@@ -393,7 +353,6 @@ footer p { font-size: .875rem; color: var(--muted); }
           <a class="btn btn-primary" href="#start">Run a lane in 5 minutes</a>
           <a class="btn btn-ghost" href="https://github.com/wmendes/caravel"><svg class="gh" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>View on GitHub</a>
         </div>
-        <p class="hero-note">MIT or Apache-2.0. Testnet only, not audited. <a href="https://35-224-76-64.sslip.io">Try the live exchange</a></p>
       </div>
 
       <div class="rulecard" id="who">
@@ -422,26 +381,6 @@ footer p { font-size: .875rem; color: var(--muted); }
     </div>
   </section>
 
-  <section class="band" id="why" aria-labelledby="why-h">
-    <div class="wrap">
-      <div class="head">
-        <h2 id="why-h">Stellar gives every app the same rules.<br>Yours can have its own.</h2>
-        <p class="lede">The shared network is right for most apps. Some need a different pace, a different fee, or a closed door, and still want their users' money on Stellar. That's what a lane is for.</p>
-      </div>
-      <table class="vs">
-        <thead><tr><th scope="col"><span class="sr">Rule</span></th><th scope="col">On Stellar</th><th scope="col" class="lane-t">On your lane</th></tr></thead>
-        <tbody>
-          <tr><th scope="row">Block time</th><td>A ledger about every 5 s</td><td>200 ms to 5 s, your choice <span class="n">lane #1 runs at 0.5 s</span></td></tr>
-          <tr><th scope="row">Fees</th><td>The network's fee on every transaction</td><td>Your fee per action, or none</td></tr>
-          <tr><th scope="row">Who can use it</th><td>Anyone</td><td>Anyone, or only an allowlist</td></tr>
-          <tr><th scope="row">Who signs</th><td>The network's validators</td><td>Your validators, at your threshold</td></tr>
-          <tr><th scope="row">Limits</th><td>The network's</td><td>Yours, per account and per block</td></tr>
-          <tr class="keep"><th scope="row">Your users' money</th><td>In their Stellar accounts</td><td><b>Still on Stellar</b>, in your lane's settlement contract, in the token you choose</td></tr>
-        </tbody>
-      </table>
-      <p class="srcs">Testnet ledgers closed every 5.0 s on average over a week of 2026 (<code>docs/SOURCES.md</code>). A lane needs no gas token of its own: it settles in a Stellar asset or any SEP-41 token.</p>
-    </div>
-  </section>
 
   <section class="band" id="how" aria-labelledby="how-h">
     <div class="wrap how">
@@ -522,21 +461,6 @@ footer p { font-size: .875rem; color: var(--muted); }
     </div>
   </section>
 
-  <section class="band" id="exit" aria-labelledby="exit-h">
-    <div class="wrap">
-      <div class="head">
-        <h2 id="exit-h">Your users can always leave.</h2>
-        <p class="lede">A lane runs off Stellar, so its rules can be yours. What it can't do is keep anyone's money.</p>
-      </div>
-      <ol class="guar">
-        <li><b>Checkpoints</b><p>The lane posts a checkpoint with its block data to Stellar every minute, or as often as you set. The settlement contract accepts it only with your validators' threshold signature.</p></li>
-        <li><b>Withdrawals</b><p>A withdrawal is a Merkle proof against an accepted checkpoint, claimed on Stellar.</p></li>
-        <li><b>Forced exits</b><p>If the lane stops checkpointing, or ignores a deposit or forced withdrawal sent through Stellar, anyone can freeze it. Users then take their last checkpointed balance back on Stellar.</p></li>
-        <li><b>Replay</b><p>Anyone can rebuild the lane from Stellar data alone and check every state hash.</p></li>
-      </ol>
-      <p class="caveat"><b>What this doesn't prevent:</b> if a threshold of validators collude with the sequencer, they can sign a wrong state. Replay shows it; it can't stop it. Choose validators you'd trust with that.</p>
-    </div>
-  </section>
 
   <section class="band" id="layers" aria-labelledby="layers-h">
     <div class="wrap">
@@ -552,40 +476,6 @@ footer p { font-size: .875rem; color: var(--muted); }
     </div>
   </section>
 
-  <section class="band" id="status" aria-labelledby="status-h">
-    <div class="wrap">
-      <div class="head">
-        <h2 id="status-h">Where it stands.</h2>
-        <p class="lede">Real runs, the edges that aren't done, and everything in the open.</p>
-      </div>
-      <div class="stand">
-        <div>
-          <h3>Measured on lane #1</h3>
-          <dl class="meas">
-            <div><dt>Soft confirmation, p50</dt><dd class="num">648 ms</dd></div>
-            <div><dt>Settled on Stellar, p50</dt><dd class="num">12.4 s</dd></div>
-            <div><dt>Stellar fees per 1,000 lane transactions</dt><dd class="num">0.842 XLM</dd></div>
-            <div><dt>A Payments lane's whole life on testnet, from apply to replay</dt><dd class="num">215 s</dd></div>
-          </dl>
-          <p class="srcs">45 tx/s for 5 minutes at 1 s blocks, 2026-09-29; the Payments run 2026-09-30 (<a href="https://github.com/wmendes/caravel/blob/main/docs/RESULTS.md">docs/RESULTS.md</a>).</p>
-        </div>
-        <div>
-          <h3>Not yet</h3>
-          <ul class="notyet">
-            <li><b>Testnet only.</b> The tool refuses mainnet.</li>
-            <li><b>Not audited.</b> There's a security review, not an audit.</li>
-            <li><b>One operator for lane #1.</b> Its three validators run on one machine, run by the Caravel team.</li>
-            <li><b>Admin powers on testnet.</b> A lane's admin can still upgrade its contract and rotate its validators.</li>
-          </ul>
-        </div>
-        <div>
-          <h3>Open source</h3>
-          <p class="open">MIT or Apache-2.0, built in the open: the spec with every decision, the measured results, the security review and the runbook for the live lane.</p>
-          <p class="doclinks"><a href="https://github.com/wmendes/caravel/blob/main/docs/CARAVEL_SPEC.md">Spec</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/SECURITY.md">Security review</a> · <a href="https://github.com/wmendes/caravel/blob/main/docs/RUNBOOK.md">Runbook</a> · <a href="https://github.com/wmendes/caravel/blob/main/CONTRIBUTING.md">Contributing</a></p>
-        </div>
-      </div>
-    </div>
-  </section>
 
   <section class="band" id="start" aria-labelledby="start-h">
     <div class="wrap">
@@ -599,7 +489,7 @@ footer p { font-size: .875rem; color: var(--muted); }
         </div>
         <pre class="lanefile" aria-label="From a local lane to your servers"><span class="c"># install the latest release, into ~/.caravel</span>
 curl -fsSL https://caravel-tau.vercel.app/install.sh | bash
-<span class="c"># adds ~/.caravel/bin to your PATH; new terminals find caravel</span>
+<span class="c"># it adds caravel to your PATH</span>
 
 <span class="c"># a lane on this machine</span>
 caravel <span class="h">init</span> payments my-lane &amp;&amp; cd my-lane
@@ -620,7 +510,7 @@ caravel status --env testnet</pre>
   <div class="wrap">
     <div>
       <p><b style="color:var(--ink)">Caravel</b> · Appchains as code, settled on Stellar.</p>
-      <p>MIT or Apache-2.0 · Built in Lisbon</p>
+      <p>MIT or Apache-2.0 · Testnet only, not audited · Built in Lisbon</p>
     </div>
     <div class="social"><a href="https://github.com/wmendes/caravel">GitHub</a><a href="https://github.com/wmendes/caravel/blob/main/docs/CARAVEL_SPEC.md">Specification</a><a href="https://35-224-76-64.sslip.io">Caravel Perps on testnet</a></div>
   </div>

@@ -41,7 +41,7 @@ Precise, plain, honest. A harbor chart, not a rocket launch. It shows real runs 
 1. **Who it's for, in the first screen.** The hero names the team and the job before it explains anything.
 2. **Rules are the product.** Every example is a rule in the lane file, with the line that sets it.
 3. **Show the run, not the claim.** Real outputs, real numbers, a live lane; each with its date or source.
-4. **Honest about the edges.** What isn't done (audit, mainnet, decentralised validators) is on the page, not in a footnote.
+4. **Honest, without the clutter.** The landing page stays short: it never claims more than is true, and says "testnet only, not audited" once, in the footer. The full list of edges (audit, mainnet, one operator for lane #1) lives in the README and the docs.
 5. **One next step.** Run a lane in five minutes; everything else is secondary.
 
 ## Accessibility & Inclusion

@@ -14,11 +14,11 @@ Caravel runs appchains that settle on Stellar. We call them **lanes**. A lane is
 
 ## Who it's for
 
-On Stellar, every app shares the network's fees and rules. A lane sets its own, one line each:
+Stellar apps that need their own rules. On Stellar, every app shares the network's block time, fees, access and validators. A lane sets its own, one line each in its lane file, and its users' money stays on Stellar. Speed is one of those rules, not the only one:
 
 | An app that is... | ...might set |
 |---|---|
-| A trading venue (the Perps template) | zero maker fees, its own leverage limits, its own price feed, settlement in Circle's USDC |
+| A trading venue (the Perps template) | a block every half second, zero maker fees, its own leverage limits, its own price feed, settlement in Circle's USDC |
 | A payment network (the Payments template) | a flat fee per transfer, members only, its own validators, its own settlement token |
 | A game economy (your engine, on the app SDK) | 200 ms blocks, players only, a cap on moves per block, an in-game token |
 | An agent marketplace (Payments) | no fee between agents, session keys for each agent, a cap on accounts |
