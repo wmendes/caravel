@@ -51,7 +51,8 @@ async function loop(name: string, everyMs: number, step: () => Promise<void>, fa
         log("error", `${name}: stopped`, { error: String(e) });
         return;
       }
-      log("warn", `${name}: ${String(e)}`);
+      const cause = e instanceof Error && e.cause !== undefined ? ` (${String(e.cause)})` : "";
+      log("warn", `${name}: ${String(e)}${cause}`);
       backoff = Math.min(backoff * 2, 30_000);
     }
     await sleep(backoff);

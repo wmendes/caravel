@@ -44,7 +44,15 @@ export class HttpSequencer implements SequencerApi {
     const headers = new Headers(init.headers);
     if (internal) headers.set("authorization", `Bearer ${this.token}`);
     if (init.body !== undefined) headers.set("content-type", "application/json");
-    return this.fetchImpl(`${this.baseUrl.replace(/\/$/, "")}${path}`, { ...init, headers, signal: AbortSignal.timeout(10_000 + heldMs) });
+    const send = () => this.fetchImpl(`${this.baseUrl.replace(/\/$/, "")}${path}`, { ...init, headers, signal: AbortSignal.timeout(10_000 + heldMs) });
+    try {
+      return await send();
+    } catch (e) {
+      // A GET is safe to send again: a pooled connection the sequencer
+      // closed fails as "fetch failed" before any answer (F-14).
+      if ((init.method ?? "GET") !== "GET" || !(e instanceof TypeError)) throw e;
+      return send();
+    }
   }
 
   private async json<T>(r: Response, what: string): Promise<T> {
