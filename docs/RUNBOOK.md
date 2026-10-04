@@ -184,7 +184,7 @@ tofu -chdir=infra/opentofu/envs/caravel-testnet output -raw caravel_vars > hosts
 
 The lane file reads the host from those vars (`host_address`, `host_project`, `host_zone`, `public_url`); their defaults are this VM, so `--var-file hosts.vars.toml` is only needed when the machine changes.
 
-Since 2026-10-04 (D-06, DEC-115) the lane runs as containers (`runtime = "docker"` in the lane file): the sequencer, three validators, the relayer and Caddy (the `web` service, which holds the TLS certificate in `/opt/caravel/caddy`), from the release's images on `ghcr.io/wmendes`. Docker came from the module's `startup.sh`. The files are owned by uid 10001, the containers' user. The old systemd units and the host's Caddy are still installed but disabled, for a rollback (§3.4). `provision.sh` set the VM up before that and is no longer needed.
+Since 2026-10-04 (D-06, DEC-115) the lane runs as containers (`runtime = "docker"` in the lane file): the sequencer, three validators, the relayer and Caddy (the `web` service, which holds the TLS certificate in `/opt/caravel/caddy`), from the release's images on `ghcr.io/wmendes`. Docker came from the module's `startup.sh`. The files are owned by uid 10001, the containers' user. The old systemd units, the host's Caddy and Node.js were removed on 2026-10-04 (D-09); §3.4 says how to go back. `provision.sh` set the VM up before that; it's now only for a rollback.
 
 Deploy or upgrade a release with the deploy tool (M0.5 P-16, DEC-070). Lane #1's deployment is the `[env.testnet]` table in `lanes/perps/config/lane.caravel-perps.testnet.toml`:
 
@@ -220,7 +220,7 @@ The project has a monthly budget of R$100 with alerts at 50%, 90% and 100%. At 1
 
 ### 3.4 Back to systemd (rollback of D-06)
 
-On the VM: `sudo docker compose -f /opt/caravel/config/compose.yml down`, `sudo chown -R caravel:caravel /opt/caravel/config /opt/caravel/data /opt/caravel/keys /opt/caravel/run`, `sudo systemctl enable --now caddy`. Then remove `runtime = "docker"` from the lane file and `caravel apply` a release, which starts the systemd units again. The stores are the same files either way.
+Since D-09 the VM has only Docker: the systemd units, the host's Caddy and Node.js are gone. To go back, first set the host up again with `lanes/perps/deploy/testnet/provision.sh` (Caddy, Node.js, the `caravel` user), then on the VM: `sudo docker compose -f /opt/caravel/config/compose.yml down`, `sudo chown -R caravel:caravel /opt/caravel/config /opt/caravel/data /opt/caravel/keys /opt/caravel/run`, and copy Caddy's certificate back from `/opt/caravel/caddy/data/caddy` to `/var/lib/caddy/.local/share/caddy`. Then remove `runtime = "docker"` from the lane file and `caravel apply` a release: it writes the units and the Caddyfile and starts them. The stores are the same files either way.
 
 ## 4. Rotate keys
 
