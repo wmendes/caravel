@@ -56,6 +56,9 @@ cargo build --release -p caravel-cli -p caravel-payments-node && ./target/releas
 ./scripts/e2e-local.sh                  # the whole lifecycle with the caravel CLI alone, on a local network (DEC-068, DEC-086); E2E_TEMPLATE=payments, E2E_NETWORK=testnet
 ./scripts/check-e2e.sh                  # the e2e calls no stellar/curl/node -e/kill/sleep outside its cleanup (DEC-086)
 ./scripts/build-images.sh <release-dir> [--push --registry ghcr.io/<owner>]   # the release's container images and its IMAGES file (DEC-111); arch=dir pairs for multi-arch
+E2E_RUNTIME=docker E2E_RELEASE_DIR=<Linux release with IMAGES> ./scripts/e2e-local.sh   # the e2e in containers (DEC-113); Linux builds the release and images itself
+tofu -chdir=infra/opentofu/envs/caravel-testnet init && tofu -chdir=infra/opentofu/envs/caravel-testnet plan   # lane #1's machines (DEC-114); OpenTofu 1.13.1 from versions.json; never apply without the human
+tofu -chdir=infra/opentofu/envs/caravel-testnet output -raw caravel_vars > hosts.vars.toml   # the host for caravel --var-file
 ./scripts/check-quickstart.sh           # install from the checkout, then the README quickstart as written (SKIP_BUILD=1 reuses builds)
 cargo run --release -p caravel-payments-node -- genesis --config lanes/payments/config/lane.caravel-payments.local.toml   # any template's genesis hashes
 TPS=20 DURATION=600 ./scripts/measure-testnet.sh   # §19.6 numbers on the live testnet lane (docs/RESULTS.md)
@@ -90,7 +93,8 @@ M0.5 splits the repo into the platform (Caravel) and its lanes (Caravel Perps fi
   - `test-vectors/` (the platform formats' golden vectors).
 - `lanes/perps/` (Caravel Perps, lane #1): `engine/` (frozen, above), `node/` (caravel-perps-node, the lane #1 binary: `PerpsApp` and its `NodeApp`, the perps lane file, views, `tx`, `loadgen`, the golden trace and fixture store, the sequencer/validator/parity tests, format compatibility tests, `bench_full_caps`), `config/` (lane TOML files and local node configs), `deploy/testnet/` (the VM), `relayer-feeds/` (the oracle feed module the relayer loads), `web/` (the trading app).
 - `lanes/payments/` (the Payments template, on the app SDK, DEC-064): `app/` (caravel-payments, no_std), `contracts/payments-engine`, `node/` (caravel-payments-node: `PaymentsApp`, the `[payments]` lane file, `tx`, scenarios, parity, API and vector tests), `config/` (the local lane file), `test-vectors/`.
-- `scripts/`: shared build, check, deploy and e2e scripts; `infra/gcp/`: the billing cap.
+- `scripts/`: shared build, check, deploy and e2e scripts; `infra/gcp/`: the billing cap's function (and its first, gcloud setup).
+- `infra/opentofu/`: machines as code (M0.8, DEC-114): `modules/caravel-host-gcp` (VM, address, firewall, Docker startup script), `modules/billing-cap`, `envs/caravel-testnet` (lane #1's project, GCS state). The only place the IaC tool's name may appear (its syntax needs it); its prose still doesn't use it.
 - `docker/`: the container images a release ships (node per template, relayer, web), built from the assembled release, base images pinned by digest (M0.8, DEC-111).
 - `site/`: the landing page (Vercel project `caravel`, https://caravel-tau.vercel.app).
 - `docs-site/`: the docs (Docusaurus, its own Vercel project, DEC-100). Users' docs live here: the lane-file reference in `docs/reference/lane-file/`, the CLI reference generated from `caravel help` (never edit it by hand). `docs/` in the repo root stays the internal record (spec, sources, results, lane #1's runbook).

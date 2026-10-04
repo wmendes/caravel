@@ -1,0 +1,10 @@
+# Provider plugins and local state: never in git. The lock file is.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+# What `tofu output -raw caravel_vars` writes for caravel --var-file.
+hosts.vars.toml
+# Modules take their providers from the root that calls them.
+modules/*/.terraform.lock.hcl

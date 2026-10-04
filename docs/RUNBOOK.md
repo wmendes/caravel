@@ -174,14 +174,24 @@ WASM_DIR=/tmp/wasm ./scripts/deploy-testnet.sh
 
 One e2-small VM (`caravel-1`, `us-central1-a`, project `caravel-testnet`) runs everything behind Caddy. The only public listener is HTTPS on the static IP's `sslip.io` name. SSH goes through IAP only.
 
-First time:
+The machine is described as code in `infra/opentofu/envs/caravel-testnet` (DEC-114): the VM, its address, both firewall rules and the budget cap (§3.3). State lives in the `caravel-testnet-tofu-state` bucket. Never apply without reading the plan, and never without the human's OK.
+
+```sh
+tofu -chdir=infra/opentofu/envs/caravel-testnet init
+tofu -chdir=infra/opentofu/envs/caravel-testnet plan            # expect "No changes"
+tofu -chdir=infra/opentofu/envs/caravel-testnet output -raw caravel_vars > hosts.vars.toml
+```
+
+The lane file reads the host from those vars (`host_address`, `host_project`, `host_zone`, `public_url`); their defaults are this VM, so `--var-file hosts.vars.toml` is only needed when the machine changes.
+
+Until lane #1 moves to containers (D-06), the VM was set up by hand with `provision.sh`, which installs Caddy and Node.js (checked against `SHASUMS256.txt`), and creates the unprivileged `caravel` user, `/opt/caravel` and 1 GB of swap:
 
 ```sh
 gcloud compute scp lanes/perps/deploy/testnet/provision.sh caravel-1:/tmp/ --zone us-central1-a --project caravel-testnet --tunnel-through-iap
 gcloud compute ssh caravel-1 --zone us-central1-a --project caravel-testnet --tunnel-through-iap --command 'sudo bash /tmp/provision.sh'
 ```
 
-`provision.sh` installs Caddy and Node.js (checked against `SHASUMS256.txt`), and creates the unprivileged `caravel` user, `/opt/caravel` and 1 GB of swap.
+A new VM from the module gets Docker instead, from its startup script (`infra/opentofu/modules/caravel-host-gcp/startup.sh`).
 
 Deploy or upgrade a release with the deploy tool (M0.5 P-16, DEC-070). Lane #1's deployment is the `[env.testnet]` table in `lanes/perps/config/lane.caravel-perps.testnet.toml`:
 
@@ -211,7 +221,7 @@ gcloud compute ssh caravel-1 --zone us-central1-a --project caravel-testnet --tu
 
 ### 3.3 Budget
 
-The project has a monthly budget of R$100 with alerts at 50%, 90% and 100%. At 100%, the `stop-billing` Cloud Run function detaches billing from the project, and Google then shuts down its paid resources, the VM included (`infra/gcp/setup-billing-cap.sh`). To bring it back, relink billing (`gcloud billing projects link caravel-testnet --billing-account <id>`) and start the VM. The expected cost is about US$12 a month for the VM and its disk and IP.
+The project has a monthly budget of R$100 with alerts at 50%, 90% and 100%. At 100%, the `stop-billing` Cloud Run function detaches billing from the project, and Google then shuts down its paid resources, the VM included. It was first made with `infra/gcp/setup-billing-cap.sh`; `infra/opentofu/modules/billing-cap` now describes it, with the function's code still in `infra/gcp/billing-cap`. `tofu output billing_cap_test` prints a harmless test message. To bring it back, relink billing (`gcloud billing projects link caravel-testnet --billing-account <id>`) and start the VM. The expected cost is about US$12 a month for the VM and its disk and IP.
 
 ## 4. Rotate keys
 
