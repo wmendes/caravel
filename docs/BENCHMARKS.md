@@ -127,7 +127,7 @@ The SDK's fee estimate is 7,699,033 stroops, almost all of it rent (7,682,542) f
 
 ## Sequencer soak: 1 hour at 50 tx/s (T-007)
 
-`DURATION=3600 TPS=50 ./scripts/soak-sequencer.sh` on 2026-09-29, same machine. The sequencer ran the local lane (DEC-037) with 1 s blocks through the engine Wasm of record. The load generator (`platform/crates/caravel-node/examples/loadgen.rs`) sent 24 accounts' orders, IOC takers, cancels and small withdrawals, plus signed oracle updates every 2 s. There was no Stellar and there were no validators, so checkpoints were sealed but not signed. Halfway through, the sequencer was stopped and started again.
+`DURATION=3600 TPS=50 ./scripts/soak-sequencer.sh` on 2026-09-29, same machine. The sequencer ran the local lane (DEC-037) with 1 s blocks through the engine Wasm of record. The load generator (`lanes/perps/node/examples/loadgen.rs`) sent 24 accounts' orders, IOC takers, cancels and small withdrawals, plus signed oracle updates every 2 s. There was no Stellar and there were no validators, so checkpoints were sealed but not signed. Halfway through, the sequencer was stopped and started again.
 
 | Measure | Result |
 |---|---:|

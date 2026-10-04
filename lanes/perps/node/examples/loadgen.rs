@@ -4,8 +4,10 @@
 //! Accounts are deterministic test keys (seed `[n; 32]`, funded through the
 //! internal inbox API, local lanes only) or, with `--key-dir`, the `S...` key
 //! files in a directory for accounts already funded through Stellar. Each
-//! account sends from its own task, one request at a time, so nonces stay in
-//! order and a remote API's round trip does not cap the rate. With
+//! account sends from its own task with up to `--inflight` requests open, so
+//! a remote API's round trip does not cap the rate; a nonce the sequencer
+//! refuses for room is sent again, so no gap holds the account's later
+//! transactions back. `--csv` writes every report as a row. With
 //! `--measure` it subscribes to each account's receipts on the WebSocket and
 //! reports soft latency (POST → receipt), hard latency (receipt → the
 //! checkpoint holding that block accepted on Stellar) and host CPU per block.
@@ -13,7 +15,8 @@
 //! cargo run --release -p caravel-perps-node --example loadgen -- \
 //!   --url http://127.0.0.1:8080 --lane lanes/perps/config/lane.caravel-perps.local.toml --tps 50 --duration-secs 3600
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -30,7 +33,8 @@ use caravel_types::tx::{LaneTxV1, PlaceOrder, Side, SigScheme, Tif, TxBody};
 use caravel_types::vectors::{key, pk};
 use clap::Parser;
 use ed25519_dalek::{Signer, SigningKey};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::stream::FuturesUnordered;
+use futures_util::{FutureExt, SinkExt, StreamExt};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
@@ -50,10 +54,17 @@ struct Args {
     #[arg(long, default_value_t = 60)]
     duration_secs: u64,
     #[arg(long, default_value_t = 24)]
-    accounts: u8,
-    /// Seed of the first account key.
+    accounts: u16,
+    /// Seed of the first account key (`[seed; 32]`; accounts past seed 255
+    /// get hashed seeds).
     #[arg(long, default_value_t = 0x80)]
     seed_base: u8,
+    /// Requests each account keeps open at once.
+    #[arg(long, default_value_t = 1)]
+    inflight: usize,
+    /// Also write every report as a CSV row to this file.
+    #[arg(long)]
+    csv: Option<PathBuf>,
     /// Use the S... key files in this directory as the accounts instead of seeds.
     #[arg(long)]
     key_dir: Option<PathBuf>,
@@ -337,21 +348,24 @@ impl Shared {
         }
     }
 
-    async fn send_one(&self, a: &mut Acct, rng: &mut Rng) -> Result<()> {
-        let body = self.body(rng);
+    /// `a`'s transaction with `nonce`, encoded, and its hash.
+    fn sign(&self, a: &Acct, nonce: u64, rng: &mut Rng) -> (Vec<u8>, String) {
         let mut tx = LaneTxV1 {
             lane_id: self.lane_id,
             account: a.pk,
             signer: a.pk,
-            nonce: a.nonce,
+            nonce,
             expiry_ms: now_ms() + 30_000,
             sig_scheme: SigScheme::RawEd25519,
-            body,
+            body: self.body(rng),
             signature: [0; 64],
         };
         let hash = sha256(&tx.tx_hash_preimage(&self.config_hash));
         tx.signature = a.key.sign(&hash).to_bytes();
-        let hash = hex(&hash);
+        (tx.encode(), hex(&hash))
+    }
+
+    async fn post(&self, bytes: Vec<u8>, hash: String) -> Sent {
         {
             // In the map before the POST: the receipt can beat the response.
             let mut st = self.stats();
@@ -362,35 +376,34 @@ impl Shared {
             .http
             .post(format!("{}/v1/tx", self.url))
             .header("content-type", "application/octet-stream")
-            .body(tx.encode())
+            .body(bytes)
             .send()
             .await;
         match r {
             Ok(r) if r.status().as_u16() == 202 => {
                 self.stats().queued += 1;
-                a.nonce += 1;
+                Sent::Queued
             }
             Ok(r) => {
                 let v: Value = r.json().await.unwrap_or(Value::Null);
                 let code = v["code"].as_str().unwrap_or("?").to_string();
-                {
-                    let mut st = self.stats();
-                    st.inflight.remove(&hash);
-                    *st.rejected.entry(code.clone()).or_default() += 1;
-                }
-                if code == "BAD_NONCE" || code == "ACCOUNT_QUEUE_FULL" {
-                    if let Some(n) = self.next_nonce(&a.g).await? {
-                        a.nonce = n;
-                    }
+                let mut st = self.stats();
+                st.inflight.remove(&hash);
+                *st.rejected.entry(code.clone()).or_default() += 1;
+                match code.as_str() {
+                    "BAD_NONCE" => Sent::Resync,
+                    "NONCE_QUEUED" | "DUPLICATE" => Sent::Done,
+                    _ => Sent::Again,
                 }
             }
             Err(_) => {
                 let mut st = self.stats();
                 st.inflight.remove(&hash);
                 st.errors += 1;
+                // It may have been queued: ask the sequencer.
+                Sent::Resync
             }
         }
-        Ok(())
     }
 
     fn on_receipt(&self, v: &Value) {
@@ -497,14 +510,126 @@ impl Shared {
             "hard_latency_ms": { "n": hard.len(), "p50": pct(&hard, 50.0), "p99": pct(&hard, 99.0) },
             "hard_samples": hard_samples,
             "host_cpu_insns_per_block": { "n": cpu.len(), "p50": pct(&cpu, 50.0), "p99": pct(&cpu, 99.0) },
+            "perf": status["perf"]["phases"],
             "state_hash": status["state_hash"],
         })
     }
 }
 
-/// One account's sender: a request at a time, at `per_sec`.
-async fn sender(sh: Arc<Shared>, mut a: Acct, seed: u64, per_sec: f64) {
+/// What became of one request.
+enum Sent {
+    Queued,
+    /// Refused for room (mempool or account queue full, or the like): send
+    /// the same nonce again.
+    Again,
+    /// The nonce is behind the account (or the request may have landed):
+    /// read the account's next nonce once the open requests are back.
+    Resync,
+    /// Already queued under another request.
+    Done,
+}
+
+/// The CSV columns: the report's flat numbers, then the sequencer's p50 and
+/// p99 for the phases the cycle tracks (F-01).
+const CSV_PHASES: [&str; 5] = [
+    "execute",
+    "commit",
+    "seal",
+    "sign_collect",
+    "seal_to_signed",
+];
+
+fn csv_header() -> String {
+    let mut cols = vec![
+        "elapsed_s",
+        "final",
+        "height",
+        "blocks_per_s",
+        "sent",
+        "queued",
+        "queued_tx_per_s",
+        "rejected",
+        "http_errors",
+        "soft_p50_ms",
+        "soft_p99_ms",
+        "hard_p50_ms",
+        "hard_p99_ms",
+        "cpu_p50_insns",
+        "cpu_p99_insns",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect::<Vec<_>>();
+    for p in CSV_PHASES {
+        cols.push(format!("{p}_p50_us"));
+        cols.push(format!("{p}_p99_us"));
+    }
+    cols.join(",")
+}
+
+fn csv_row(r: &Value) -> String {
+    let cell = |v: &Value| match v {
+        Value::Null => String::new(),
+        Value::String(s) => s.clone(),
+        v => v.to_string(),
+    };
+    let rejected: u64 = r["rejected"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .filter_map(|(_, n)| n.as_u64())
+        .sum();
+    let mut cells = vec![
+        cell(&r["elapsed_s"]),
+        (r["final"] == true).to_string(),
+        cell(&r["height"]),
+        cell(&r["blocks_per_s"]),
+        cell(&r["sent"]),
+        cell(&r["queued"]),
+        cell(&r["queued_tx_per_s"]),
+        rejected.to_string(),
+        cell(&r["http_errors"]),
+        cell(&r["soft_latency_ms"]["p50"]),
+        cell(&r["soft_latency_ms"]["p99"]),
+        cell(&r["hard_latency_ms"]["p50"]),
+        cell(&r["hard_latency_ms"]["p99"]),
+        cell(&r["host_cpu_insns_per_block"]["p50"]),
+        cell(&r["host_cpu_insns_per_block"]["p99"]),
+    ];
+    for p in CSV_PHASES {
+        cells.push(cell(&r["perf"][p]["p50_us"]));
+        cells.push(cell(&r["perf"][p]["p99_us"]));
+    }
+    cells.join(",")
+}
+
+/// Prints a report, and appends it to the CSV file if there is one.
+fn emit(r: &Value, csv: Option<&Path>) -> Result<()> {
+    println!("{r}");
+    if let Some(path) = csv {
+        let fresh = !path.exists();
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .with_context(|| format!("{}", path.display()))?;
+        if fresh {
+            writeln!(f, "{}", csv_header())?;
+        }
+        writeln!(f, "{}", csv_row(r))?;
+    }
+    Ok(())
+}
+
+/// One account's sender: a request every `1 / per_sec`, with up to
+/// `inflight` open at once.
+async fn sender(sh: Arc<Shared>, a: Acct, seed: u64, per_sec: f64, inflight: usize) {
     let mut rng = Rng(seed);
+    let mut next = a.nonce;
+    // Nonces refused for room, sent again before new ones.
+    let mut again: BTreeSet<u64> = BTreeSet::new();
+    let mut resync = false;
+    let mut open = FuturesUnordered::new();
     let mut tick = tokio::time::interval(Duration::from_secs_f64(1.0 / per_sec));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     // Spread the accounts' first requests over one interval.
@@ -512,11 +637,47 @@ async fn sender(sh: Arc<Shared>, mut a: Acct, seed: u64, per_sec: f64) {
         (rng.below(1000) as f64 / 1000.0) / per_sec,
     ))
     .await;
-    while !sh.stop.load(Ordering::Relaxed) {
-        tick.tick().await;
-        if let Err(e) = sh.send_one(&mut a, &mut rng).await {
-            eprintln!("tx: {e}");
-            sh.stats().errors += 1;
+    loop {
+        let stop = sh.stop.load(Ordering::Relaxed);
+        if stop && open.is_empty() {
+            break;
+        }
+        if resync && open.is_empty() {
+            match sh.next_nonce(&a.g).await {
+                Ok(Some(n)) => {
+                    next = n;
+                    again.clear();
+                    resync = false;
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    eprintln!("nonce: {e}");
+                    sh.stats().errors += 1;
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                }
+            }
+            continue;
+        }
+        let room = !stop && !resync && open.len() < inflight;
+        tokio::select! {
+            _ = tick.tick(), if room => {
+                let nonce = again.pop_first().unwrap_or_else(|| {
+                    next += 1;
+                    next - 1
+                });
+                let (bytes, hash) = sh.sign(&a, nonce, &mut rng);
+                let s = sh.clone();
+                open.push(async move { s.post(bytes, hash).await }.map(move |r| (nonce, r)));
+            }
+            Some((nonce, sent)) = open.next(), if !open.is_empty() => match sent {
+                Sent::Queued | Sent::Done => {}
+                Sent::Again => {
+                    again.insert(nonce);
+                }
+                Sent::Resync => resync = true,
+            },
+            // Stopping, with nothing open: the loop's first check ends it.
+            _ = tokio::time::sleep(Duration::from_millis(50)), if !room && open.is_empty() => {}
         }
     }
 }
@@ -544,6 +705,17 @@ async fn watch(url: String, g: String, tx: mpsc::UnboundedSender<Value>) {
             }
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+/// Account `i`'s key: `[seed_base + i; 32]` while that fits a byte (the keys
+/// earlier runs funded), then a hashed seed.
+fn seed_key(seed_base: u8, i: u16) -> SigningKey {
+    match u8::try_from(u16::from(seed_base) + i) {
+        Ok(seed) => key(seed),
+        Err(_) => SigningKey::from_bytes(&sha256(
+            &[b"caravel-loadgen".as_slice(), &i.to_be_bytes()].concat(),
+        )),
     }
 }
 
@@ -575,7 +747,7 @@ async fn main() -> Result<()> {
             files.iter().map(|p| read_key(p)).collect::<Result<_>>()?
         }
         None => (0..args.accounts)
-            .map(|i| key(args.seed_base + i))
+            .map(|i| seed_key(args.seed_base, i))
             .collect(),
     };
     if keys.is_empty() {
@@ -700,6 +872,7 @@ async fn main() -> Result<()> {
                 a,
                 0x9E37_79B9_7F4A_7C15 ^ (i as u64 + 1).wrapping_mul(0xA24B_AED4_963E_E407),
                 per_sec,
+                args.inflight.max(1),
             ))
         })
         .collect();
@@ -707,7 +880,10 @@ async fn main() -> Result<()> {
     while started.elapsed() < Duration::from_secs(args.duration_secs) {
         tokio::time::sleep(Duration::from_millis(250)).await;
         if last_report.elapsed() >= Duration::from_secs(args.report_secs) {
-            println!("{}", sh.report(started, start_height, None).await);
+            emit(
+                &sh.report(started, start_height, None).await,
+                args.csv.as_deref(),
+            )?;
             last_report = Instant::now();
         }
     }
@@ -733,6 +909,6 @@ async fn main() -> Result<()> {
     }
     let mut summary = sh.report(started, start_height, window).await;
     summary["final"] = json!(true);
-    println!("{summary}");
+    emit(&summary, args.csv.as_deref())?;
     Ok(())
 }
