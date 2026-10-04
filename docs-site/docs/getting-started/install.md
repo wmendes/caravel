@@ -33,8 +33,8 @@ This builds the CLI, every template's node, the contracts and the relayer, and i
 
 | To run... | You need |
 |---|---|
-| A lane on your machine | Docker (the local Stellar network) and Node.js 22 (the lane's relayer) |
-| A lane on your servers | ssh access to Linux hosts with systemd, passwordless sudo, Node.js 22, rsync and curl, plus Caddy for a public URL. See [Deploy to testnet](../guides/deploy-to-testnet.md) |
+| A lane on your machine | Docker with Compose: the local Stellar network, and the lane's nodes in containers. Node.js 22 only when the nodes run as processes (`caravel init --runtime process`, or a release without images such as 0.1.0) |
+| A lane on your servers | Linux hosts over ssh with passwordless sudo, and either Docker with Compose (`runtime = "docker"`, nothing else needed) or systemd with Node.js 22, rsync and curl, plus Caddy for a public URL. See [Deploy to testnet](../guides/deploy-to-testnet.md) and [Lanes in containers](../guides/lanes-in-docker.md) |
 
 `caravel doctor` checks this machine against a lane file and says what's missing.
 

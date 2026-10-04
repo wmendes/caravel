@@ -65,7 +65,7 @@ A Payments lane was also run through its whole life on testnet from a lane file:
 
 This brings up a Payments lane on your machine, against a local Stellar network, and uses it.
 
-**Requirements:** Docker, for the local Stellar network, and Node.js 22, for the lane's relayer.
+**Requirements:** Docker with Compose, for the local Stellar network and the lane's nodes, which run in containers from the release's images. A release without images (0.1.0) or `caravel init --runtime process` runs them as processes instead, and then the relayer needs Node.js 22.
 
 **Install** the latest release, on x86_64 or arm64 Linux and arm64 macOS. It needs no Rust, and it brings the pinned Stellar CLI (28.1.0) if yours isn't that version:
 

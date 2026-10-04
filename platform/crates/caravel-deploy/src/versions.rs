@@ -20,6 +20,17 @@ fn get(path: &str) -> &'static str {
         .unwrap_or_else(|| panic!("versions.json has no string at {path}"))
 }
 
+/// The Stellar quickstart image a local network runs, as `stellar container
+/// start --image-tag-override` takes it: the tag of the pinned
+/// `stellar/quickstart:<tag>@sha256:…` (D-03).
+pub fn quickstart_tag() -> &'static str {
+    let image = get("images.stellar_quickstart");
+    image
+        .split_once(':')
+        .map(|(_, rest)| rest.split('@').next().unwrap_or(rest))
+        .unwrap_or("latest")
+}
+
 pub fn testnet_rpc() -> &'static str {
     get("testnet.rpc_url")
 }

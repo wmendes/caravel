@@ -84,6 +84,13 @@ pub struct InitArgs<'a> {
     pub port: Option<u16>,
     pub prefix: Option<&'a str>,
     pub force: bool,
+    /// `docker` or `process`; None picks docker when the release has images.
+    pub runtime: Option<&'a str>,
+}
+
+/// The example's local host with `runtime = "docker"` (D-03).
+fn with_docker(text: &str) -> String {
+    text.replacen("[env.local.host]\n", "[env.local.host]\nruntime = \"docker\"                         # containers from the release's images (caravel init --runtime)\n", 1)
 }
 
 /// What `init` did.
@@ -168,6 +175,17 @@ pub fn init(a: &InitArgs) -> Result<Init> {
         None => free_port(18080, 10)?,
     };
     let text = fill_example(&example, &name, port, &ids)?;
+    // Containers when the installed release ships this template's images.
+    let docker = match a.runtime {
+        Some(r) => r == "docker",
+        None => {
+            caravel_deploy::release::Release::locate(None, &plugin.info.template).is_ok_and(|r| {
+                r.images
+                    .contains_key(&format!("{}-node", plugin.info.template))
+            })
+        }
+    };
+    let text = if docker { with_docker(&text) } else { text };
 
     // What's written must be a lane file the template and the tool accept.
     let lane = LaneFile::parse(&text).context("the template's example")?;
@@ -196,6 +214,7 @@ pub fn init(a: &InitArgs) -> Result<Init> {
         )?;
     }
     let report = json!({
+        "runtime": if docker { "docker" } else { "process" },
         "lane_file": lane_file.display().to_string(),
         "template": plugin.info.template,
         "name": name,
