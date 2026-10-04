@@ -4,7 +4,7 @@ sidebar_position: 2
 description: "A Payments lane on a local Stellar network: create it, use it, and wind it down."
 ---
 
-This brings up a Payments lane on your machine, against a local Stellar network that `caravel apply` starts in Docker, and takes it through its whole life. It takes about two minutes once Caravel is [installed](./install.md).
+This brings up a Payments lane on your machine, against a local Stellar network that `caravel apply` starts in Docker, with the lane's nodes in containers too, and takes it through its whole life. It takes about two minutes once Caravel is [installed](./install.md).
 
 ## Create the lane
 

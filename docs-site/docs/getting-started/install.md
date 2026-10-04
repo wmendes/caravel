@@ -4,7 +4,7 @@ sidebar_position: 1
 description: "Install the caravel CLI: a prebuilt release in one line, or built from a clone."
 ---
 
-`caravel` is one CLI for every template. It installs into `~/.caravel` (or `$CARAVEL_HOME`) and touches nothing outside it.
+`caravel` is one CLI for every template. It installs into `~/.caravel` (or `$CARAVEL_HOME`). Outside that directory it only adds one line to your shell's startup files, so `caravel` is on your PATH ([below](#your-path)).
 
 ## A prebuilt release
 
@@ -16,7 +16,9 @@ curl -fsSL https://raw.githubusercontent.com/wmendes/caravel/main/scripts/instal
 
 The script downloads the release for your machine and checks it against the release's `SHA256SUMS`. It also brings the pinned Stellar CLI (28.1.0, checked against GitHub's published digest) unless the `stellar` on your PATH is already that version. `--version vX.Y.Z` picks a release; `--no-stellar-cli` skips the CLI.
 
-**Your PATH.** Like rustup, the installer writes `~/.caravel/env` and sources it from your shell's startup files (`~/.profile`, `~/.bashrc` and `~/.bash_profile` when they exist, zsh's `.zshenv`, and fish's `conf.d`), so new terminals find `caravel`. In the terminal you installed from, run `. ~/.caravel/env` once. `--no-modify-path` (or `CARAVEL_NO_MODIFY_PATH=1`) leaves those files alone and prints the line to add yourself. Running the installer again adds nothing twice.
+### Your PATH
+
+Like rustup, the installer writes `~/.caravel/env` and sources it from your shell's startup files (`~/.profile`, `~/.bashrc` and `~/.bash_profile` when they exist, zsh's `.zshenv`, and fish's `conf.d`), so new terminals find `caravel`. In the terminal you installed from, run `. ~/.caravel/env` once. `--no-modify-path` (or `CARAVEL_NO_MODIFY_PATH=1`) leaves those files alone and prints the line to add yourself. Running the installer again adds nothing twice.
 
 ## From a clone
 
