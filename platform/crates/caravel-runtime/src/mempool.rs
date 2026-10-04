@@ -4,7 +4,7 @@
 //! whole block (spec §8.3), so every signature is checked here with the
 //! engine's own rule (`verify_strict`) before anything reaches a block.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 use caravel_core::state::StateFrameV1;
 use caravel_core::tx::{sep53_preimage, sep53_tx_message, SigScheme, TxEnvelopeV1};
@@ -133,6 +133,9 @@ pub struct Queued {
 pub struct Mempool {
     queue: VecDeque<Queued>,
     hashes: HashSet<[u8; 32]>,
+    /// Each account's queued nonces (F-12): the per-transaction checks and
+    /// `next_queued_nonce` no longer scan the whole queue.
+    by_account: HashMap<[u8; 32], BTreeSet<u64>>,
     max_total: usize,
     max_per_account: usize,
 }
@@ -142,6 +145,7 @@ impl Mempool {
         Self {
             queue: VecDeque::new(),
             hashes: HashSet::new(),
+            by_account: HashMap::new(),
             max_total,
             max_per_account,
         }
@@ -165,36 +169,30 @@ impl Mempool {
 
     /// The nonce after `account`'s queued transactions, if it has any.
     pub fn next_queued_nonce(&self, account: &[u8; 32]) -> Option<u64> {
-        self.queue
-            .iter()
-            .filter(|q| &q.tx.account == account)
-            .map(|q| q.tx.nonce.saturating_add(1))
-            .max()
+        self.by_account
+            .get(account)
+            .and_then(|n| n.last())
+            .map(|n| n.saturating_add(1))
     }
 
     pub fn push(&mut self, hash: [u8; 32], tx: TxEnvelopeV1) -> Result<(), Reject> {
         if self.hashes.contains(&hash) {
             return Err(Reject::Duplicate);
         }
-        if self
-            .queue
-            .iter()
-            .any(|q| q.tx.account == tx.account && q.tx.nonce == tx.nonce)
-        {
+        let queued = self.by_account.get(&tx.account);
+        if queued.is_some_and(|n| n.contains(&tx.nonce)) {
             return Err(Reject::NonceQueued);
         }
         if self.queue.len() >= self.max_total {
             return Err(Reject::MempoolFull);
         }
-        if self
-            .queue
-            .iter()
-            .filter(|q| q.tx.account == tx.account)
-            .count()
-            >= self.max_per_account
-        {
+        if queued.map_or(0, |n| n.len()) >= self.max_per_account {
             return Err(Reject::AccountQueueFull);
         }
+        self.by_account
+            .entry(tx.account)
+            .or_default()
+            .insert(tx.nonce);
         self.hashes.insert(hash);
         self.queue.push_back(Queued { hash, tx });
         Ok(())
@@ -205,8 +203,22 @@ impl Mempool {
         if hashes.is_empty() {
             return;
         }
-        self.queue.retain(|q| !hashes.contains(&q.hash));
-        self.hashes.retain(|h| !hashes.contains(h));
+        let index = &mut self.by_account;
+        self.queue.retain(|q| {
+            let keep = !hashes.contains(&q.hash);
+            if !keep {
+                if let Some(n) = index.get_mut(&q.tx.account) {
+                    n.remove(&q.tx.nonce);
+                    if n.is_empty() {
+                        index.remove(&q.tx.account);
+                    }
+                }
+            }
+            keep
+        });
+        for h in hashes {
+            self.hashes.remove(h);
+        }
     }
 }
 
@@ -226,6 +238,25 @@ mod tests {
             body: vec![],
             signature: [0; 64],
         }
+    }
+
+    #[test]
+    fn the_account_index_follows_pushes_and_removals() {
+        let mut m = Mempool::new(10, 2);
+        m.push([1; 32], tx(1, 5)).unwrap();
+        assert_eq!(m.push([2; 32], tx(1, 5)), Err(Reject::NonceQueued));
+        m.push([3; 32], tx(1, 6)).unwrap();
+        assert_eq!(m.push([4; 32], tx(1, 7)), Err(Reject::AccountQueueFull));
+        m.push([5; 32], tx(2, 1)).unwrap();
+        m.remove(&HashSet::from([[1; 32], [5; 32]]));
+        assert_eq!(m.len(), 1);
+        assert!(!m.contains(&[1; 32]));
+        // The removed nonce and the room it held are free again.
+        m.push([6; 32], tx(1, 5)).unwrap();
+        assert_eq!(m.next_queued_nonce(&[1; 32]), Some(7));
+        assert_eq!(m.next_queued_nonce(&[2; 32]), None);
+        m.remove(&HashSet::from([[3; 32], [6; 32]]));
+        assert!(m.is_empty() && m.by_account.is_empty());
     }
 
     #[test]
