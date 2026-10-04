@@ -325,10 +325,12 @@ impl Local {
         std::fs::create_dir_all(self.root.join("logs"))?;
         std::fs::create_dir_all(self.root.join("run"))?;
         std::fs::create_dir_all(self.root.join("data"))?;
+        let log_path = self.root.join("logs").join(format!("{node}.log"));
+        rotate_log(&log_path, LOG_MAX_BYTES, LOG_KEEP)?;
         let log = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(self.root.join("logs").join(format!("{node}.log")))?;
+            .open(&log_path)?;
         let child = cmd
             .env("RUST_LOG", "info")
             .current_dir(&self.root)
@@ -563,4 +565,58 @@ pub async fn wait_healthy(port: u16, want: &NodeReport, timeout: Duration) -> Re
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
     Err(anyhow!("the node on port {port} is not healthy: {last}"))
+}
+
+/// A node's log is rotated when it starts past this size (F-05).
+const LOG_MAX_BYTES: u64 = 10 * 1024 * 1024;
+/// Rotated logs kept: `<node>.log.1` (newest) to `<node>.log.<LOG_KEEP>`.
+const LOG_KEEP: u32 = 3;
+
+/// Moves `path` to `path.1` (and `.1` to `.2`, and so on, dropping the
+/// oldest) when it has reached `max` bytes. A running node keeps writing to
+/// the file it opened, so the process runtime rotates as a node (re)starts.
+fn rotate_log(path: &Path, max: u64, keep: u32) -> Result<()> {
+    let big = std::fs::metadata(path).is_ok_and(|m| m.len() >= max);
+    if !big || keep == 0 {
+        return Ok(());
+    }
+    let numbered = |n: u32| {
+        let mut p = path.as_os_str().to_owned();
+        p.push(format!(".{n}"));
+        PathBuf::from(p)
+    };
+    for n in (1..keep).rev() {
+        if numbered(n).exists() {
+            std::fs::rename(numbered(n), numbered(n + 1))?;
+        }
+    }
+    std::fs::rename(path, numbered(1))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_big_log_rotates_and_the_oldest_goes() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("sequencer.log");
+        let read = |name: &str| std::fs::read_to_string(dir.path().join(name)).ok();
+        std::fs::write(&log, "small").unwrap();
+        rotate_log(&log, 10, 2).unwrap();
+        assert_eq!(
+            read("sequencer.log").as_deref(),
+            Some("small"),
+            "under the cap"
+        );
+        for gen in ["first log", "second log", "third log"] {
+            std::fs::write(&log, gen).unwrap();
+            rotate_log(&log, 5, 2).unwrap();
+        }
+        assert_eq!(read("sequencer.log"), None);
+        assert_eq!(read("sequencer.log.1").as_deref(), Some("third log"));
+        assert_eq!(read("sequencer.log.2").as_deref(), Some("second log"));
+        assert_eq!(read("sequencer.log.3"), None, "only 2 kept");
+    }
 }

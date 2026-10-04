@@ -533,7 +533,7 @@ fn docker_files(
     };
     let hardening = |node: &str| {
         format!(
-            "    extra_hosts: [\"host.docker.internal:host-gateway\"]\n    user: \"${{CARAVEL_UID:-10001}}:${{CARAVEL_GID:-10001}}\"\n    read_only: true\n    tmpfs: [/tmp]\n    security_opt: [\"no-new-privileges:true\"]\n    cap_drop: [ALL]\n    restart: unless-stopped\n    labels: {{ caravel.lane: {}, caravel.env: {}, caravel.node: {} }}\n",
+            "    extra_hosts: [\"host.docker.internal:host-gateway\"]\n    user: \"${{CARAVEL_UID:-10001}}:${{CARAVEL_GID:-10001}}\"\n    read_only: true\n    tmpfs: [/tmp]\n    security_opt: [\"no-new-privileges:true\"]\n    cap_drop: [ALL]\n    restart: unless-stopped\n    logging: {{ driver: local, options: {{ max-size: \"10m\", max-file: \"3\" }} }}\n    labels: {{ caravel.lane: {}, caravel.env: {}, caravel.node: {} }}\n",
             y(&m.lane.lane.name),
             y(&m.env_name),
             y(node)
@@ -607,7 +607,7 @@ fn docker_files(
             _ => image("caddy")?,
         };
         c += &format!(
-            "  web:\n    image: {img}\n    ports: [\"80:80\", \"443:443\", \"443:443/udp\"]\n    volumes:\n      - {cf}\n{config}      - {cd}\n      - {cc}\n    read_only: true\n    tmpfs: [/tmp]\n    security_opt: [\"no-new-privileges:true\"]\n    cap_drop: [ALL]\n    cap_add: [NET_BIND_SERVICE]\n    restart: unless-stopped\n    labels: {{ caravel.lane: {lane}, caravel.env: {env}, caravel.node: \"web\" }}\n",
+            "  web:\n    image: {img}\n    ports: [\"80:80\", \"443:443\", \"443:443/udp\"]\n    volumes:\n      - {cf}\n{config}      - {cd}\n      - {cc}\n    read_only: true\n    tmpfs: [/tmp]\n    security_opt: [\"no-new-privileges:true\"]\n    cap_drop: [ALL]\n    cap_add: [NET_BIND_SERVICE]\n    restart: unless-stopped\n    logging: {{ driver: local, options: {{ max-size: \"10m\", max-file: \"3\" }} }}\n    labels: {{ caravel.lane: {lane}, caravel.env: {env}, caravel.node: \"web\" }}\n",
             img = y(&web_image),
             cf = y(&format!("{root}/config/Caddyfile:/etc/caddy/Caddyfile:ro")),
             cd = y(&format!("{root}/caddy/data:/data")),
