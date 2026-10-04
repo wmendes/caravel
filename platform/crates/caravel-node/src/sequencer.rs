@@ -316,15 +316,18 @@ async fn block_loop<A: NodeApp>(app: Arc<SequencerNode<A>>, config_hash: [u8; 32
                 .unwrap_or(0);
             a.record("queue_read", t_queue.elapsed());
             core.set_queue_len(waiting);
-            core.produce_block(now_ms())
+            let produced = core.produce_block(now_ms())?;
+            drop(core);
+            // Still off the async runtime, but after the core lock (F-12):
+            // the app's views and, once a minute, the perps history's save.
+            let t_publish = std::time::Instant::now();
+            a.publish(produced, config_hash);
+            a.record("publish", t_publish.elapsed());
+            Ok::<(), caravel_runtime::sequencer::CoreError>(())
         })
         .await;
         match result {
-            Ok(Ok(produced)) => {
-                let t_publish = std::time::Instant::now();
-                app.publish(produced, config_hash);
-                app.record("publish", t_publish.elapsed());
-            }
+            Ok(Ok(())) => {}
             Ok(Err(e)) => {
                 tracing::error!("block production halted: {e}");
                 *app.halted.lock().expect("halted lock") = Some(e.to_string());
@@ -377,7 +380,7 @@ async fn signer_loop<A: NodeApp>(app: Arc<SequencerNode<A>>) {
         }
         wait = SIGN_IDLE;
         // The lowest checkpoint still waiting for signatures, in seq order.
-        let next = {
+        let next = on_pool(&app, |app| {
             let core = app.core.lock().expect("core lock");
             match core
                 .store()
@@ -392,7 +395,10 @@ async fn signer_loop<A: NodeApp>(app: Arc<SequencerNode<A>>) {
                     None
                 }
             }
-        };
+        })
+        .await
+        .ok()
+        .flatten();
         let Some((row, check)) = next else { continue };
         if let Err(reason) = check {
             if warned.insert(row.seq) {
@@ -423,11 +429,17 @@ async fn signer_loop<A: NodeApp>(app: Arc<SequencerNode<A>>) {
                     app.record("seal_to_signed", at.elapsed());
                 }
                 let json = serde_json::to_string(&sigs).expect("json");
-                let stored = app.core.lock().expect("core lock").store_mut().set_signed(
-                    row.seq,
-                    signers.epoch,
-                    &json,
-                );
+                let (seq, epoch) = (row.seq, signers.epoch);
+                let stored = on_pool(&app, move |app| {
+                    app.core
+                        .lock()
+                        .expect("core lock")
+                        .store_mut()
+                        .set_signed(seq, epoch, &json)
+                        .map_err(|e| e.to_string())
+                })
+                .await
+                .unwrap_or_else(|e| Err(format!("{e:?}")));
                 match stored {
                     Ok(()) => {
                         tracing::info!(seq = row.seq, signatures = sigs.len(), "checkpoint signed");
@@ -627,6 +639,20 @@ pub fn router<A: NodeApp>(app: Arc<SequencerNode<A>>, cors_origins: &[String]) -
 
 type AppState<A> = State<Arc<SequencerNode<A>>>;
 
+/// Runs `f` on the blocking pool (F-12). The core lock is a std mutex held
+/// for a whole block (~15 ms to execute and commit at full load): waiting
+/// for it must never park an async worker, which also serves the WebSocket
+/// and every other request.
+async fn on_pool<A: NodeApp, T: Send + 'static>(
+    app: &Arc<SequencerNode<A>>,
+    f: impl FnOnce(&SequencerNode<A>) -> T + Send + 'static,
+) -> Result<T, ApiError> {
+    let a = app.clone();
+    tokio::task::spawn_blocking(move || f(&a))
+        .await
+        .map_err(ApiError::internal)
+}
+
 #[derive(Deserialize)]
 struct TxJson {
     tx: String,
@@ -652,11 +678,13 @@ async fn post_tx<A: NodeApp>(
             api::unhex(&j.tx, "tx")?
         }
     };
-    let result = app
-        .core
-        .lock()
-        .expect("core lock")
-        .submit_tx(&raw, now_ms());
+    let result = on_pool(&app, move |app| {
+        app.core
+            .lock()
+            .expect("core lock")
+            .submit_tx(&raw, now_ms())
+    })
+    .await?;
     match result {
         Ok(hash) => Ok((
             StatusCode::ACCEPTED,
@@ -668,6 +696,10 @@ async fn post_tx<A: NodeApp>(
 }
 
 async fn status<A: NodeApp>(State(app): AppState<A>) -> ApiResult {
+    on_pool(&app, |app| status_body(app)).await?
+}
+
+fn status_body<A: NodeApp>(app: &SequencerNode<A>) -> ApiResult {
     let core = app.core.lock().expect("core lock");
     let st = core.frame();
     let store = core.store();
@@ -722,11 +754,12 @@ async fn account<A: NodeApp>(State(app): AppState<A>, Path(account): Path<String
     let mut body = serde_json::to_value(view).map_err(ApiError::internal)?;
     // The nonce a new transaction takes: after the account's queued ones
     // (read under one lock, so a block can't land in between).
-    let pending = {
+    let pending = on_pool(&app, move |app| {
         let core = app.core.lock().expect("core lock");
         let next = app.app.next_nonce(&core.state(), &key);
         next.map(|n| n.max(core.mempool.next_queued_nonce(&key).unwrap_or(0)))
-    };
+    })
+    .await?;
     if let (Some(o), Some(p)) = (body.as_object_mut(), pending) {
         o.insert("pending_nonce".into(), json!(p.to_string()));
     }
@@ -734,7 +767,10 @@ async fn account<A: NodeApp>(State(app): AppState<A>, Path(account): Path<String
 }
 
 async fn block<A: NodeApp>(State(app): AppState<A>, Path(height): Path<u64>) -> ApiResult {
-    app.store(|s| api::block_json(&app.app, s, height))
+    on_pool(&app, move |app| {
+        app.store(|s| api::block_json(&app.app, s, height))
+    })
+    .await?
 }
 
 #[derive(Deserialize)]
@@ -777,7 +813,7 @@ async fn block_raw<A: NodeApp>(
 }
 
 async fn checkpoint<A: NodeApp>(State(app): AppState<A>, Path(seq): Path<u64>) -> ApiResult {
-    app.store(|s| api::checkpoint_json(s, seq))
+    on_pool(&app, move |app| app.store(|s| api::checkpoint_json(s, seq))).await?
 }
 
 #[derive(Deserialize)]
@@ -790,7 +826,10 @@ async fn withdrawal_proofs<A: NodeApp>(
     Query(q): Query<AccountQuery>,
 ) -> ApiResult {
     let key = api::parse_account(&q.account)?;
-    app.store(|s| api::withdrawal_proofs(s, &key))
+    on_pool(&app, move |app| {
+        app.store(|s| api::withdrawal_proofs(s, &key))
+    })
+    .await?
 }
 
 async fn escape_proof<A: NodeApp>(
@@ -798,12 +837,15 @@ async fn escape_proof<A: NodeApp>(
     Query(q): Query<AccountQuery>,
 ) -> ApiResult {
     let key = api::parse_account(&q.account)?;
-    app.store(|s| {
-        let accepted = s
-            .last_checkpoint_with(CheckpointStatus::Accepted)
-            .map_err(ApiError::internal)?;
-        api::escape_proof(&app.app, s, &key, accepted)
+    on_pool(&app, move |app| {
+        app.store(|s| {
+            let accepted = s
+                .last_checkpoint_with(CheckpointStatus::Accepted)
+                .map_err(ApiError::internal)?;
+            api::escape_proof(&app.app, s, &key, accepted)
+        })
     })
+    .await?
 }
 
 // --- Internal API (relayer → sequencer, bearer token) ------------------------------------
@@ -844,12 +886,11 @@ async fn internal_inbox<A: NodeApp>(
     let acc: [u8; 32] = api::unhex(&j.acc_after_hex, "acc_after_hex")?
         .try_into()
         .map_err(|_| ApiError::bad_request("BAD_HEX", "acc_after_hex is not 32 bytes"))?;
-    let report = app
-        .core
-        .lock()
-        .expect("core lock")
-        .report_inbox(msg, acc)
-        .map_err(ApiError::internal)?;
+    let report = on_pool(&app, move |app| {
+        app.core.lock().expect("core lock").report_inbox(msg, acc)
+    })
+    .await?
+    .map_err(ApiError::internal)?;
     match report {
         InboxReport::Added => ok(json!({ "status": "added" })),
         InboxReport::AlreadyKnown => ok(json!({ "status": "known" })),
@@ -892,12 +933,11 @@ async fn internal_feed<A: NodeApp>(
     if app.app.decode_feed(&bytes).is_none() {
         return Err(ApiError::bad_request("DECODE", feed.not_decoded));
     }
-    let accepted = app
-        .core
-        .lock()
-        .expect("core lock")
-        .report_feed(&bytes)
-        .map_err(ApiError::internal)?;
+    let accepted = on_pool(&app, move |app| {
+        app.core.lock().expect("core lock").report_feed(&bytes)
+    })
+    .await?
+    .map_err(ApiError::internal)?;
     if accepted {
         ok(json!({ "status": "queued" }))
     } else {
@@ -907,9 +947,11 @@ async fn internal_feed<A: NodeApp>(
 
 async fn internal_pending<A: NodeApp>(State(app): AppState<A>, headers: HeaderMap) -> ApiResult {
     authorized(&app, &headers)?;
-    let row = app
-        .store(|s| s.first_checkpoint_with(CheckpointStatus::Signed))
-        .map_err(ApiError::internal)?;
+    let row = on_pool(&app, |app| {
+        app.store(|s| s.first_checkpoint_with(CheckpointStatus::Signed))
+    })
+    .await?
+    .map_err(ApiError::internal)?;
     match row {
         None => Ok(StatusCode::NO_CONTENT.into_response()),
         Some(row) => ok(json!({
