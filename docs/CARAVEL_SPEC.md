@@ -2277,6 +2277,32 @@ Branches are `h-0x-short-name`. Gates: H1 (H-01), H2 (H-04), H3 (H-06, the Groun
 | H-18 | **The rest of the perps app, and test USDC in one click** (DEC-106). Portfolio as an account page with a balance sheet and Get test USDC / Deposit / Withdraw; Explorer as a live lane view with the checkpoint pipeline and search; Exit (the old Escape) useful at all times, with the freeze timers and a downloadable escape proof; How it works (the old About) with a diagram and a trust table; a wallet menu | H-13 | review |
 | H-19 | **Withdraw through to the claim** (DEC-107). A withdrawal is followed from the lane to the user's wallet: the app tracks it until its checkpoint is accepted, then puts a Claim button where the user is (top bar, Trade account box, Portfolio) | H-18 | review |
 
+
+### 20.7 Milestone M0.8: containers and machines as code
+
+**Decided with the human on 2026-10-04.** Lane #1 runs straight on one VM: the machine and its firewall were made by hand, and `caravel apply` installs a release tarball and systemd units over ssh. M0.8 puts two established tools under Caravel, each owning one layer, and keeps Caravel the layer on top:
+1. **OpenTofu** owns the machines: VM, address, firewall, budget cap (`infra/opentofu/`). Caravel itself still provisions no machines (§2.4, §20.3).
+2. **Containers** run the nodes, the same way on a laptop and on a VM: one image per node template, the relayer and each web app, built from the release (`docker/`, GHCR).
+3. **Caravel** stays the lane layer: Stellar contracts, keys, signers, node configs, releases and plan/apply, now with a `docker` runtime beside systemd and plain processes.
+
+The human's calls:
+- images per release on GHCR, pinned by digest;
+- Caddy in compose, so a host needs only Docker;
+- OpenTofu state in a versioned GCS bucket;
+- the rule against the other IaC tool's name exempts `infra/opentofu/` only, where the syntax needs it; copy, docs and the spec still never write it.
+
+Branches are `d-0x-short-name`, stacked. Gates: after D-03 (lanes in Docker on a laptop) and after D-06 (lane #1 on Docker).
+
+| ID | Task | Depends | Status |
+|---|---|---|---|
+| D-01 | **Images in the release** (DEC-111). `docker/{node,relayer,web}.Dockerfile` package an assembled release without rebuilding it; `scripts/build-images.sh` builds them for this machine, or pushes them for one or more architectures and joins them into one image. CI pushes `ghcr.io/<owner>/caravel-*:sha-<12>` on main and `:v*` (amd64 and arm64) on tags, and the release carries `IMAGES`. Base images pinned by digest in `versions.json` | M0.7 | review |
+| D-02 | **A `docker` runtime in caravel-deploy** (DEC-112). `runtime = "process" \| "systemd" \| "docker"` per host; transport (local, ssh) split from runtime; a rendered compose file per host with the systemd units' hardening; restarts by each service's fingerprint | D-01 | todo |
+| D-03 | **Lanes in Docker on a laptop** — **Gate**. `caravel init` lanes run in containers; the quickstart needs Docker and the `caravel` CLI, not Node.js; the Stellar quickstart image pinned; e2e in both runtimes | D-02 | todo |
+| D-04 | **OpenTofu modules for GCP** (DEC-114). A host module (VM, address, firewall, IAP SSH, a startup script that installs Docker), a billing-cap module, lane #1's root module with a GCS backend; outputs feed `caravel --var-file` | D-01 | todo |
+| D-05 | **Lane #1's project, imported.** Every existing resource imported; `tofu plan` says no changes; nothing recreated | D-04 | todo |
+| D-06 | **Lane #1 on Docker** — **Gate**. With the human's OK: Docker on the VM, `runtime = "docker"`, apply, verify, rollback ready | D-03, D-05 | todo |
+| D-07 | **Spec and docs.** Guides (lanes in Docker, machines with OpenTofu), RUNBOOK §3, CLAUDE.md, SOURCES | D-06 | todo |
+
 ---
 
 ## 21. Later milestones (not for M0 agents to start without a human go-ahead)
@@ -3155,6 +3181,14 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 - **How it works** (route `/about`): a diagram of wallet, sequencer, validators and the settlement contract, live figures, a table of what is trusted and how to check it, what is not claimed (§2), and the contracts with copy buttons.
 - **Shell:** a wallet menu (copy, stellar.expert, fast-trading state, disconnect); on phones the nav takes its own row. | The human asked for the whole app at the Trade page's standard and for a way to fund an account; the DEX already has the depth, so no new token or faucet service is needed | Testnet DEX liquidity drying up (then a faucet of our own) |
 | DEC-107 | **M0.7 (H-19).** A withdrawal is one flow, from the lane to the wallet. After `withdraw` is queued, the app keeps the amount and time as pending (in the browser, per account, dropped after 15 minutes) and shows its three steps: left the lane, waiting for the next checkpoint on Stellar, claim. It polls the account's withdrawal proofs every 4 s while one is pending (every 15 s otherwise); when a new claimable leaf of the same amount appears, the pending entry becomes a Claim button. Claimable withdrawals show everywhere the user is: a Claim button in the top bar, a line under the Trade page's account, and a tracker above Portfolio's actions. "Claim" claims every ready withdrawal in turn, one wallet signature each (a Soroban transaction holds one contract call). Portfolio's separate Claims tab is gone. | The human withdrew and then could not find how to claim: the claim lived in a tab | A contract call that claims several leaves at once |
+| DEC-111 | **M0.8 (D-01).** A release ships container images, built from the release itself, never recompiled, so an image runs the same bytes as the tarball:
+- `docker/node.Dockerfile` (`TEMPLATE` arg): `debian:trixie-slim` (glibc 2.41, newer than both build hosts: Ubuntu 22.04's 2.35 for tagged releases and 24.04's 2.39 for main), `ca-certificates`, the template's node binary and engine Wasm under `/opt/caravel`, user 10001, entrypoint the node binary. Images `caravel-perps-node`, `caravel-payments-node`.
+- `docker/relayer.Dockerfile`: `node:22.23.3-trixie-slim` (the VM's Node), the relayer with its production `node_modules` and every template's feed modules, user 10001. Image `caravel-relayer`.
+- `docker/web.Dockerfile`: `caddy:2.11.6` with a template's web app at `/opt/caravel/web`; the Caddyfile and `web.json` are mounted at run time. Image `caravel-<template>-web`.
+- Base images are pinned by digest in `versions.json` (`images`), and `check-versions` fails a Dockerfile whose `FROM` differs.
+- `scripts/build-images.sh` builds them for this machine (tags, `caravel-*:<commit tag>`), or with `--push --registry` for one or more architectures (`amd64=<release> arm64=<release>`): each architecture is pushed by digest, then joined into one image with `buildx imagetools create`. It writes `IMAGES` into each release: one `<role> <ref>` line per image (`perps-node`, `relayer`, `perps-web`, …) plus the pinned `caddy` for lanes without a web app.
+- CI: on main the release job pushes `ghcr.io/<owner>/caravel-*:sha-<12>` (amd64, lane #1's architecture) and puts `IMAGES` in the release artifact; on a `v*` tag `release.yml` pushes `:v*` for amd64 and arm64 from the Linux archives and attaches `IMAGES` to the draft; a pull request that touches the images builds and smoke-tests them without pushing. `install.sh` keeps a release's `IMAGES` next to it, and `Release` reads it (`release.rs`, `parse_images`).
+- A smoke test on every build: the node image prints its version and computes lane #1's genesis (`f4b9db09…`, checked 2026-10-04 on the amd64 image under emulation). | Images that rebuild from source would be other bytes than the release of record (DEC-033). A digest pins exactly what runs | Signing the images (cosign or attestations), or a smaller relayer image (the Stellar SDK is in it twice, about 70 MB each) |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

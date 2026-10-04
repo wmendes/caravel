@@ -16,6 +16,8 @@ on:
       - .github/workflows/release.yml
       - scripts/assemble-release.sh
       - scripts/install.sh
+      - scripts/build-images.sh
+      - docker/**
   workflow_dispatch:
 
 permissions:
@@ -123,10 +125,56 @@ jobs:
             dist/${{ env.NAME }}.tar.gz
             dist/${{ env.NAME }}.tar.gz.sha256
 
+  # The container images (D-01, DEC-111): one per node template, the relayer
+  # and each web app, built from the Linux archives above, nothing rebuilt.
+  # A tag pushes them for amd64 and arm64 as one image each and records them
+  # in IMAGES; a pull request builds and smoke-tests the amd64 ones.
+  images:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Unpack the Linux archives
+        run: |
+          for a in x86_64 aarch64; do
+            mkdir -p "rel/$a"
+            tar -xzf assets/caravel-*-"$a"-linux.tar.gz -C "rel/$a" --strip-components=1
+          done
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.ref_type == 'tag'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build (and on a tag, push) the images
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            ./scripts/build-images.sh amd64=rel/x86_64 arm64=rel/aarch64 --push \
+              --registry "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" --tag "$GITHUB_REF_NAME"
+          else
+            ./scripts/build-images.sh rel/x86_64
+          fi
+          node_image="$(awk '$1 == "perps-node" { print $2 }' rel/x86_64/IMAGES)"
+          docker run --rm --platform linux/amd64 "$node_image" --version
+          docker run --rm --platform linux/amd64 -v "$PWD/lanes/perps/config:/cfg:ro" "$node_image" genesis --config /cfg/lane.caravel-perps.testnet.toml | jq -e '.config_hash'
+          cp rel/x86_64/IMAGES IMAGES
+      - uses: actions/upload-artifact@v4
+        with:
+          name: images
+          path: IMAGES
+
   # A tag opens a draft release; a person reads it and publishes it.
   draft:
     if: github.ref_type == 'tag'
-    needs: build
+    needs: [build, images]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -145,4 +193,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
             --title "Caravel $GITHUB_REF_NAME" \
             --notes "Testnet only, not audited. Install: curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_REF_NAME/scripts/install.sh | bash" \
-            *.tar.gz SHA256SUMS
+            *.tar.gz SHA256SUMS IMAGES

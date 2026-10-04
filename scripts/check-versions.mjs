@@ -91,6 +91,18 @@ for (const [file, re] of [
   else if (m[1] !== versions.stellar_cli) fail(`${file} pins the Stellar CLI ${m[1]}, versions.json says ${versions.stellar_cli}`);
 }
 
+// --- Container base images (M0.8, D-01): each Dockerfile's FROM is the pinned image, by digest.
+for (const [file, key] of [
+  ["docker/node.Dockerfile", "debian"],
+  ["docker/relayer.Dockerfile", "node"],
+  ["docker/web.Dockerfile", "caddy"],
+]) {
+  const from = [...read(file).matchAll(/^FROM\s+(\S+)/gm)].map((m) => m[1]);
+  const want = versions.images?.[key];
+  if (!want || !/@sha256:[0-9a-f]{64}$/.test(want)) fail(`versions.json images.${key} must be an image pinned by digest`);
+  else if (from.length !== 1 || from[0] !== want) fail(`${file} builds FROM ${from.join(", ") || "nothing"}, versions.json says ${want}`);
+}
+
 // --- npm: exact pins in package.json and package-lock.json ------------------
 // npm apps: the platform relayer, the perps feed module and web app (M0.5 layout), and the docs site (H-12).
 const apps = ["platform/relayer", "lanes/perps/relayer-feeds", "lanes/perps/web", "docs-site"].filter((d) => existsSync(join(root, d, "package.json")));

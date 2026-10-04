@@ -135,6 +135,8 @@ if [[ -z "$ARCHIVE" && ( -z "$ROOT" || "$RELEASE" == 1 ) ]]; then
   curl -fsSL -o "$DL/$NAME" "$BASE/$NAME" || fail "downloading $BASE/$NAME failed"
   curl -fsSL -o "$DL/SHA256SUMS" "$BASE/SHA256SUMS" || fail "downloading $BASE/SHA256SUMS failed"
   grep "  $NAME\$" "$DL/SHA256SUMS" > "$DL/$NAME.sha256" || fail "$NAME is not in the release's SHA256SUMS"
+  # The release's container images by digest (D-01): releases before M0.8 have none.
+  curl -fsSL -o "$DL/IMAGES" "$BASE/IMAGES" 2> /dev/null || rm -f "$DL/IMAGES"
   ARCHIVE="$DL/$NAME"
 fi
 
@@ -156,6 +158,7 @@ if [[ -n "$ARCHIVE" ]]; then
   dir="$(find "$STAGE" -mindepth 1 -maxdepth 1 -type d | head -1)"
   [[ -f "$dir/COMMIT" && -f "$dir/SHA256SUMS" ]] || fail "$ARCHIVE is not a Caravel release"
   (cd "$dir" && "${SHA256[@]}" -c --quiet SHA256SUMS) || fail "$ARCHIVE: a file does not match SHA256SUMS"
+  if [[ -n "${DL:-}" && -f "$DL/IMAGES" ]]; then cp "$DL/IMAGES" "$dir/IMAGES"; fi
   [[ "$STELLAR_CLI" == 1 ]] && stellar_cli
   install_release "$dir"
   printf '\nNext: caravel init payments my-lane && cd my-lane && caravel apply\n'
