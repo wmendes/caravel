@@ -171,14 +171,12 @@ async fn dropped_blocks_answer_pruned() {
     let first = (accepted - KEEP_ACCEPTED_SNAPSHOTS) * 10 + 1;
     assert_eq!(t.core.store().first_block().unwrap(), Some(first));
     let gone = caravel_node::api::block_json(&PerpsApp, t.core.store(), first - 1)
-        .err()
-        .expect("pruned")
+        .expect_err("pruned")
         .into_response();
     assert_eq!(gone.status(), axum::http::StatusCode::GONE);
     assert!(caravel_node::api::block_json(&PerpsApp, t.core.store(), first).is_ok());
     let missing = caravel_node::api::block_json(&PerpsApp, t.core.store(), 500)
-        .err()
-        .expect("past the tip")
+        .expect_err("past the tip")
         .into_response();
     assert_eq!(missing.status(), axum::http::StatusCode::NOT_FOUND);
     let now = t.now;
