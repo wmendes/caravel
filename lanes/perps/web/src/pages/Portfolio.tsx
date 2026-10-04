@@ -5,9 +5,11 @@
  */
 import { useState, type ReactNode } from "react";
 
-import { lane, type Account, type Proof } from "../api/lane";
+import type { Account } from "../api/lane";
 import { explain, stellar } from "../api/stellar";
 import { FundPanel } from "../components/Fund";
+import { WithdrawalTracker } from "../components/Withdrawals";
+import { useClaims } from "../claims";
 import { Chip, Empty, SidePill, Signed, Skel, Tabs, useToast } from "../components/ui";
 import { config } from "../config";
 import { base, baseAmount, parseUsdc, perUnit, price, short, usdc } from "../format";
@@ -16,21 +18,17 @@ import { useApp, usePoll } from "../state";
 import { explainReject, laneIds, send, type LaneIds } from "../trade";
 
 type Action = "fund" | "deposit" | "withdraw";
-type Claim = Proof & { claimed: boolean };
 
 export function Portfolio() {
   const { address, connect, connecting, status, account } = useApp();
   const [wallet, setWallet] = useState<bigint | null | undefined>(undefined);
-  const [claims, setClaims] = useState<Claim[] | null>(null);
+  const { ready, readyTotal, lastClaimed } = useClaims();
   const [action, setAction] = useState<Action | null>(null);
   const [depositAmount, setDepositAmount] = useState("");
 
   usePoll(async () => {
-    if (!address) return;
-    const [w, p] = await Promise.all([stellar.usdcBalance(address), lane.withdrawalProofs(address).catch(() => ({ withdrawals: [] as Proof[] }))]);
-    setWallet(w);
-    setClaims(await Promise.all(p.withdrawals.map(async (x) => ({ ...x, claimed: await stellar.isClaimed(x.seq, x.index).catch(() => false) }))));
-  }, 5000, [address]);
+    if (address) setWallet(await stellar.usdcBalance(address));
+  }, 5000, [address, lastClaimed?.tx]);
 
   if (!address) {
     return (
@@ -59,8 +57,8 @@ export function Portfolio() {
 
   // Default action: fund an empty wallet, otherwise deposit.
   const current: Action = action ?? ((wallet === null || wallet === 0n) && !account ? "fund" : "deposit");
-  const open = claims?.filter((c) => !c.claimed) ?? [];
-  const claimable = open.reduce((s, c) => s + BigInt(c.amount ?? "0"), 0n);
+  const open = ready ?? [];
+  const claimable = readyTotal;
   const equity = account ? BigInt(account.equity) : null;
   const upnl = account ? BigInt(account.equity) - BigInt(account.collateral) : null;
   const mm = account ? BigInt(account.maintenance_margin) : 0n;
@@ -77,7 +75,7 @@ export function Portfolio() {
           <Fig k="Equity" chip="soft" v={account === undefined ? <Skel w={110} h={22} /> : account === null ? "No deposit yet" : `${usdc(equity)} USDC`} big />
           <Fig k="Unrealized PnL" v={upnl === null ? "–" : <Signed value={upnl}>{usdc(upnl)}</Signed>} />
           <Fig k="Margin ratio" v={account ? `${ratio.toFixed(2)}%` : "–"} hint="Maintenance margin over equity; at 100% the account can be liquidated." />
-          <Fig k="Ready to claim" chip="settled" v={claims === null ? <Skel w={70} h={18} /> : `${usdc(claimable)} USDC`} />
+          <Fig k="Ready to claim" chip="settled" v={ready === null ? <Skel w={70} h={18} /> : `${usdc(claimable)} USDC`} />
         </div>
       </header>
 
@@ -95,13 +93,13 @@ export function Portfolio() {
                   <Row where="Lane collateral" chip="soft" amount={account === undefined ? undefined : account ? BigInt(account.collateral) : null} note="Deposits, less withdrawals, plus realized PnL and fees" />
                   <Row where="Held as margin" chip="soft" amount={account === undefined ? undefined : account ? BigInt(account.initial_margin) : null} note="Initial margin of positions and open orders" />
                   <Row where="Free to withdraw" chip="soft" amount={account === undefined ? undefined : account ? BigInt(account.free_collateral) : null} note="Claimable on Stellar after the next checkpoint" strong />
-                  <Row where="Claimable on Stellar" chip="settled" amount={claims === null ? undefined : claimable} note={open.length ? `${open.length} withdrawal${open.length > 1 ? "s" : ""} ready` : "Nothing waiting"} />
+                  <Row where="Claimable on Stellar" chip="settled" amount={ready === null ? undefined : claimable} note={open.length ? `${open.length} withdrawal${open.length > 1 ? "s" : ""} ready: claim it on the right` : "Nothing waiting"} />
                 </tbody>
               </table>
             </div>
           </section>
 
-          <Holdings account={account} claims={claims} address={address} />
+          <Holdings account={account} />
 
           <details className="section">
             <summary>Forced withdrawal through Stellar</summary>
@@ -110,6 +108,7 @@ export function Portfolio() {
         </div>
 
         <aside className="acct-side" aria-label="Move funds">
+          <WithdrawalTracker />
           <section className="section">
             <Tabs
               label="Move funds"
@@ -195,13 +194,11 @@ function Row({ where, chip, amount, note, strong }: { where: string; chip: "soft
   );
 }
 
-function Holdings({ account, claims, address }: { account: Account | null | undefined; claims: Claim[] | null; address: string }) {
+function Holdings({ account }: { account: Account | null | undefined }) {
   const { markets } = useApp();
-  const [tab, setTab] = useState<"positions" | "orders" | "claims">("positions");
+  const [tab, setTab] = useState<"positions" | "orders">("positions");
   const positions = account?.positions ?? [];
   const orders = account?.open_orders ?? [];
-  const open = claims?.filter((c) => !c.claimed) ?? [];
-  const { busy, msg, run } = useAction();
   return (
     <section className="section">
       <Tabs
@@ -211,7 +208,6 @@ function Holdings({ account, claims, address }: { account: Account | null | unde
         tabs={[
           { id: "positions", label: "Positions", count: positions.length },
           { id: "orders", label: "Open orders", count: orders.length },
-          { id: "claims", label: "Claims", count: open.length },
         ]}
       />
       {tab === "positions" &&
@@ -300,55 +296,6 @@ function Holdings({ account, claims, address }: { account: Account | null | unde
             </table>
           </div>
         ))}
-      {tab === "claims" &&
-        (claims === null ? (
-          <div className="section-body">
-            <Skel w="100%" />
-          </div>
-        ) : open.length === 0 ? (
-          <Empty title="Nothing to claim">A withdrawal shows here once its checkpoint is accepted on Stellar, about a minute after you make it.</Empty>
-        ) : (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Checkpoint</th>
-                <th className="r">Amount</th>
-                <th className="r">
-                  <span className="sr-only">Claim</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {open.map((c) => (
-                <tr key={`${c.seq}-${c.index}`}>
-                  <td>
-                    <Chip kind="settled">#{c.seq}</Chip>
-                  </td>
-                  <td className="r">{usdc(c.amount ?? "0")} USDC</td>
-                  <td className="r">
-                    <button
-                      className="btn sm stellar"
-                      disabled={busy}
-                      onClick={() =>
-                        void run(async () => {
-                          const hash = await stellar.claimWithdrawal(address, { seq: c.seq, index: c.index, amount: c.amount ?? "0", proof: c.proof });
-                          return `Claimed on Stellar (${short(hash, 6)}).`;
-                        })
-                      }
-                    >
-                      Claim
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ))}
-      {msg && (
-        <div className="section-body">
-          <p className={`msg ${msg.ok ? "ok" : "err"}`}>{msg.text}</p>
-        </div>
-      )}
     </section>
   );
 }
@@ -430,6 +377,7 @@ function Deposit({ address, wallet, initial, onNeedFunds }: { address: string; w
 }
 
 function Withdraw({ address, ids, account }: { address: string; ids: LaneIds | null; account: Account | null }) {
+  const { withdrew } = useClaims();
   const [amount, setAmount] = useState("");
   const { busy, msg, run } = useAction();
   const v = parseUsdc(amount);
@@ -451,14 +399,19 @@ function Withdraw({ address, ids, account }: { address: string; ids: LaneIds | n
         onClick={() =>
           void run(async () => {
             const hash = await send(ids!, address, { kind: "withdraw", amount: v! }, null);
+            withdrew(v!, hash);
             setAmount("");
-            return `Withdrawal queued in the lane (${short(hash, 6)}). It shows under Claims once its checkpoint is accepted on Stellar.`;
+            return `${usdc(v!)} USDC left the lane (${short(hash, 6)}). Claim it above once the next checkpoint is accepted on Stellar, usually under a minute.`;
           }, explainReject)
         }
       >
         {busy ? "Sign in your wallet…" : "Withdraw"}
       </button>
-      <p className="hint">Signed in your wallet. The amount leaves your lane collateral now and becomes claimable on Stellar after the next accepted checkpoint, about a minute.</p>
+      <ol className="track compact">
+        <li>Withdraw: one wallet signature; it leaves the lane at once</li>
+        <li>The next checkpoint is accepted on Stellar, usually under a minute</li>
+        <li>Claim it to your wallet: one more signature</li>
+      </ol>
       {msg && <p className={`msg ${msg.ok ? "ok" : "err"}`}>{msg.text}</p>}
     </div>
   );

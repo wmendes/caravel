@@ -9,6 +9,7 @@ import { Portfolio } from "./pages/Portfolio";
 import { Trade } from "./pages/Trade";
 import { Router, useRoute } from "./router";
 import { AppProvider } from "./state";
+import { ClaimsProvider } from "./claims";
 
 function Routes() {
   const { path } = useRoute();
@@ -61,11 +62,13 @@ class PageBoundary extends Component<{ children: ReactNode }, { error: string | 
 export function App() {
   return (
     <AppProvider>
+      <ClaimsProvider>
       <Router>
         <Toasts>
           <Routes />
         </Toasts>
       </Router>
+      </ClaimsProvider>
     </AppProvider>
   );
 }

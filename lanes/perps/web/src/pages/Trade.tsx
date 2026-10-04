@@ -8,6 +8,8 @@ import { lane, stream, type Account, type Book, type CandleInterval, type Fill, 
 import { Side, Tif } from "../codec/tx";
 import { INTERVALS, PriceChart } from "../components/Chart";
 import { Chip, Empty, SidePill, Signed, Skel, Tabs, useFlash, useNow, useToast } from "../components/ui";
+import { ClaimChip } from "../components/Withdrawals";
+import { useClaims } from "../claims";
 import { ago, base, baseAmount, perUnit, price, short, toPricePerLot, usdc } from "../format";
 import { Link, useRoute } from "../router";
 import type { SessionKey } from "../session";
@@ -764,6 +766,7 @@ function AccountBox({ account, address, ids, hasKey, keyExpiry }: { account: Acc
           Withdraw
         </Link>
       </div>
+      <ClaimLine />
       {hasKey ? (
         <p className="hint">
           <Chip kind="plain">Fast trading on</Chip> A key on this device signs orders until {keyExpiry ? new Date(keyExpiry).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "it expires"}.
@@ -777,6 +780,18 @@ function AccountBox({ account, address, ids, hasKey, keyExpiry }: { account: Acc
         </div>
       )}
       {err && <p className="msg err">{err}</p>}
+    </div>
+  );
+}
+
+/** Withdrawals waiting to be claimed, right under the account. */
+function ClaimLine() {
+  const { ready, readyTotal, pending } = useClaims();
+  if (!ready?.length && !pending.length) return null;
+  return (
+    <div className="claim-line">
+      <span className="hint">{ready?.length ? `${usdc(readyTotal)} USDC ready to claim on Stellar` : "A withdrawal is on its way: claimable after the next checkpoint"}</span>
+      <ClaimChip />
     </div>
   );
 }

@@ -514,3 +514,19 @@ details.section[open] > summary::after { content: "−"; }
   .section-head .hint { display: none; }
 }
 .topbar .wallet { margin-left: auto; }
+
+/* ---------------------------------------------------------------- withdrawals and claims */
+.tracker { border-color: oklch(0.76 0.105 186 / 0.35); }
+.track { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: var(--t-s); }
+.track li { display: grid; grid-template-columns: 16px 1fr; gap: 8px; align-items: start; color: var(--ink-3); }
+.track li::before { content: ""; width: 10px; height: 10px; margin-top: 3px; border-radius: 50%; border: 1px solid var(--line-strong); }
+.track li.done { color: var(--ink-2); }
+.track li.done::before { background: var(--settled); border-color: var(--settled); }
+.track li.now { color: var(--ink); font-weight: 600; }
+.track li.now::before { border-color: var(--soft); background: var(--soft-bg); animation: pulse 1.6s ease-in-out infinite; }
+.track.compact { margin-top: 2px; }
+.inflight { display: grid; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--hair); }
+.inflight:last-of-type { border-bottom: 0; padding-bottom: 0; }
+.inflight-head { display: flex; justify-content: space-between; }
+.ready { display: grid; gap: 12px; }
+.claim-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: var(--r-2); background: var(--settled-bg); }

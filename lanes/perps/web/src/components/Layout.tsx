@@ -5,6 +5,7 @@ import { Link, useRoute } from "../router";
 import { config } from "../config";
 import { useApp } from "../state";
 import { Chip, useNow } from "./ui";
+import { ClaimChip } from "./Withdrawals";
 
 export function Layout({ children }: { children: ReactNode }) {
   const { path } = useRoute();
@@ -36,6 +37,7 @@ export function Layout({ children }: { children: ReactNode }) {
           <Link to="/about">How it works</Link>
         </nav>
         <div className="wallet">
+          <ClaimChip />
           {address && account !== undefined && (
             <div className="eq">
               <span className="label">Equity</span>
