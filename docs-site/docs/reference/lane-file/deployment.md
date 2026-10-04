@@ -55,6 +55,7 @@ With `runtime = "docker"`, on this machine or an ssh host, each node runs in a c
 - Plans work as for the other runtimes: a node restarts only when its configs or the release change, and `caravel logs`, `status`, `destroy` and `escape` work the same.
 - The containers run read-only, without capabilities, as uid 10001 on an ssh host and as you on this machine. Each sees only its own key.
 - A container reaches a local Stellar network at `host.docker.internal`; `caravel` writes that into the node configs for you.
+- Each container's log is capped at three files of 10 MB (Docker's `local` driver). With the `process` runtime, a node's log in `logs/` moves to `.1` once it passes 10 MB, the next time the node starts.
 - The release names its images in `IMAGES`. A release from CI or `install.sh` has it; for this checkout's builds, `scripts/build-images.sh` makes the images and the file.
 
 **Settlement tokens:**

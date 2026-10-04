@@ -16,6 +16,10 @@ A lane file declares one lane and its deployments. `caravel` reads it for every 
 
 `[node]` is the one genesis-side section that isn't consensus. A deployment can override it with `[env.<name>.node]`, which reaches the hosts but never genesis.
 
+### Block time and checkpoints
+
+`block_time_ms` (200 to 5,000) is how often the sequencer makes a block. `checkpoint_every_blocks` is how many blocks go into one checkpoint, and each checkpoint is a Stellar transaction the relayer submits once the previous one has landed. Choose it by time rather than by blocks: lane #1 seals one a minute, so `checkpoint_every_blocks = 60000 / block_time_ms` (120 at 500 ms, 300 at 200 ms). Faster block times then cost no more Stellar transactions. On a network other than `local`, `caravel validate` points out a deployment that would checkpoint more often than every 30 seconds.
+
 There is no state file. The lane file, Stellar and the host are the whole truth, and `plan` reads all three.
 
 ## Finding the file and the deployment

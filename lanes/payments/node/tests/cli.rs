@@ -213,3 +213,25 @@ fn init_in_containers() {
         caravel_deploy::manifest::Runtime::Docker
     );
 }
+
+/// `validate` notes a deployment off the local network that checkpoints
+/// more often than every 30 s (F-09), and is quiet otherwise.
+#[test]
+fn validate_notes_a_fast_checkpoint_cadence() {
+    let lane = root().join("lanes/payments/config/lane.caravel-payments.local.toml");
+    let mut m = Manifest::load(&lane, "local").unwrap();
+    assert!(
+        caravel_cli::deployment_notes(&m).is_empty(),
+        "local is free"
+    );
+    m.env.network = caravel_deploy::manifest::Network::Testnet;
+    let notes = caravel_cli::deployment_notes(&m);
+    assert_eq!(notes.len(), 1);
+    assert!(
+        notes[0].contains("every 10.0 s") && notes[0].contains("checkpoint_every_blocks = 60"),
+        "{}",
+        notes[0]
+    );
+    m.lane.node.checkpoint_every_blocks = 60;
+    assert!(caravel_cli::deployment_notes(&m).is_empty(), "one a minute");
+}

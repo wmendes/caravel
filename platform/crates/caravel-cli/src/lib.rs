@@ -1598,6 +1598,9 @@ fn validate(g: &Global, positional: Option<&Path>) -> Result<u8> {
                 String::new()
             };
             println!("{mark} {what} {detail}");
+            for n in r["notes"].as_array().into_iter().flatten() {
+                println!("    note: {}", n.as_str().unwrap_or_default());
+            }
         }
         if ok {
             println!("\n{} is valid.", lane_path.display());
@@ -1656,6 +1659,7 @@ pub fn validate_report(
                     "ok": missing.is_empty(),
                     "rules": true,
                     "missing_identities": missing,
+                    "notes": deployment_notes(&m),
                 }));
             }
             Err(e) => {
@@ -1668,6 +1672,29 @@ pub fn validate_report(
         ok,
         json!({ "ok": ok, "lane_file": lane_path.display().to_string(), "checks": checks }),
     ))
+}
+
+/// A checkpoint more often than this is noted (F-09): each one is a Stellar
+/// transaction, submitted one after the other.
+const CHECKPOINT_NOTE_BELOW_MS: u64 = 30_000;
+
+/// Advice on a deployment that is valid as it is.
+pub fn deployment_notes(m: &Manifest) -> Vec<String> {
+    let mut notes = Vec::new();
+    let node = &m.lane.node;
+    let every_ms = node.block_time_ms * node.checkpoint_every_blocks;
+    if m.env.network != caravel_deploy::manifest::Network::Local
+        && every_ms < CHECKPOINT_NOTE_BELOW_MS
+    {
+        notes.push(format!(
+            "a checkpoint every {:.1} s ({} blocks of {} ms): each is a Stellar transaction the relayer submits after the last one lands. For one a minute, set checkpoint_every_blocks = {}",
+            every_ms as f64 / 1000.0,
+            node.checkpoint_every_blocks,
+            node.block_time_ms,
+            60_000 / node.block_time_ms.max(1)
+        ));
+    }
+    notes
 }
 
 /// The identities a deployment names, in a stable order.
