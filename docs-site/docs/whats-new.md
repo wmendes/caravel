@@ -6,6 +6,7 @@ description: "Changes to Caravel, newest first."
 
 ## October 2026
 
+- **Caravel 0.3.0**, a performance release. Validators keep only recent blocks and the sequencer compresses old ones, so three of a lane's four stores stay flat and the fourth grows about 2.4 times slower. Store files give space back as they prune. Checkpoints get signed in milliseconds instead of after a 2 s retry, and the relayer picks them up at once: about 2.5 s less from a transaction to its checkpoint on Stellar. Every node reports its timings under `perf` in `/v1/status` and `caravel status --json`. Logs have a size cap, and `caravel validate` points out a checkpoint cadence faster than every 30 s.
 - **The installer sets up your PATH**, like rustup: new terminals find `caravel` with no `export` to add (`--no-modify-path` to opt out).
 - **Caravel 0.2.0.** Lanes in containers: `runtime = "docker"` runs the nodes, the relayer and Caddy from the release's images, on your machine or on a server, so a first lane needs Docker and the `caravel` CLI. Images for x86_64 and arm64 on `ghcr.io`. Infrastructure as code for the machine a lane runs on ([Machines on Google Cloud](guides/machines-on-gcp.md)). Caravel Perps runs this way on testnet.
 - **Docs.** This site.
