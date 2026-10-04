@@ -108,14 +108,22 @@ if [[ "$E2E_NETWORK" == local ]]; then
 fi
 command -v jq > /dev/null || fail "jq is required"
 
-log "build"
-./scripts/build-contracts.sh
-cargo build --release --locked -p "caravel-$E2E_TEMPLATE-node" -p caravel-cli
-npm --prefix platform/relayer ci --silent
-npm --prefix platform/relayer run build --silent
-if [[ "$E2E_TEMPLATE" == perps ]]; then
-  npm --prefix lanes/perps/relayer-feeds ci --silent
-  npm --prefix lanes/perps/relayer-feeds run build --silent
+if [[ -n "${E2E_RELEASE_DIR:-}" ]]; then
+  # A release built elsewhere (CI's release job, F-04): it carries the CLI,
+  # the nodes, the contracts, the relayer and the feeds, so nothing is built here.
+  log "release $(cat "$E2E_RELEASE_DIR/COMMIT")"
+  CARAVEL="$E2E_RELEASE_DIR/bin/caravel"
+  [[ -x "$CARAVEL" ]] || fail "$E2E_RELEASE_DIR has no bin/caravel"
+else
+  log "build"
+  ./scripts/build-contracts.sh
+  cargo build --release --locked -p "caravel-$E2E_TEMPLATE-node" -p caravel-cli
+  npm --prefix platform/relayer ci --silent
+  npm --prefix platform/relayer run build --silent
+  if [[ "$E2E_TEMPLATE" == perps ]]; then
+    npm --prefix lanes/perps/relayer-feeds ci --silent
+    npm --prefix lanes/perps/relayer-feeds run build --silent
+  fi
 fi
 
 if [[ "$E2E_RUNTIME" == docker && -z "${E2E_RELEASE_DIR:-}" ]]; then

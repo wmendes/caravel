@@ -1,0 +1,49 @@
+# The Rust jobs' common setup (F-04): toolchain, the cargo cache for both
+# workspaces, Node 22, and optionally the Stellar CLI and cargo-nextest.
+name: rust-setup
+description: Toolchain, cache, Node, and optional Stellar CLI / nextest for Caravel's Rust jobs.
+inputs:
+  cache-key:
+    description: Shared cache key (jobs that build the same thing share one cache).
+    required: true
+  stellar-cli:
+    description: Install the pinned Stellar CLI (build-contracts.sh needs it).
+    default: "false"
+  nextest:
+    description: Install the pinned cargo-nextest.
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Install toolchain from rust-toolchain.toml
+      shell: bash
+      run: rustup toolchain install && rustup show active-toolchain
+    # Both workspaces: the frozen engine (DEC-051) has its own target/ and was
+    # rebuilt from scratch on every run before F-04. Only main saves, so pull
+    # requests restore main's cache and the repo stays under the 10 GB limit.
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: ${{ inputs.cache-key }}
+        workspaces: |
+          . -> target
+          lanes/perps/engine -> target
+        save-if: ${{ github.ref == 'refs/heads/main' }}
+    - uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+    - name: Install Stellar CLI
+      if: inputs.stellar-cli == 'true'
+      shell: bash
+      run: |
+        curl -sSfL -o stellar-cli.tar.gz \
+          "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+        echo "${STELLAR_CLI_SHA256}  stellar-cli.tar.gz" | sha256sum -c -
+        mkdir -p "$HOME/.local/bin"
+        tar xzf stellar-cli.tar.gz -C "$HOME/.local/bin" stellar
+        rm stellar-cli.tar.gz
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+    - name: Install cargo-nextest
+      if: inputs.nextest == 'true'
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-nextest@${{ env.NEXTEST_VERSION }}

@@ -69,5 +69,6 @@
     "compose_plugin": "5.6.0-1~ubuntu.24.04~noble",
     "containerd": "2.3.6-1~ubuntu.24.04~noble",
     "apt_key_fingerprint": "9DC858229FC7DD38854AE2D88D81803C0EBFCD88"
-  }
+  },
+  "nextest": "0.9.146"
 }

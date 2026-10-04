@@ -188,6 +188,7 @@ fn init_writes_a_lane_file_and_its_identities() {
 /// nodes as containers.
 #[test]
 fn init_in_containers() {
+    use_this_plugin();
     let dir = tempfile::tempdir().unwrap();
     let dir = dir.path().join("boxed");
     let done = init(&InitArgs {

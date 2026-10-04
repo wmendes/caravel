@@ -191,11 +191,25 @@ fn random_workloads_match_native() {
     }
 }
 
-/// The parity gate: 10,000 blocks (INV-P5).
+/// The parity gate: 10,000 blocks (INV-P5), as 16 seeded lanes of 625 blocks
+/// run on every core (F-04), like the perps gate's 50 × 200.
 #[test]
 #[ignore = "10,000 blocks; run with --ignored"]
 fn ten_thousand_blocks_match_native() {
-    random_parity(0x5EED_CAFE, 10_000, FEE);
+    const LANES: u64 = 16;
+    let threads = std::thread::available_parallelism()
+        .map_or(1, |n| n.get())
+        .min(LANES as usize) as u64;
+    std::thread::scope(|s| {
+        for t in 0..threads {
+            s.spawn(move || {
+                for seed in (t..LANES).step_by(threads as usize) {
+                    random_parity(0x5EED_CAFE + seed, 10_000 / LANES, FEE);
+                }
+            });
+        }
+    });
+    eprintln!("parity: 10,000 blocks on {threads} threads");
 }
 
 // --- Budget --------------------------------------------------------------------

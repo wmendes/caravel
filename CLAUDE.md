@@ -1,6 +1,6 @@
 # Caravel: agent instructions
 
-Caravel deploys and runs configurable appchains ("lanes") that settle to Stellar in a token of their choosing (DEC-072), declared in one lane file (`caravel plan / apply / status / destroy`). The first lane is Caravel Perps, an on-chain perpetual futures exchange; Payments is the second template. Current milestone: **M0.8, containers and machines as code** (spec §20.7): images per release, a `docker` runtime for `caravel apply`, OpenTofu for machines; lane #1 runs as containers since 2026-10-04 (DEC-115). Before it, **M0.7, ready for HackMeridian** (spec §20.6): the landing page says who it is for, prebuilt binaries and a short path to a first lane, a contracts lane template that can run Groundhog, and a starter kit for Frankenstack teams. Before it came M0.6 (a real CLI and the lane file language, §20.5, done 2026-10-03) and M0.5 (the platform split and declarative lanes, §20.3).
+Caravel deploys and runs configurable appchains ("lanes") that settle to Stellar in a token of their choosing (DEC-072), declared in one lane file (`caravel plan / apply / status / destroy`). The first lane is Caravel Perps, an on-chain perpetual futures exchange; Payments is the second template. Current milestone: **M0.9, a performance cycle** (spec §20.8): measure, then storage, disk I/O, latency, throughput and CI without consensus changes. Before it, **M0.8, containers and machines as code** (spec §20.7): images per release, a `docker` runtime for `caravel apply`, OpenTofu for machines; lane #1 runs as containers since 2026-10-04 (DEC-115). Before it, **M0.7, ready for HackMeridian** (spec §20.6): the landing page says who it is for, prebuilt binaries and a short path to a first lane, a contracts lane template that can run Groundhog, and a starter kit for Frankenstack teams. Before it came M0.6 (a real CLI and the lane file language, §20.5, done 2026-10-03) and M0.5 (the platform split and declarative lanes, §20.3).
 
 ## Read first
 
@@ -37,7 +37,8 @@ Toolchain: Rust 1.93.0 + `wasm32v1-none` (from `rust-toolchain.toml`), Stellar C
 node scripts/check-versions.mjs         # versions.json pins, Cargo.lock/package-lock, placeholders (§7)
 ./scripts/build-contracts.sh            # builds Wasm with the pinned CLI, checks size and recorded hashes (DEC-020; hashes of record are x86_64 Linux builds from CI, DEC-033); run before the tests
 cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace --locked
-cargo test --locked -p caravel-perps-node --test parity -- --ignored      # 10,000-block native/Wasm parity gate (INV-P5)
+cargo test --locked -p caravel-perps-node --test parity -- --ignored      # 10,000-block native/Wasm parity gate (INV-P5); its 50 lanes run on every core
+cargo nextest run --workspace --locked --run-ignored only -E 'binary(parity)'   # both parity gates at once, as CI runs them (F-04; nextest pinned in versions.json)
 cargo test --locked -p caravel-payments-node --test parity -- --ignored   # the same gate for the payments engine (DEC-064)
 ./scripts/check-frozen.sh               # the perps engine of record is frozen under lanes/perps/engine (DEC-051)
 node scripts/check-deps.mjs             # platform/ never depends on lanes/ (M0.5; listed exceptions shrink to none)
