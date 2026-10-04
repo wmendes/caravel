@@ -75,7 +75,7 @@ npm --prefix docs-site start            # the docs with live reload; `npm --pref
 node scripts/gen-cli-docs.mjs && ./scripts/check-cli-docs.sh && ./scripts/check-docs.sh   # the CLI reference from `caravel help`, and the docs' copy rules
 ```
 
-Git: one branch and PR per task (`t-0xx-short-name`, `p-0x-short-name` for M0.5, `c-0x-short-name` for M0.6, `h-0x-short-name` for M0.7). Inside a phase, PRs stack on the previous task's branch, and the human reviews at the phase gates (M0: T-003, T-006, T-011, T-016; M0.5: P-07, P-10, P-14, P-18; M0.6: C-05, C-10, C-14, C-17, C-21, C-25; M0.7: H-01, H-04, H-06, H-08, H-11).
+Git: one branch and PR per task (`t-0xx-short-name`, `p-0x-short-name` for M0.5, `c-0x-short-name` for M0.6, `h-0x-short-name` for M0.7). CI runs only what a change touches (DEC-117): docs-only PRs take about a minute, and `[skip ci]` in a commit message skips CI for changes that can't break anything. Inside a phase, PRs stack on the previous task's branch, and the human reviews at the phase gates (M0: T-003, T-006, T-011, T-016; M0.5: P-07, P-10, P-14, P-18; M0.6: C-05, C-10, C-14, C-17, C-21, C-25; M0.7: H-01, H-04, H-06, H-08, H-11).
 
 ## Layout
 

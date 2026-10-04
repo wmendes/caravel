@@ -48,6 +48,16 @@ cargo test --locked -p caravel-payments-node --test parity -- --ignored
 ./scripts/e2e-local.sh
 ```
 
+## What CI runs
+
+CI looks at the files a change touches and runs only what they can affect:
+- **Docs only** (`docs/`, `docs-site/`, `site/`, any `.md` outside the frozen engine): the version and copy checks, plus the docs site build when it changed. About a minute.
+- **An npm app** (`platform/relayer`, `lanes/perps/relayer-feeds`, `lanes/perps/web`, `docs-site`): that app's tests and build. A relayer change tests the feed module too.
+- **OpenTofu** (`infra/opentofu/`): its format and validate job.
+- **Anything else is code:** the Rust build and tests, and on `main` the e2e runs, the quickstart and the release. A change to `versions.json` or the workflow runs everything.
+
+For a commit that can't break anything, such as a typo in a comment or a spec wording fix, put `[skip ci]` in its message and CI doesn't start. Never use it for a change to code, scripts, versions or the workflow. GitHub finds the marker anywhere in the message, so don't quote it in a message that should run CI.
+
 ## Pull requests
 
 Keep each pull request to one change. In its description, say:
