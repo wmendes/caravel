@@ -594,6 +594,24 @@ async fn validators_follow_sign_and_refuse_a_tampered_chain() {
         .await;
     assert_eq!(from_sequencer["seq"], "1");
     assert_eq!(from_sequencer, proof);
+
+    // F-14: the relayer's pending request is held until the next checkpoint
+    // is signed (one every 2 s here), not answered 204 at once.
+    let held = c
+        .http
+        .get(format!(
+            "{seq_url}/internal/checkpoints/pending?wait_ms=8000"
+        ))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(held.status(), 200);
+    let next: Value = held.json().await.unwrap();
+    assert!(
+        next["seq"].as_str().unwrap().parse::<u64>().unwrap() >= 2,
+        "{next}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

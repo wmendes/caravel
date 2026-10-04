@@ -23,7 +23,8 @@ export interface SequencerApi {
   postInbox(index: bigint, msgHex: string, accAfterHex: string): Promise<InboxReply>;
   /** `POST /internal/{route}`: an app's feed update (DEC-053). */
   postFeed(route: string, updateHex: string): Promise<void>;
-  pendingCheckpoint(): Promise<PendingCheckpoint | null>;
+  /** The next signed checkpoint; with `waitMs`, the sequencer holds the request until one is signed (F-14). */
+  pendingCheckpoint(waitMs?: number): Promise<PendingCheckpoint | null>;
   reportAccepted(seq: bigint, stellarTxHash: string, ledger: number): Promise<void>;
 }
 
@@ -39,11 +40,19 @@ export class HttpSequencer implements SequencerApi {
     private readonly fetchImpl: typeof fetch = fetch,
   ) {}
 
-  private async request(path: string, init: RequestInit = {}, internal = false): Promise<Response> {
+  private async request(path: string, init: RequestInit = {}, internal = false, heldMs = 0): Promise<Response> {
     const headers = new Headers(init.headers);
     if (internal) headers.set("authorization", `Bearer ${this.token}`);
     if (init.body !== undefined) headers.set("content-type", "application/json");
-    return this.fetchImpl(`${this.baseUrl.replace(/\/$/, "")}${path}`, { ...init, headers, signal: AbortSignal.timeout(10_000) });
+    const send = () => this.fetchImpl(`${this.baseUrl.replace(/\/$/, "")}${path}`, { ...init, headers, signal: AbortSignal.timeout(10_000 + heldMs) });
+    try {
+      return await send();
+    } catch (e) {
+      // A GET is safe to send again: a pooled connection the sequencer
+      // closed fails as "fetch failed" before any answer (F-14).
+      if ((init.method ?? "GET") !== "GET" || !(e instanceof TypeError)) throw e;
+      return send();
+    }
   }
 
   private async json<T>(r: Response, what: string): Promise<T> {
@@ -80,8 +89,8 @@ export class HttpSequencer implements SequencerApi {
     await this.json(await this.request(`/internal/${route}`, { method: "POST", body: JSON.stringify({ update: updateHex }) }, true), route);
   }
 
-  async pendingCheckpoint(): Promise<PendingCheckpoint | null> {
-    const r = await this.request("/internal/checkpoints/pending", {}, true);
+  async pendingCheckpoint(waitMs = 0): Promise<PendingCheckpoint | null> {
+    const r = await this.request(`/internal/checkpoints/pending${waitMs > 0 ? `?wait_ms=${waitMs}` : ""}`, {}, true, waitMs);
     if (r.status === 204) return null;
     const v = await this.json<{ seq: string; header: string; batch: string; epoch: string; sigs: { signer_index: number; signature: string }[] }>(r, "pending checkpoint");
     return {

@@ -81,6 +81,32 @@ describe("checkpoint submitter (spec §17.2)", () => {
     expect(seq.reported).toEqual([]);
   });
 
+  it("sends the next checkpoint without reading Stellar first (F-14)", async () => {
+    const st = new FakeSettlement();
+    const seq = new FakeSequencer();
+    const state = { lastAccepted: null };
+    seq.queue.push(pending(1n), pending(2n), pending(3n));
+    for (let i = 0; i < 3; i++) expect((await submitNext(seq, st, new Metrics(), state)).kind).toBe("submitted");
+    expect(st.lastReads).toBe(1);
+    expect(state.lastAccepted).toBe(3n);
+  });
+
+  it("reads Stellar again after a failed send, and reports what is there (F-14)", async () => {
+    const st = new FakeSettlement();
+    const seq = new FakeSequencer();
+    const state = { lastAccepted: null };
+    const p2 = pending(2n);
+    seq.queue.push(pending(1n), p2);
+    expect((await submitNext(seq, st, new Metrics(), state)).kind).toBe("submitted");
+    // Another relayer got seq 2 in first: the send fails the simulation.
+    st.accepted.push({ seq: 2n, header: p2.header, ledger: 200, hash: "other" });
+    await expect(submitNext(seq, st, new Metrics(), state)).rejects.toThrow(/simulation/);
+    expect(state.lastAccepted).toBeNull();
+    expect(await submitNext(seq, st, new Metrics(), state)).toMatchObject({ kind: "reconciled", seq: 2n, hash: "other" });
+    expect(st.lastReads).toBe(2);
+    expect(st.submits).toBe(2);
+  });
+
   it("refuses to skip a seq", async () => {
     const st = new FakeSettlement();
     const seq = new FakeSequencer();

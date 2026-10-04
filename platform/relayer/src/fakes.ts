@@ -10,6 +10,8 @@ export class FakeSettlement implements SettlementApi {
   /** Throw after the transaction lands, as if the process died before reporting. */
   crashAfterSubmit = false;
   submits = 0;
+  /** The relayer's `last_checkpoint()` reads. */
+  lastReads = 0;
 
   deposit(laneAccount: Uint8Array, amount: bigint, enqueuedAt: bigint): void {
     const index = BigInt(this.inboxMsgs.length);
@@ -27,6 +29,11 @@ export class FakeSettlement implements SettlementApi {
   }
 
   async lastCheckpoint(): Promise<{ seq: bigint; headerHash: Uint8Array }> {
+    this.lastReads += 1;
+    return this.last();
+  }
+
+  private last(): { seq: bigint; headerHash: Uint8Array } {
     const last = this.accepted.at(-1);
     return last ? { seq: last.seq, headerHash: sha256(last.header) } : { seq: 0n, headerHash: new Uint8Array(32) };
   }
@@ -43,7 +50,7 @@ export class FakeSettlement implements SettlementApi {
 
   async submitCheckpoint(p: PendingCheckpoint): Promise<SubmitResult> {
     this.submits += 1;
-    const last = await this.lastCheckpoint();
+    const last = this.last();
     if (p.seq !== last.seq + 1n) throw new Error("simulation: Error(Contract, #25)");
     this.ledger += 1;
     const hash = `${p.seq.toString().padStart(64, "0")}`;

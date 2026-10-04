@@ -6,7 +6,7 @@
  *   node dist/main.js --config relayer.local.json
  */
 import { syncInbox, InboxMismatch } from "./inbox.js";
-import { submitNext, CheckpointDivergence } from "./checkpoints.js";
+import { submitNext, CheckpointDivergence, type SubmitState } from "./checkpoints.js";
 import { fromHex } from "./codec.js";
 import { loadConfig } from "./config.js";
 import { FEED_DEADLINE_MS, loadFeedModule, withDeadline, type FeedHost } from "./feeds.js";
@@ -20,6 +20,9 @@ function log(level: "info" | "warn" | "error", msg: string, extra: Record<string
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** How long the sequencer holds a request for the next signed checkpoint (F-14). */
+const PENDING_WAIT_MS = 5_000;
 
 let stopping = false;
 for (const sig of ["SIGINT", "SIGTERM"] as const) {
@@ -48,7 +51,8 @@ async function loop(name: string, everyMs: number, step: () => Promise<void>, fa
         log("error", `${name}: stopped`, { error: String(e) });
         return;
       }
-      log("warn", `${name}: ${String(e)}`);
+      const cause = e instanceof Error && e.cause !== undefined ? ` (${String(e.cause)})` : "";
+      log("warn", `${name}: ${String(e)}${cause}`);
       backoff = Math.min(backoff * 2, 30_000);
     }
     await sleep(backoff);
@@ -81,13 +85,14 @@ async function main(): Promise<void> {
 
   if (f.loops.checkpoints) {
     const metrics = new JsonlMetrics(cfg.metricsPath);
+    const submitState: SubmitState = { lastAccepted: null };
     loops.push(
       loop(
         "checkpoints",
         f.intervalsMs?.checkpoints ?? 2_000,
         async () => {
           for (;;) {
-            const r = await submitNext(seq, st, metrics);
+            const r = await submitNext(seq, st, metrics, submitState, PENDING_WAIT_MS);
             if (r.kind === "idle") return;
             log("info", `checkpoint ${r.kind}`, { seq: r.seq, tx: r.hash });
           }

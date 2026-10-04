@@ -142,6 +142,8 @@ pub struct SequencerNode<A: NodeApp> {
     sealed_at: Mutex<BTreeMap<u64, std::time::Instant>>,
     /// The height of the last published block, for long polls (F-11).
     height: tokio::sync::watch::Sender<u64>,
+    /// The last checkpoint signed, for the relayer's long poll (F-14).
+    signed: tokio::sync::watch::Sender<u64>,
     /// A read-only connection to the store, for raw blocks outside the core
     /// lock (F-11); `None` for a store in memory.
     reader: Option<Mutex<Store>>,
@@ -314,6 +316,7 @@ pub async fn start<A: NodeApp>(
         perf: Mutex::new(caravel_runtime::perf::Perf::new()),
         sealed_at: Mutex::new(BTreeMap::new()),
         height: tokio::sync::watch::Sender::new(start_height),
+        signed: tokio::sync::watch::Sender::new(0),
         reader: Store::open_read_only(&cfg.db).ok().map(Mutex::new),
     });
     let router = router(node.clone(), &cfg.cors_origins);
@@ -489,6 +492,7 @@ async fn signer_loop<A: NodeApp>(app: Arc<SequencerNode<A>>) {
                 match stored {
                     Ok(()) => {
                         tracing::info!(seq = row.seq, signatures = sigs.len(), "checkpoint signed");
+                        app.signed.send_replace(row.seq);
                         let _ = app.events.send(StreamEvent::Checkpoint {
                             seq: row.seq,
                             status: "signed",
@@ -826,6 +830,8 @@ struct RawQuery {
 
 /// The longest `/v1/blocks/{h}/raw?wait_ms=` holds a request.
 const RAW_WAIT_MAX: Duration = Duration::from_secs(5);
+/// The longest `/internal/checkpoints/pending?wait_ms=` holds a request.
+const PENDING_WAIT_MAX: Duration = Duration::from_secs(10);
 
 /// `GET /v1/blocks/{h}/raw` (F-11): the `BlockRecordV1` bytes, what a
 /// validator follows, read without the core lock. With `wait_ms`, a block
@@ -991,13 +997,33 @@ async fn internal_feed<A: NodeApp>(
     }
 }
 
-async fn internal_pending<A: NodeApp>(State(app): AppState<A>, headers: HeaderMap) -> ApiResult {
-    authorized(&app, &headers)?;
-    let row = on_pool(&app, |app| {
+async fn first_signed<A: NodeApp>(
+    app: &Arc<SequencerNode<A>>,
+) -> Result<Option<CheckpointRow>, ApiError> {
+    on_pool(app, |app| {
         app.store(|s| s.first_checkpoint_with(CheckpointStatus::Signed))
     })
     .await?
-    .map_err(ApiError::internal)?;
+    .map_err(ApiError::internal)
+}
+
+/// `GET /internal/checkpoints/pending[?wait_ms=N]`: the next signed
+/// checkpoint for the relayer. With `wait_ms` (at most 10,000) the request
+/// is held until one is signed (F-14), else 204.
+async fn internal_pending<A: NodeApp>(
+    State(app): AppState<A>,
+    headers: HeaderMap,
+    Query(q): Query<RawQuery>,
+) -> ApiResult {
+    authorized(&app, &headers)?;
+    let wait = Duration::from_millis(q.wait_ms.unwrap_or(0)).min(PENDING_WAIT_MAX);
+    // Subscribed before the read, so a signature in between is not missed.
+    let mut signed = app.signed.subscribe();
+    let mut row = first_signed(&app).await?;
+    if row.is_none() && !wait.is_zero() {
+        let _ = tokio::time::timeout(wait, signed.changed()).await;
+        row = first_signed(&app).await?;
+    }
     match row {
         None => Ok(StatusCode::NO_CONTENT.into_response()),
         Some(row) => ok(json!({
