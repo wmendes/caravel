@@ -52,6 +52,7 @@ cargo run --release -p caravel-perps-node -- check-store --config lanes/perps/co
 cargo run --release -p caravel-perps-node -- compact --config <sequencer or validator toml>   # prune a stopped node's store and VACUUM it (DEC-105); nodes also prune as they run
 cargo run --release -p caravel-perps-node -- export-proofs --config <validator.toml> [--out exit.json]   # every escape and withdrawal proof a validator holds (DEC-065)
 DURATION=3600 TPS=50 ./scripts/soak-sequencer.sh   # T-007 soak: 1 s blocks, 50 tx/s, restart halfway
+BLOCK_MS=500 TPS=45 DURATION=600 ./scripts/soak-lane.sh   # F-02: the whole lane on a local network under load; phases, storage/day, CPU, latency (summary.json)
 cargo run --release -p caravel-perps-node -- replay --rpc <url> --network-passphrase <p> --settlement C... --genesis-config lanes/perps/config/lane.<lane>.toml --engine-wasm target/contracts/perps_engine.wasm [--prove-escape G...]   # replay from Stellar only
 cargo build --release -p caravel-cli -p caravel-payments-node && ./target/release/caravel plan -f lanes/payments/config/lane.caravel-payments.local.toml   # the CLI (DEC-066 to DEC-068, DEC-075): plan, apply, status, destroy, validate, env list, output, version, doctor; --json on all
 ./scripts/e2e-local.sh                  # the whole lifecycle with the caravel CLI alone, on a local network (DEC-068, DEC-086); E2E_TEMPLATE=payments, E2E_NETWORK=testnet

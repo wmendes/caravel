@@ -2336,7 +2336,7 @@ Branches are `f-0x-short-name`. Gates: F-04, F-09 and F-14.
 | ID | Task | Depends | Status |
 |---|---|---|---|
 | F-01 | **Per-phase metrics.** Lock wait, build, execute, decode, commit, seal, sign-collect and fan-out timings (p50/p99), in `/v1/status` and `caravel status --json`. Node-side only (`caravel-runtime::perf`, a 1,024-sample window per phase); validators also report fetch, checkpoint and sign, the sequencer seal-to-signed | M0.8 | review |
-| F-02 | **Load tooling.** `loadgen` past 255 accounts with several requests in flight and a target rate; a local full-stack soak (sequencer, validators, relayer) at 500 and 200 ms | F-01 | todo |
+| F-02 | **Load tooling.** `loadgen` past 255 accounts (`--accounts` u16, hashed seeds past 255) with `--inflight` requests open per account (a nonce refused for room is sent again, so no gap stalls the account) and `--csv`; `scripts/soak-lane.sh`, a local full-stack soak (sequencer, 3 validators, relayer, accounts that deposit through Stellar) at any `BLOCK_MS`, reporting every node's phases, CPU and memory, store bytes per block and per day, latency and rate | F-01 | review |
 | F-03 | **Baseline report.** Soak at 500/200 ms (idle, 45 and 100 tx/s) plus lane #1's growth; RESULTS "Performance baseline"; network limits in SOURCES | F-02 | todo |
 | F-04 | **CI, fast path** (DEC-119) — **Gate.** Both workspaces cached; no disk cleanup; four parallel Rust jobs; parity gates concurrent and both gates threaded; nextest; main-only cache saves; release built once for the e2e; no cancelled main runs | M0.8 | review |
 | F-05 | **Logs and small files.** Rotation for container and process logs, no ANSI, a capped relayer jsonl, a quieter prune log | F-04 | todo |
