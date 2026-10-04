@@ -38,4 +38,4 @@ Every other command works the same: `plan` restarts only the nodes whose configs
 
 ## Where the images come from
 
-A release names its images in an `IMAGES` file: one per node template (`caravel-perps-node`, `caravel-payments-node`), the relayer (`caravel-relayer`) and each web app (`caravel-perps-web`), on `ghcr.io`. Releases from CI and from `install.sh` carry it. On Linux, `scripts/build-images.sh <release>` builds the images of a release assembled from your checkout and writes the file.
+A release names its images in an `IMAGES` file: one per node template (`caravel-perps-node`, `caravel-payments-node`), the relayer (`caravel-relayer`) and each web app (`caravel-perps-web`), on `ghcr.io`. Releases from CI and from `install.sh` carry it. To run your own changes, build a release from your checkout and package it: `scripts/assemble-release.sh <dir>` on Linux, or `scripts/build-linux-release.sh <dir>` anywhere with Docker (it builds the binaries in the pinned Rust image, for your Docker's architecture), then `scripts/build-images.sh <dir>`, which builds the images and writes the file. Give `caravel` that release with `--release-dir <dir>`.

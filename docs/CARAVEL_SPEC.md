@@ -2302,7 +2302,10 @@ Branches are `d-0x-short-name`, stacked. Gates: after D-03 (lanes in Docker on a
 | D-04 | **OpenTofu modules for GCP** (DEC-114). A host module (VM, address, firewall, IAP SSH, a startup script that installs Docker), a billing-cap module, lane #1's root module with a GCS backend; outputs feed `caravel --var-file` | D-01 | done |
 | D-05 | **Lane #1's project, imported.** Every existing resource imported; `tofu plan` says no changes; nothing recreated | D-04 | done |
 | D-06 | **Lane #1 on Docker** — **Gate**. With the human's OK: Docker on the VM, `runtime = "docker"`, apply, verify, rollback ready | D-03, D-05 | done |
-| D-07 | **Spec and docs.** Guides (lanes in Docker, machines with OpenTofu), RUNBOOK §3, CLAUDE.md, SOURCES | D-06 | review |
+| D-07 | **Spec and docs.** Guides (lanes in Docker, machines with OpenTofu), RUNBOOK §3, CLAUDE.md, SOURCES | D-06 | done |
+| D-08 | **A Linux builder anywhere** (DEC-116). `scripts/build-linux-release.sh` builds the Rust binaries in the pinned Rust image for Docker's architecture and assembles a release from this checkout, so a Mac builds images and runs the docker e2e with nothing downloaded | D-07 | review |
+| D-09 | **Lane #1's VM cleaned up.** With the human's OK: the disabled systemd units and the host's Caddy and Node.js removed; the rollback is now a reinstall (RUNBOOK §3.4) | D-06 | todo |
+| D-10 | **A release with images.** With the human's OK: a `v*` tag, multi-arch images on GHCR, the draft checked and published, `install.sh` users get the docker runtime | D-08 | todo |
 
 ---
 
@@ -3216,6 +3219,7 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 - **Downtime:** 10:24:21 to about 10:28:35 UTC (4 min), most of it two IAP ssh round trips and the apply's per-node health waits; the plan had said 1 to 2 minutes.
 - **Checked:** blocks at 0.5 s from height 403,001, checkpoints 6551 to 6553 accepted on Stellar after the switch, oracle prices moving, `/validators/1..3` and the web app over HTTPS with the same Let's Encrypt certificate, six containers using about 105 MB together (the relayer 57 MB, each node about 10 MB), and `caravel plan` with the `caravel_vars` file said **No changes**.
 - **Rollback:** RUNBOOK §3.4 (compose down, ownership back to `caravel`, Caddy on, runtime line removed, apply). | The human chose one way to run a lane on a laptop and on a VM; lane #1 now runs the same images CI pushes | Removing the disabled units and the host's Caddy once the containers have run for a while |
+| DEC-116 | **M0.8 (D-08).** `scripts/build-linux-release.sh <out>` makes a Linux release on any machine with Docker: `cargo build --release --locked` of `caravel-cli` and each template's node in `rust:1.93.0-trixie` (pinned by digest, `versions.json` `images.rust_builder`; `check-versions` requires the toolchain of record), as the calling user, with the target and cargo's cache under `target/linux-<arch>/`, and `RUSTUP_TOOLCHAIN` set so rustup doesn't install `rust-toolchain.toml`'s Wasm target into the image. The architecture is the Docker daemon's (arm64 on Apple silicon, native speed). Everything else comes from this checkout's builds, which don't depend on the platform: the contracts, and the relayer, feeds and web app (their production dependencies are plain JS). `assemble-release.sh` takes the binaries from `CARAVEL_BIN_DIR`, and now resolves its output to a real path, because `npm ci` refused a prefix reached through macOS's `/var` symlink. `E2E_RUNTIME=docker` uses the builder off Linux instead of requiring `E2E_RELEASE_DIR`. **Checked 2026-10-04 on macOS (arm64):** a first build in 3 min 41 s; `E2E_TEMPLATE=payments E2E_RUNTIME=docker` passed every step from a clean checkout build. | A Mac developer can try their own changes in containers without CI | Cross-building amd64 on arm64 (slow under emulation) |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

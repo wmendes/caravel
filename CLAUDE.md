@@ -56,7 +56,8 @@ cargo build --release -p caravel-cli -p caravel-payments-node && ./target/releas
 ./scripts/e2e-local.sh                  # the whole lifecycle with the caravel CLI alone, on a local network (DEC-068, DEC-086); E2E_TEMPLATE=payments, E2E_NETWORK=testnet
 ./scripts/check-e2e.sh                  # the e2e calls no stellar/curl/node -e/kill/sleep outside its cleanup (DEC-086)
 ./scripts/build-images.sh <release-dir> [--push --registry ghcr.io/<owner>]   # the release's container images and its IMAGES file (DEC-111); arch=dir pairs for multi-arch
-E2E_RUNTIME=docker E2E_RELEASE_DIR=<Linux release with IMAGES> ./scripts/e2e-local.sh   # the e2e in containers (DEC-113); Linux builds the release and images itself
+E2E_RUNTIME=docker ./scripts/e2e-local.sh   # the e2e in containers (DEC-113); builds the release and images itself (off Linux, through build-linux-release.sh), or E2E_RELEASE_DIR=<Linux release with IMAGES>
+./scripts/build-linux-release.sh <out> && ./scripts/build-images.sh <out>   # a Linux release and its images from this checkout on any machine with Docker (D-08)
 tofu -chdir=infra/opentofu/envs/caravel-testnet init && tofu -chdir=infra/opentofu/envs/caravel-testnet plan   # lane #1's machines (DEC-114); OpenTofu 1.13.1 from versions.json; never apply without the human
 tofu -chdir=infra/opentofu/envs/caravel-testnet output -raw caravel_vars > hosts.vars.toml   # the host for caravel --var-file
 ./scripts/check-quickstart.sh           # install from the checkout, then the README quickstart as written (SKIP_BUILD=1 reuses builds)
