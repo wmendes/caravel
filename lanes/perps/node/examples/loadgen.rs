@@ -531,13 +531,31 @@ enum Sent {
 
 /// The CSV columns: the report's flat numbers, then the sequencer's p50 and
 /// p99 for the phases the cycle tracks (F-01).
-const CSV_PHASES: [&str; 5] = ["execute", "commit", "seal", "sign_collect", "seal_to_signed"];
+const CSV_PHASES: [&str; 5] = [
+    "execute",
+    "commit",
+    "seal",
+    "sign_collect",
+    "seal_to_signed",
+];
 
 fn csv_header() -> String {
     let mut cols = vec![
-        "elapsed_s", "final", "height", "blocks_per_s", "sent", "queued", "queued_tx_per_s",
-        "rejected", "http_errors", "soft_p50_ms", "soft_p99_ms", "hard_p50_ms", "hard_p99_ms",
-        "cpu_p50_insns", "cpu_p99_insns",
+        "elapsed_s",
+        "final",
+        "height",
+        "blocks_per_s",
+        "sent",
+        "queued",
+        "queued_tx_per_s",
+        "rejected",
+        "http_errors",
+        "soft_p50_ms",
+        "soft_p99_ms",
+        "hard_p50_ms",
+        "hard_p99_ms",
+        "cpu_p50_insns",
+        "cpu_p99_insns",
     ]
     .into_iter()
     .map(str::to_string)
@@ -862,7 +880,10 @@ async fn main() -> Result<()> {
     while started.elapsed() < Duration::from_secs(args.duration_secs) {
         tokio::time::sleep(Duration::from_millis(250)).await;
         if last_report.elapsed() >= Duration::from_secs(args.report_secs) {
-            emit(&sh.report(started, start_height, None).await, args.csv.as_deref())?;
+            emit(
+                &sh.report(started, start_height, None).await,
+                args.csv.as_deref(),
+            )?;
             last_report = Instant::now();
         }
     }
