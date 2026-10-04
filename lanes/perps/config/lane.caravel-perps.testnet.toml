@@ -187,6 +187,7 @@ reflectorContract = "CCYOZJCOPG34LLQQ7N24YXBM7LL62R7ONMZ3G6WZAAYPB5OYKOMJRN63"
 [env.testnet.host]
 provider = "ssh"
 transport = "gcloud-iap"
+runtime = "docker"                          # D-06 (DEC-112): the nodes and Caddy as containers from the release's images
 address = "${var.host_address}"
 project = "${var.host_project}"
 zone = "${var.host_zone}"

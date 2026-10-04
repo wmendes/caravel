@@ -21,13 +21,25 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
 }
 
+/// Lane #1's lane file as it ran before D-06, on systemd: the runtime line
+/// dropped. These goldens keep the systemd runtime pinned; the docker one
+/// (`render-testnet-docker/`) is the file as written.
+fn systemd_text() -> String {
+    let text =
+        std::fs::read_to_string(root().join("lanes/perps/config/lane.caravel-perps.testnet.toml"))
+            .unwrap();
+    let out: String = text
+        .lines()
+        .filter(|l| !l.starts_with("runtime = \"docker\""))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    assert_ne!(out.len(), text.len(), "lane #1 names its runtime");
+    out
+}
+
 /// Lane #1's deployment, from its lane file (P-16).
 fn manifest() -> Manifest {
-    Manifest::load(
-        &root().join("lanes/perps/config/lane.caravel-perps.testnet.toml"),
-        "testnet",
-    )
-    .unwrap()
+    Manifest::parse(&systemd_text(), "testnet").unwrap()
 }
 
 fn files() -> std::collections::BTreeMap<String, String> {
@@ -52,9 +64,7 @@ fn files() -> std::collections::BTreeMap<String, String> {
 /// its private address and reaching the sequencer at `a`'s.
 #[test]
 fn files_for_two_hosts() {
-    let text =
-        std::fs::read_to_string(root().join("lanes/perps/config/lane.caravel-perps.testnet.toml"))
-            .unwrap();
+    let text = systemd_text();
     let text = text
         .replace(
             "[env.testnet.sequencer]\n",
@@ -425,13 +435,10 @@ fn lane_1_plans_no_changes() {
 /// are its own, so another lane can share the host.
 #[test]
 fn files_in_a_namespace() {
-    let text =
-        std::fs::read_to_string(root().join("lanes/perps/config/lane.caravel-perps.testnet.toml"))
-            .unwrap()
-            .replace(
-                "[env.testnet.host]\n",
-                "[env.testnet.host]\nnamespace = \"perps\"\n",
-            );
+    let text = systemd_text().replace(
+        "[env.testnet.host]\n",
+        "[env.testnet.host]\nnamespace = \"perps\"\n",
+    );
     let m = Manifest::parse(&text, "testnet").unwrap();
     let r = Resolved {
         template: "perps".into(),
@@ -475,8 +482,7 @@ fn files_in_a_namespace() {
 #[test]
 fn the_web_apps_config_is_served() {
     let text =
-        std::fs::read_to_string(root().join("lanes/perps/config/lane.caravel-perps.testnet.toml"))
-            .unwrap()
+        systemd_text()
             + "\n[env.testnet.web.config]\nnetworkName = \"testnet\"\nsequencerUrl = \"https://35-224-76-64.sslip.io\"\n";
     let m = Manifest::parse(&text, "testnet").unwrap();
     let r = Resolved {
@@ -508,12 +514,8 @@ fn the_web_apps_config_is_served() {
 fn docker_files() -> std::collections::BTreeMap<String, String> {
     let text =
         std::fs::read_to_string(root().join("lanes/perps/config/lane.caravel-perps.testnet.toml"))
-            .unwrap()
-            .replacen(
-                "[env.testnet.host]\n",
-                "[env.testnet.host]\nruntime = \"docker\"\n",
-                1,
-            );
+            .unwrap();
+    assert!(text.contains("runtime = \"docker\""));
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("lane.toml");
     std::fs::write(&path, text).unwrap();

@@ -184,14 +184,7 @@ tofu -chdir=infra/opentofu/envs/caravel-testnet output -raw caravel_vars > hosts
 
 The lane file reads the host from those vars (`host_address`, `host_project`, `host_zone`, `public_url`); their defaults are this VM, so `--var-file hosts.vars.toml` is only needed when the machine changes.
 
-Until lane #1 moves to containers (D-06), the VM was set up by hand with `provision.sh`, which installs Caddy and Node.js (checked against `SHASUMS256.txt`), and creates the unprivileged `caravel` user, `/opt/caravel` and 1 GB of swap:
-
-```sh
-gcloud compute scp lanes/perps/deploy/testnet/provision.sh caravel-1:/tmp/ --zone us-central1-a --project caravel-testnet --tunnel-through-iap
-gcloud compute ssh caravel-1 --zone us-central1-a --project caravel-testnet --tunnel-through-iap --command 'sudo bash /tmp/provision.sh'
-```
-
-A new VM from the module gets Docker instead, from its startup script (`infra/opentofu/modules/caravel-host-gcp/startup.sh`).
+Since 2026-10-04 (D-06, DEC-115) the lane runs as containers (`runtime = "docker"` in the lane file): the sequencer, three validators, the relayer and Caddy (the `web` service, which holds the TLS certificate in `/opt/caravel/caddy`), from the release's images on `ghcr.io/wmendes`. Docker came from the module's `startup.sh`. The files are owned by uid 10001, the containers' user. The old systemd units and the host's Caddy are still installed but disabled, for a rollback (§3.4). `provision.sh` set the VM up before that and is no longer needed.
 
 Deploy or upgrade a release with the deploy tool (M0.5 P-16, DEC-070). Lane #1's deployment is the `[env.testnet]` table in `lanes/perps/config/lane.caravel-perps.testnet.toml`:
 
@@ -215,13 +208,19 @@ Status and logs:
 
 ```sh
 curl -s https://35-224-76-64.sslip.io/v1/status | jq '{height, checkpoints, mempool, halted}'
+./target/release/caravel status $L --env testnet --release-dir /tmp/release
+./target/release/caravel logs relayer -f $L --env testnet --release-dir /tmp/release   # any node: sequencer, validator-1..3, relayer
 gcloud compute ssh caravel-1 --zone us-central1-a --project caravel-testnet --tunnel-through-iap \
-  --command 'systemctl is-active caravel-sequencer caravel-validator@{1,2,3} caravel-relayer caddy; sudo journalctl -u caravel-relayer -n 20 --no-pager'
+  --command "sudo docker ps --format '{{.Names}}\t{{.Status}}'; sudo docker stats --no-stream"
 ```
 
 ### 3.3 Budget
 
 The project has a monthly budget of R$100 with alerts at 50%, 90% and 100%. At 100%, the `stop-billing` Cloud Run function detaches billing from the project, and Google then shuts down its paid resources, the VM included. It was first made with `infra/gcp/setup-billing-cap.sh`; `infra/opentofu/modules/billing-cap` now describes it, with the function's code still in `infra/gcp/billing-cap`. `tofu output billing_cap_test` prints a harmless test message. To bring it back, relink billing (`gcloud billing projects link caravel-testnet --billing-account <id>`) and start the VM. The expected cost is about US$12 a month for the VM and its disk and IP.
+
+### 3.4 Back to systemd (rollback of D-06)
+
+On the VM: `sudo docker compose -f /opt/caravel/config/compose.yml down`, `sudo chown -R caravel:caravel /opt/caravel/config /opt/caravel/data /opt/caravel/keys /opt/caravel/run`, `sudo systemctl enable --now caddy`. Then remove `runtime = "docker"` from the lane file and `caravel apply` a release, which starts the systemd units again. The stores are the same files either way.
 
 ## 4. Rotate keys
 
