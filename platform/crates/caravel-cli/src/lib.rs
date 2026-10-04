@@ -376,6 +376,11 @@ pub enum Cmd {
         /// Replace an existing lane.toml.
         #[arg(long)]
         force: bool,
+        /// How the local deployment runs its nodes: `docker` (containers
+        /// from the release's images) or `process`. Default: docker when the
+        /// installed release ships images, else process.
+        #[arg(long, value_parser = ["docker", "process"])]
+        runtime: Option<String>,
         /// List the templates instead.
         #[arg(long)]
         list: bool,
@@ -1460,6 +1465,7 @@ fn dispatch(cli: Cli) -> Result<u8> {
             port,
             prefix,
             force,
+            runtime,
             list,
         } => {
             if list {
@@ -1472,6 +1478,7 @@ fn dispatch(cli: Cli) -> Result<u8> {
                 port,
                 prefix: prefix.as_deref(),
                 force,
+                runtime: runtime.as_deref(),
             })?;
             if g.json {
                 print_json(&done.report)?;
@@ -1919,9 +1926,11 @@ fn doctor(g: &Global) -> Result<u8> {
         "stellar CLI",
         Stellar::check_version().map(|()| caravel_deploy::versions::stellar_cli().to_string()),
     );
-    add("Node.js 22+", node_version());
     match context(g, None) {
-        Err(e) => add("lane file", Err(e)),
+        Err(e) => {
+            add("Node.js 22+", node_version());
+            add("lane file", Err(e))
+        }
         Ok(ctx) => {
             add("lane file", Ok(ctx.describe()));
             let m = ctx.manifest();
@@ -1972,7 +1981,20 @@ fn doctor(g: &Global) -> Result<u8> {
                             ))
                         },
                     );
-                    if m.env.network == caravel_deploy::manifest::Network::Local {
+                    // What runs the nodes here: Node.js for a process
+                    // relayer, Docker and Compose for containers (D-03).
+                    use caravel_deploy::manifest::{Provider, Runtime};
+                    let here: Vec<Runtime> = std::iter::once(&m.env.host)
+                        .chain(m.env.hosts.values())
+                        .filter(|h| h.provider == Provider::Local)
+                        .map(|h| h.runtime())
+                        .collect();
+                    if here.contains(&Runtime::Process) {
+                        add("Node.js 22+", node_version());
+                    }
+                    if here.contains(&Runtime::Docker) {
+                        add("Docker Compose (nodes)", docker_compose());
+                    } else if m.env.network == caravel_deploy::manifest::Network::Local {
                         add("Docker (local network)", docker());
                     }
                 }
@@ -2015,6 +2037,22 @@ fn node_version() -> Result<String> {
         bail!("node {v} is installed; the relayer needs 22 or later");
     }
     Ok(v)
+}
+
+/// Docker running, with the Compose plugin: what `runtime = "docker"` needs.
+fn docker_compose() -> Result<String> {
+    let engine = docker()?;
+    let out = std::process::Command::new("docker")
+        .args(["compose", "version", "--short"])
+        .output()
+        .context("docker is not installed")?;
+    if !out.status.success() {
+        bail!("Docker {engine} runs, but without the Compose plugin (docker compose)");
+    }
+    Ok(format!(
+        "Docker {engine}, Compose {}",
+        String::from_utf8_lossy(&out.stdout).trim()
+    ))
 }
 
 fn docker() -> Result<String> {

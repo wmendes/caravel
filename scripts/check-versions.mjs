@@ -103,6 +103,10 @@ for (const [file, key] of [
   else if (from.length !== 1 || from[0] !== want) fail(`${file} builds FROM ${from.join(", ") || "nothing"}, versions.json says ${want}`);
 }
 
+if (!/^stellar\/quickstart:[\w.-]+@sha256:[0-9a-f]{64}$/.test(versions.images?.stellar_quickstart ?? "")) {
+  fail("versions.json images.stellar_quickstart must be stellar/quickstart:<tag>@sha256:<digest>");
+}
+
 // --- npm: exact pins in package.json and package-lock.json ------------------
 // npm apps: the platform relayer, the perps feed module and web app (M0.5 layout), and the docs site (H-12).
 const apps = ["platform/relayer", "lanes/perps/relayer-feeds", "lanes/perps/web", "docs-site"].filter((d) => existsSync(join(root, d, "package.json")));

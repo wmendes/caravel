@@ -133,6 +133,8 @@ jobs:
       fail-fast: false
       matrix:
         template: [perps, payments]
+        # Processes, and containers from images built here from the checkout (D-03).
+        runtime: [process, docker]
     steps:
       - uses: actions/checkout@v4
       - name: Install toolchain from rust-toolchain.toml
@@ -152,6 +154,7 @@ jobs:
       - run: ./scripts/e2e-local.sh
         env:
           E2E_TEMPLATE: ${{ matrix.template }}
+          E2E_RUNTIME: ${{ matrix.runtime }}
 
   # The README's quickstart, run as written after ./scripts/install.sh
   # (C-14, Gate G3): the same conditions as the e2e.

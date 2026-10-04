@@ -144,8 +144,10 @@ fn init_writes_a_lane_file_and_its_identities() {
         port: Some(28080),
         prefix: None,
         force: false,
+        runtime: Some("process"),
     };
     let done = init(&args).unwrap();
+    assert_eq!(done.report["runtime"], "process");
     assert_eq!(done.lane_file, dir.join("lane.toml"));
     assert_eq!(done.report["name"], "acme-pay");
     let ids = done.report["identities"].as_array().unwrap();
@@ -180,4 +182,33 @@ fn init_writes_a_lane_file_and_its_identities() {
         .all(|i| i["created"] == false));
     let ignore2 = std::fs::read_to_string(dir.join(".gitignore")).unwrap();
     assert_eq!(ignore, ignore2, "the .gitignore line is added once");
+}
+
+/// `caravel init --runtime docker` (D-03): the local deployment runs its
+/// nodes as containers.
+#[test]
+fn init_in_containers() {
+    let dir = tempfile::tempdir().unwrap();
+    let dir = dir.path().join("boxed");
+    let done = init(&InitArgs {
+        template: Some("payments"),
+        dir: Some(&dir),
+        name: None,
+        port: Some(28180),
+        prefix: Some("boxed-test"),
+        force: false,
+        runtime: Some("docker"),
+    })
+    .unwrap();
+    assert_eq!(done.report["runtime"], "docker");
+    let text = std::fs::read_to_string(dir.join("lane.toml")).unwrap();
+    assert!(
+        text.contains("[env.local.host]\nruntime = \"docker\""),
+        "{text}"
+    );
+    let m = caravel_deploy::manifest::Manifest::load(&dir.join("lane.toml"), "local").unwrap();
+    assert_eq!(
+        m.env.host.runtime(),
+        caravel_deploy::manifest::Runtime::Docker
+    );
 }

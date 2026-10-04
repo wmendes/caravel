@@ -162,7 +162,11 @@ if [[ -n "$ARCHIVE" ]]; then
   [[ "$STELLAR_CLI" == 1 ]] && stellar_cli
   install_release "$dir"
   printf '\nNext: caravel init payments my-lane && cd my-lane && caravel apply\n'
-  printf 'A lane on your machine also needs Docker (the local Stellar network) and Node.js 22 (its relayer); caravel doctor checks.\n'
+  if [[ -f "$PREFIX/share/caravel/current/IMAGES" ]]; then
+    printf 'A lane on your machine needs Docker with Compose: its nodes run in containers. caravel doctor checks.\n'
+  else
+    printf 'A lane on your machine also needs Docker (the local Stellar network) and Node.js 22 (its relayer); caravel doctor checks.\n'
+  fi
   exit 0
 fi
 

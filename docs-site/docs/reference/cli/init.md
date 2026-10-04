@@ -27,8 +27,9 @@ Options:
       --prefix <PREFIX>    The identities' prefix (default: the lane's name)
       --force              Replace an existing lane.toml
       --release-dir <DIR>  A release to install (also CARAVEL_RELEASE_DIR); default: the one installed with caravel, else this checkout's builds
-      --list               List the templates instead
+      --runtime <RUNTIME>  How the local deployment runs its nodes: `docker` (containers from the release's images) or `process`. Default: docker when the installed release ships images, else process [possible values: docker, process]
       --wasm-dir <DIR>     Take the contracts from here instead, e.g. the CI contracts-wasm artifact (also CARAVEL_WASM_DIR)
+      --list               List the templates instead
       --var <NAME=VALUE>   Set one of the lane file's vars; repeat for more. Read by the var's type (lists and maps as TOML: --var 'validators=["1","2"]'). Also CARAVEL_VAR_<name>
       --var-file <FILE>    A TOML file of var values (name = value); later files win, and --var over them
   -h, --help               Print help

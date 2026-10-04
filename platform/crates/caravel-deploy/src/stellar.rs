@@ -654,13 +654,16 @@ pub fn ensure_local_network(m: &Manifest) -> Result<()> {
     if healthy() {
         return Ok(());
     }
-    eprintln!("starting a local Stellar network (stellar container start local)");
+    let tag = crate::versions::quickstart_tag();
+    eprintln!("starting a local Stellar network (stellar container start local, quickstart {tag})");
     run(&[
         s("container"),
         s("start"),
         s("local"),
         s("--limits"),
         s("testnet"),
+        s("--image-tag-override"),
+        s(tag),
     ])?;
     for _ in 0..180 {
         if healthy() {

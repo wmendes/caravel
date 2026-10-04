@@ -10,6 +10,9 @@
 #   E2E_TEMPLATE=payments ./scripts/e2e-local.sh  # the payments template instead of perps
 #   E2E_NETWORK=testnet ./scripts/e2e-local.sh    # a throwaway lane on Stellar testnet
 #   E2E_TOKEN_CODE=EURC ./scripts/e2e-local.sh    # a local lane settling in another token
+#   E2E_RUNTIME=docker ./scripts/e2e-local.sh     # the nodes as containers (D-03): on Linux the
+#                                                 # release and its images are built here; elsewhere
+#                                                 # E2E_RELEASE_DIR=<a Linux release with IMAGES>
 #
 # With E2E_NETWORK=testnet the lane gets a settlement contract of its own (the
 # demo lane's is never touched) and Circle's testnet USDC, bought with
@@ -50,6 +53,8 @@ case "$E2E_NETWORK" in
   testnet) TOKEN='"circle-usdc"'; FUND=(--amount 1100 --max-xlm 1200) ;;
   *) echo "E2E_NETWORK is local or testnet" >&2; exit 1 ;;
 esac
+E2E_RUNTIME="${E2E_RUNTIME:-process}"
+case "$E2E_RUNTIME" in process | docker) ;; *) echo "E2E_RUNTIME is process or docker" >&2; exit 1 ;; esac
 E2E_TEMPLATE="${E2E_TEMPLATE:-perps}"
 case "$E2E_TEMPLATE" in
   perps) BALANCE=collateral ;;
@@ -71,11 +76,13 @@ cleanup() {
   local code=$?
   if [[ "${KEEP:-0}" != "1" ]]; then
     for f in "$WORK"/.caravel/*/*/run/*.pid; do [[ -f "$f" ]] && kill "$(cat "$f")" 2>/dev/null || true; done
+    for f in "$WORK"/.caravel/*/*/config/compose.yml; do [[ -f "$f" ]] && docker compose -f "$f" down -t 2 > /dev/null 2>&1 || true; done
     [[ "$E2E_NETWORK" == local ]] && stellar container stop local > /dev/null 2>&1 || true
   fi
   if (( code != 0 )); then
     echo "logs and state: $WORK" >&2
     for f in "$WORK"/.caravel/*/*/logs/*.log; do [[ -f "$f" ]] && { echo "--- $(basename "$f")" >&2; tail -15 "$f" >&2; }; done
+    for f in "$WORK"/.caravel/*/*/config/compose.yml; do [[ -f "$f" ]] && docker compose -f "$f" logs --tail 15 >&2 2>&1 || true; done
   fi
 }
 trap cleanup EXIT
@@ -110,6 +117,17 @@ if [[ "$E2E_TEMPLATE" == perps ]]; then
   npm --prefix lanes/perps/relayer-feeds run build --silent
 fi
 
+if [[ "$E2E_RUNTIME" == docker && -z "${E2E_RELEASE_DIR:-}" ]]; then
+  log "release and images"
+  [[ "$(uname -s)" == Linux ]] || fail "E2E_RUNTIME=docker builds Linux images from this checkout on Linux only; elsewhere give E2E_RELEASE_DIR=<a Linux release with IMAGES>"
+  npm --prefix lanes/perps/web ci --silent
+  npm --prefix lanes/perps/web run build --silent
+  ./scripts/assemble-release.sh "$WORK/release" --templates "$E2E_TEMPLATE" > "$WORK/logs/assemble.log"
+  ./scripts/build-images.sh "$WORK/release" > "$WORK/logs/images.log" 2>&1 || { tail -20 "$WORK/logs/images.log"; fail "build-images"; }
+  RELEASE=(--release-dir "$WORK/release")
+  [[ -n "${E2E_WASM_DIR:-}" ]] && RELEASE+=(--wasm-dir "$E2E_WASM_DIR")
+fi
+
 log "lane file"
 # `caravel init`: the template's scaffold with e2e-<role> identities. The
 # e2e's deployment (scripts/e2e/env.toml, [env.e2e]) is included, and its vars
@@ -122,6 +140,7 @@ cp "$ROOT/scripts/e2e/env.toml" "$WORK/e2e-env.toml"
   echo "network = \"$E2E_NETWORK\""
   echo "token = $TOKEN"
   echo "port = $SEQ_PORT"
+  echo "runtime = \"$E2E_RUNTIME\""
   if [[ "$E2E_NETWORK" == testnet && -z "${E2E_RELEASE_DIR:-}${E2E_WASM_DIR:-}" ]]; then
     echo "settlement_wasm = \"$(shasum -a 256 target/contracts/settlement.wasm | awk '{print $1}')\""
   fi
@@ -200,7 +219,9 @@ caravel keys ensure > /dev/null
 caravel plan | grep -E '^\+|^~|^-' | sed 's/^/   /'
 ERR="$WORK/logs/apply-rotate.log" caravel apply --yes >> "$WORK/logs/apply-rotate.log" || { tail -30 "$WORK/logs/apply-rotate.log"; fail "caravel apply (rotation)"; }
 [[ "$(q status | jq -r .epoch)" == 2 ]] || fail "the contract epoch after the rotation"
-caravel logs sequencer -n 100000 | grep -q "older epoch go back for signatures" || fail "the sequencer did not send checkpoint $stale back for signatures"
+# Captured first: grep -q stops reading early, and a streamed log (docker) would then fail the pipe.
+caravel logs sequencer -n 100000 > "$WORK/logs/sequencer-after-rotation.log"
+grep -q "older epoch go back for signatures" "$WORK/logs/sequencer-after-rotation.log" || fail "the sequencer did not send checkpoint $stale back for signatures"
 caravel wait --timeout 120 checkpoint --seq "$stale" --epoch 2 > /dev/null || fail "checkpoint $stale accepted under epoch 2"
 caravel wait --timeout 120 checkpoint --seq $(( stale + 1 )) --epoch 2 > /dev/null || fail "checkpoint $(( stale + 1 )) accepted under epoch 2"
 caravel plan --exit-code > /dev/null || fail "a plan after the rotation still has changes"
