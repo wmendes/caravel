@@ -187,7 +187,7 @@ The two examples above are the same token, Circle's testnet USDC, written both w
 
 - **Network:** set `network = "testnet"` in the `[env]` table.
 - **Wasm:** pass `--wasm-dir` with the `contracts-wasm` artifact that CI builds for each commit, so the lane deploys the Wasm of record. Hashes of record are x86_64 Linux builds.
-- **Host:** `provider = "ssh"` runs the nodes as systemd units on a Linux host prepared with [`lanes/perps/deploy/testnet/provision.sh`](lanes/perps/deploy/testnet/provision.sh). The host is reached over ssh, or over `gcloud compute ssh --tunnel-through-iap`, and keys stream over the connection into mode-600 files.
+- **Host:** `provider = "ssh"` runs the nodes as containers with `runtime = "docker"` (the host needs Docker; [`infra/opentofu`](infra/opentofu) makes such a VM on Google Cloud), or as systemd units on a Linux host prepared with [`lanes/perps/deploy/testnet/provision.sh`](lanes/perps/deploy/testnet/provision.sh). The host is reached over ssh, or over `gcloud compute ssh --tunnel-through-iap`, and keys stream over the connection into mode-600 files.
 - **Operations:** releases, rotations and recovery are in [`docs/RUNBOOK.md`](docs/RUNBOOK.md).
 
 ## What this is not

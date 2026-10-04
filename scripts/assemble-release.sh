@@ -17,9 +17,12 @@
 # Build first: ./scripts/build-contracts.sh, cargo build --release for
 # caravel-cli and each template's node, npm ci + npm run build in
 # platform/relayer (and in each template's relayer-feeds and web).
+# CARAVEL_BIN_DIR takes the binaries from elsewhere than target/release
+# (scripts/build-linux-release.sh's Linux builds).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+BIN="${CARAVEL_BIN_DIR:-$ROOT/target/release}"
 OUT=""
 COMMIT=""
 TEMPLATES=""
@@ -42,16 +45,19 @@ fi
 if command -v sha256sum > /dev/null; then SHA256=(sha256sum); else SHA256=(shasum -a 256); fi
 need() { [[ -e "$1" ]] || { echo "assemble-release: no $1 (build first: $2)" >&2; exit 1; }; }
 
-need "$ROOT/target/release/caravel" "cargo build --release -p caravel-cli"
+need "$BIN/caravel" "cargo build --release -p caravel-cli"
 need "$ROOT/platform/relayer/dist/main.js" "npm --prefix platform/relayer ci && npm --prefix platform/relayer run build"
 ls "$ROOT"/target/contracts/*.wasm > /dev/null 2>&1 || need "$ROOT/target/contracts/settlement.wasm" "./scripts/build-contracts.sh"
 
 rm -rf "$OUT"
 mkdir -p "$OUT/bin" "$OUT/contracts" "$OUT/relayer"
-cp "$ROOT/target/release/caravel" "$OUT/bin/"
+# The real path: npm ci treats a prefix reached through a symlink (macOS's
+# /var -> /private/var) as a different package and refuses the lock file.
+OUT="$(cd "$OUT" && pwd -P)"
+cp "$BIN/caravel" "$OUT/bin/"
 for t in $TEMPLATES; do
-  need "$ROOT/target/release/caravel-$t-node" "cargo build --release -p caravel-$t-node"
-  cp "$ROOT/target/release/caravel-$t-node" "$OUT/bin/"
+  need "$BIN/caravel-$t-node" "cargo build --release -p caravel-$t-node"
+  cp "$BIN/caravel-$t-node" "$OUT/bin/"
   if [[ -d "$ROOT/lanes/$t/relayer-feeds" ]]; then
     need "$ROOT/lanes/$t/relayer-feeds/dist" "npm --prefix lanes/$t/relayer-feeds ci && npm --prefix lanes/$t/relayer-feeds run build"
     mkdir -p "$OUT/relayer-feeds/$t"

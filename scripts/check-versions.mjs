@@ -103,6 +103,10 @@ for (const [file, key] of [
   else if (from.length !== 1 || from[0] !== want) fail(`${file} builds FROM ${from.join(", ") || "nothing"}, versions.json says ${want}`);
 }
 
+// The Linux builder for any machine (D-08): the pinned Rust image of the toolchain of record.
+if (!new RegExp(`^rust:${versions.rust_toolchain.replace(/\./g, "\\.")}-[\\w.-]+@sha256:[0-9a-f]{64}$`).test(versions.images?.rust_builder ?? "")) {
+  fail(`versions.json images.rust_builder must be rust:${versions.rust_toolchain}-<variant>@sha256:<digest>`);
+}
 if (!/^stellar\/quickstart:[\w.-]+@sha256:[0-9a-f]{64}$/.test(versions.images?.stellar_quickstart ?? "")) {
   fail("versions.json images.stellar_quickstart must be stellar/quickstart:<tag>@sha256:<digest>");
 }

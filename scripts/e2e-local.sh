@@ -10,9 +10,10 @@
 #   E2E_TEMPLATE=payments ./scripts/e2e-local.sh  # the payments template instead of perps
 #   E2E_NETWORK=testnet ./scripts/e2e-local.sh    # a throwaway lane on Stellar testnet
 #   E2E_TOKEN_CODE=EURC ./scripts/e2e-local.sh    # a local lane settling in another token
-#   E2E_RUNTIME=docker ./scripts/e2e-local.sh     # the nodes as containers (D-03): on Linux the
-#                                                 # release and its images are built here; elsewhere
-#                                                 # E2E_RELEASE_DIR=<a Linux release with IMAGES>
+#   E2E_RUNTIME=docker ./scripts/e2e-local.sh     # the nodes as containers (D-03): the release and
+#                                                 # its images are built here (off Linux, the binaries
+#                                                 # in a container, D-08), or E2E_RELEASE_DIR=<a Linux
+#                                                 # release with IMAGES>
 #
 # With E2E_NETWORK=testnet the lane gets a settlement contract of its own (the
 # demo lane's is never touched) and Circle's testnet USDC, bought with
@@ -119,10 +120,15 @@ fi
 
 if [[ "$E2E_RUNTIME" == docker && -z "${E2E_RELEASE_DIR:-}" ]]; then
   log "release and images"
-  [[ "$(uname -s)" == Linux ]] || fail "E2E_RUNTIME=docker builds Linux images from this checkout on Linux only; elsewhere give E2E_RELEASE_DIR=<a Linux release with IMAGES>"
   npm --prefix lanes/perps/web ci --silent
   npm --prefix lanes/perps/web run build --silent
-  ./scripts/assemble-release.sh "$WORK/release" --templates "$E2E_TEMPLATE" > "$WORK/logs/assemble.log"
+  if [[ "$(uname -s)" == Linux ]]; then
+    ./scripts/assemble-release.sh "$WORK/release" --templates "$E2E_TEMPLATE" > "$WORK/logs/assemble.log"
+  else
+    # Not Linux: the binaries are built in the pinned Rust image (D-08).
+    ./scripts/build-linux-release.sh "$WORK/release" --templates "$E2E_TEMPLATE" > "$WORK/logs/assemble.log" 2>&1 \
+      || { tail -20 "$WORK/logs/assemble.log"; fail "build-linux-release"; }
+  fi
   ./scripts/build-images.sh "$WORK/release" > "$WORK/logs/images.log" 2>&1 || { tail -20 "$WORK/logs/images.log"; fail "build-images"; }
   RELEASE=(--release-dir "$WORK/release")
   [[ -n "${E2E_WASM_DIR:-}" ]] && RELEASE+=(--wasm-dir "$E2E_WASM_DIR")
