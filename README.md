@@ -31,10 +31,10 @@ Caravel deploys and runs appchains, called **lanes**, that settle to Stellar in 
 
 | Command | What it does |
 |---|---|
-| `caravel plan` | Shows every change on Stellar and on your hosts before anything is sent, down to the settlement contract's address |
-| `caravel apply` | Makes the lane match the file. A second run changes nothing, and an interrupted run finishes on the next one |
-| `caravel status` | Height, checkpoints accepted on Stellar, when a freeze would become possible, and drift from the file |
-| `caravel destroy` | Drains the lane, writes every account's exit proof to `exit.json`, and freezes its contract |
+| <code>caravel&nbsp;plan</code> | Shows every change on Stellar and on your hosts before anything is sent, down to the settlement contract's address |
+| <code>caravel&nbsp;apply</code> | Makes the lane match the file. A second run changes nothing, and an interrupted run finishes on the next one |
+| <code>caravel&nbsp;status</code> | Height, checkpoints accepted on Stellar, when a freeze would become possible, and drift from the file |
+| <code>caravel&nbsp;destroy</code> | Drains the lane, writes every account's exit proof to `exit.json`, and freezes its contract |
 
 > [!NOTE]
 > Testnet software, not audited. See [What this is not](#what-this-is-not).
@@ -54,14 +54,12 @@ Caravel deploys and runs appchains, called **lanes**, that settle to Stellar in 
 ## How it fits together
 
 ```mermaid
-flowchart LR
-  subgraph you["Your repository"]
-    lane["lane.toml"]
-    tofu["infra as code<br/>(OpenTofu)"]
-  end
-  subgraph host["A host: your laptop or a VM"]
-    seq["sequencer"]
-    val["validators"]
+flowchart TB
+  lane["lane.toml"]
+  tofu["OpenTofu modules<br/>(optional)"]
+  subgraph host["A host: your laptop or a VM, nodes in containers"]
+    direction LR
+    seq["sequencer"] <-- "blocks, signatures" --> val["validators"]
     rel["relayer"]
   end
   subgraph stellar["Stellar"]
@@ -70,10 +68,7 @@ flowchart LR
   tofu -- "makes the VM" --> host
   lane -- "caravel apply" --> host
   lane -- "caravel apply" --> sc
-  seq -- "blocks" --> val
-  val -- "signatures" --> seq
-  rel -- "checkpoints + block data" --> sc
-  sc -- "deposits, forced withdrawals" --> rel
+  rel <-- "checkpoints out, deposits in" --> sc
 ```
 
 Three layers, each with one owner:
