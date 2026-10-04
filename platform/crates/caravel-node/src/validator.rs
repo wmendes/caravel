@@ -472,6 +472,11 @@ struct SignJson {
     batch: String,
 }
 
+/// How long `/v1/sign` waits for the follower to reach the checkpoint's last
+/// block before it answers `NOT_CAUGHT_UP` (F-10), and how often it looks.
+const SIGN_WAIT: Duration = Duration::from_millis(1500);
+const SIGN_WAIT_STEP: Duration = Duration::from_millis(20);
+
 async fn sign<A: NodeApp>(
     State(app): AppState<A>,
     headers: axum::http::HeaderMap,
@@ -497,15 +502,26 @@ async fn sign<A: NodeApp>(
     }
     let j: SignJson = serde_json::from_slice(&body)
         .map_err(|e| ApiError::bad_request("BAD_JSON", e.to_string()))?;
-    let header = api::unhex(&j.header, "header")?;
-    let batch = api::unhex(&j.batch, "batch")?;
-    let a = app.clone();
+    let header = Arc::new(api::unhex(&j.header, "header")?);
+    let batch = Arc::new(api::unhex(&j.batch, "batch")?);
     let t_sign = std::time::Instant::now();
-    let result = tokio::task::spawn_blocking(move || {
-        a.with(|f| f.sign(&header, &batch).map(|sig| (sig, f.public_key())))
-    })
-    .await
-    .map_err(ApiError::internal)?;
+    // The sequencer asks as soon as it seals, often before this validator
+    // has fetched the last block: wait for it a little rather than refuse
+    // (F-10). A refusal changes nothing, so asking again is safe.
+    let result = loop {
+        let (a, header, batch) = (app.clone(), header.clone(), batch.clone());
+        let r = tokio::task::spawn_blocking(move || {
+            a.with(|f| f.sign(&header, &batch).map(|sig| (sig, f.public_key())))
+        })
+        .await
+        .map_err(ApiError::internal)?;
+        match r {
+            Err(Refusal::NotCaughtUp { .. }) if t_sign.elapsed() < SIGN_WAIT => {
+                tokio::time::sleep(SIGN_WAIT_STEP).await;
+            }
+            r => break r,
+        }
+    };
     app.record("sign", t_sign.elapsed());
     match result {
         Ok((sig, key)) => {

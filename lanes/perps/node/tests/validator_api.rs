@@ -520,6 +520,13 @@ async fn validators_follow_sign_and_refuse_a_tampered_chain() {
             "sequencer phase {phase}: {sp}"
         );
     }
+    // No fixed retry sleep between a seal and its signatures any more (F-10):
+    // before, a validator one poll behind cost 2 s.
+    assert!(
+        sp["seal_to_signed"]["max_us"].as_u64().unwrap() < 1_500_000,
+        "seal to signed: {}",
+        sp["seal_to_signed"]
+    );
 
     let (s, proof) = c
         .get(&format!("{}/v1/proofs/escape?account={}", urls[0], g(0x41)))

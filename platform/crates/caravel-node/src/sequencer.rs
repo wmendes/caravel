@@ -356,11 +356,17 @@ async fn signer_loop<A: NodeApp>(app: Arc<SequencerNode<A>>) {
         .build()
         .expect("http client");
     let mut warned: BTreeSet<u64> = BTreeSet::new();
+    // After a failed round, ask again soon, then less often (F-10): a
+    // validator that has not fetched the last block yet catches up within
+    // a poll or two.
+    let mut retry = SIGN_RETRY_FIRST;
+    let mut wait = SIGN_IDLE;
     loop {
         tokio::select! {
             _ = app.sealed.notified() => {}
-            _ = tokio::time::sleep(Duration::from_secs(2)) => {}
+            _ = tokio::time::sleep(wait) => {}
         }
+        wait = SIGN_IDLE;
         // The lowest checkpoint still waiting for signatures, in seq order.
         let next = {
             let core = app.core.lock().expect("core lock");
@@ -398,6 +404,7 @@ async fn signer_loop<A: NodeApp>(app: Arc<SequencerNode<A>>) {
         app.record("sign_collect", t_collect.elapsed());
         match collected {
             Ok(sigs) => {
+                retry = SIGN_RETRY_FIRST;
                 if let Some(at) = app
                     .sealed_at
                     .lock()
@@ -424,10 +431,27 @@ async fn signer_loop<A: NodeApp>(app: Arc<SequencerNode<A>>) {
                     Err(e) => tracing::error!(seq = row.seq, "storing signatures: {e}"),
                 }
             }
-            Err(e) => tracing::warn!(seq = row.seq, "collecting signatures: {e}; retrying"),
+            Err(e) => {
+                if retry < SIGN_IDLE {
+                    tracing::debug!(
+                        seq = row.seq,
+                        ?retry,
+                        "collecting signatures: {e}; retrying"
+                    );
+                } else {
+                    tracing::warn!(seq = row.seq, "collecting signatures: {e}; retrying");
+                }
+                wait = retry;
+                retry = (retry * 2).min(SIGN_IDLE);
+            }
         }
     }
 }
+
+/// The signer looks for work this often when nothing is sealed, and after a
+/// failed round retries in `SIGN_RETRY_FIRST`, doubling up to `SIGN_IDLE`.
+const SIGN_IDLE: Duration = Duration::from_secs(2);
+const SIGN_RETRY_FIRST: Duration = Duration::from_millis(150);
 
 /// `/v1/status` `perf` (F-01): each phase's p50 / p99 / max in microseconds,
 /// over the last `perf::WINDOW` samples, from the core and the node.
@@ -505,6 +529,11 @@ async fn collect(
     for (v, resp) in futures_util::future::join_all(requests).await {
         let resp = match resp {
             Ok(r) if r.status().is_success() => r,
+            // Not caught up yet: expected right after a seal, and retried.
+            Ok(r) if r.status() == reqwest::StatusCode::SERVICE_UNAVAILABLE => {
+                tracing::debug!(validator = %v.url, "validator not caught up yet");
+                continue;
+            }
             Ok(r) => {
                 tracing::warn!(validator = %v.url, status = %r.status(), "validator refused to sign");
                 continue;
