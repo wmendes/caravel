@@ -20,6 +20,15 @@ pub mod witness;
 
 pub use app::{FeedApi, NodeApp};
 
+/// About how often a node writes its head, the full state (F-07): the blocks
+/// since are re-executed when it starts again.
+pub(crate) const HEAD_EVERY_MS: u64 = 10_000;
+
+/// The head cadence in blocks for `block_time_ms`.
+pub(crate) fn head_every(block_time_ms: u64) -> u64 {
+    (HEAD_EVERY_MS / block_time_ms.max(1)).max(1)
+}
+
 /// How often a node prunes its store (DEC-105).
 pub(crate) const PRUNE_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
 /// Rows of each kind one prune pass may drop.

@@ -26,6 +26,35 @@ pub enum Executor {
     Native,
 }
 
+/// The state after the store's last block (F-07): the persisted head, then
+/// every block after it re-executed and checked against its
+/// `state_hash_after`. The head is then written at the tip.
+pub(crate) fn resume<A: LaneApp>(
+    store: &mut Store,
+    app: &A,
+    exec: &Executor,
+) -> Result<(u64, Vec<u8>), CoreError> {
+    let (mut height, mut state) = store.head()?;
+    let tip = store.tip()?;
+    if tip <= height {
+        return Ok((height, state));
+    }
+    for (record, _) in store.blocks(height + 1, tip)? {
+        height += 1;
+        let (out, _) = exec
+            .step(app, &state, &record.input)
+            .map_err(|e| CoreError::Halted(format!("re-executing block {height}: {e:?}")))?;
+        if sha256(&out.state) != record.state_hash_after {
+            return Err(CoreError::Corrupt(
+                "a stored block re-executes to another state",
+            ));
+        }
+        state = out.state;
+    }
+    store.persist_head(height, &state)?;
+    Ok((height, state))
+}
+
 impl Executor {
     pub fn step<A: LaneApp>(
         &self,
@@ -165,7 +194,8 @@ impl<A: LaneApp> Core<A> {
         config_hash: [u8; 32],
         cfg: SequencerConfig,
     ) -> Result<Self, CoreError> {
-        let (height, state_bytes) = store.head()?;
+        let mut store = store;
+        let (height, state_bytes) = resume(&mut store, &app, &exec)?;
         let state = app
             .decode_state(&state_bytes)
             .ok_or(CoreError::Corrupt("head state"))?;
