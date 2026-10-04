@@ -268,7 +268,7 @@ The same soak on the M0.9 stack (F-01 to F-14), same machine and settings as the
 | Soft latency, p50 / p99 | – | 267 / 512 ms | 275 / 521 ms | – | 117 / 217 ms |
 | Sequencer store growth per block (baseline) | 248 B (290) | 3,143 B (7,302) | 5,494 B (13,143) | 191 B (238) | 2,250 B (5,500) |
 | Sequencer store per day (baseline) | 43 MB (50) | 543 MB (1,261) | 949 MB (2,271) | 83 MB (103) | 973 MB (2,373) |
-| A validator's store at the end (baseline) | 0.27 MB (0.40) | 1.27 MB (9.2) | 1.22 MB (17.7) | 0.49 MB (0.77) | 1.60 MB (18.6) |
+| A validator's store at the end (baseline) | 0.27 MB (0.38) | 1.27 MB (9.2) | 1.22 MB (17.6) | 0.49 MB (0.77) | 1.60 MB (18.9) |
 | Validator commit, p50 / p99 (baseline) | 60 / 407 µs (308 / 3,232) | 79 / 478 µs (248 / 2,956) | 104 / 415 µs (260 / 7,890) | 89 / 638 µs (358 / 2,839) | 81 / 309 µs (208 / 1,005) |
 | CPU average, sequencer / a validator / relayer | 1.6 / 1.2 / 0.3% | 3.4 / 1.8 / 0.6% | 6.0 / 2.3 / 1.2% | 4.7 / 3.9 / 0.3% | 9.6 / 5.3 / 1.8% |
 | User tx OK / rejected by the engine | – | 26,896 / 139 | 59,586 / 468 | – | 59,567 / 467 |
