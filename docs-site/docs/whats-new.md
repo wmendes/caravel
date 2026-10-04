@@ -6,6 +6,7 @@ description: "Changes to Caravel, newest first."
 
 ## October 2026
 
+- **Caravel 0.2.0.** Lanes in containers: `runtime = "docker"` runs the nodes, the relayer and Caddy from the release's images, on your machine or on a server, so a first lane needs Docker and the `caravel` CLI. Images for x86_64 and arm64 on `ghcr.io`. Infrastructure as code for the machine a lane runs on ([Machines on Google Cloud](guides/machines-on-gcp.md)). Caravel Perps runs this way on testnet.
 - **Docs.** This site.
 - **Caravel 0.1.0**, the first prebuilt release, with a one-line install for x86_64 and arm64 Linux and arm64 macOS.
 - **Topology.** Several hosts per deployment, validators run by others, signed requests to validators, several lanes on one host, and the web app's config from the lane file.

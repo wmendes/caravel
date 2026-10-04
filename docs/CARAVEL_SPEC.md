@@ -2305,7 +2305,7 @@ Branches are `d-0x-short-name`, stacked. Gates: after D-03 (lanes in Docker on a
 | D-07 | **Spec and docs.** Guides (lanes in Docker, machines with OpenTofu), RUNBOOK §3, CLAUDE.md, SOURCES | D-06 | done |
 | D-08 | **A Linux builder anywhere** (DEC-116). `scripts/build-linux-release.sh` builds the Rust binaries in the pinned Rust image for Docker's architecture and assembles a release from this checkout, so a Mac builds images and runs the docker e2e with nothing downloaded | D-07 | review |
 | D-09 | **Lane #1's VM cleaned up.** With the human's OK: the disabled systemd units and the host's Caddy and Node.js removed; the rollback is now a reinstall (RUNBOOK §3.4). **Done 2026-10-04:** the three unit files, the `caddy` package with its apt source and key, Node.js from `/usr/local`, the old release files in `/opt/caravel` (`bin`, `contracts`, `relayer`, `relayer-feeds`, `web`, `staging`, `.npm`, about 190 MB) and the `caravel` user; `/opt/caravel` keeps `COMMIT`, `caddy`, `config`, `data`, `keys`, `run`; the lane kept checkpointing and `caravel plan` said No changes | D-06 | review |
-| D-10 | **A release with images.** With the human's OK: a `v*` tag, multi-arch images on GHCR, the draft checked and published, `install.sh` users get the docker runtime | D-08 | todo |
+| D-10 | **A release with images.** With the human's OK: a `v*` tag, multi-arch images on GHCR, the draft checked and published, `install.sh` users get the docker runtime | D-08 | doing |
 
 ---
 
