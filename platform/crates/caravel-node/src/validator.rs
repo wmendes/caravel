@@ -15,7 +15,7 @@ use axum::Router;
 use caravel_core::block::BlockRecordV1;
 use caravel_runtime::checkpoint::{network_id, settlement_addr_hash, sha256, HeaderIds};
 use caravel_runtime::sequencer::{hex, Executor};
-use caravel_runtime::store::{CheckpointStatus, Store};
+use caravel_runtime::store::{CheckpointStatus, History, Store};
 use caravel_runtime::validator::{FollowError, Follower, Refusal};
 use caravel_runtime::views;
 use caravel_runtime::WasmExecutor;
@@ -432,9 +432,10 @@ async fn prune_loop<A: NodeApp>(app: Arc<ValidatorNode<A>>) {
     loop {
         tokio::time::sleep(crate::PRUNE_EVERY).await;
         let a = app.clone();
-        let r =
-            tokio::task::spawn_blocking(move || a.with(|f| f.store_mut().prune(crate::PRUNE_ROWS)))
-                .await;
+        let r = tokio::task::spawn_blocking(move || {
+            a.with(|f| crate::prune_pass(f.store_mut(), History::Drop))
+        })
+        .await;
         crate::log_pruned(r);
     }
 }

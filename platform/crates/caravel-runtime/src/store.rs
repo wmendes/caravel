@@ -57,6 +57,13 @@ CREATE TABLE IF NOT EXISTS inbox (
 CREATE TABLE IF NOT EXISTS oracle (market_id INTEGER PRIMARY KEY, update_bytes BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS signed (seq INTEGER PRIMARY KEY, header_hash BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS flags (height INTEGER PRIMARY KEY, reason TEXT NOT NULL, cleared INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS block_archive (
+    seq INTEGER PRIMARY KEY,
+    first_height INTEGER NOT NULL,
+    last_height INTEGER NOT NULL,
+    blob BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS block_archive_first ON block_archive (first_height);
 ";
 
 #[derive(Debug)]
@@ -154,6 +161,74 @@ pub struct Pruned {
     pub batches: usize,
 }
 
+/// What happens to the blocks of old accepted checkpoints (F-08).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum History {
+    /// The sequencer keeps every block: a checkpoint's blocks become one
+    /// deflated blob in `block_archive`, read back transparently.
+    Archive,
+    /// A validator drops them: what it needs is the snapshots it keeps, the
+    /// blocks after them, and Stellar.
+    Drop,
+}
+
+/// An archive blob: this version byte, then the deflated blocks, each as
+/// `u32 LE input length, input, state_hash_after, u32 LE receipts length,
+/// receipts`. A node-local format, never hashed or signed.
+const ARCHIVE_VERSION: u8 = 1;
+const ARCHIVE_LEVEL: u8 = 6;
+/// Inflating refuses more than this: a checkpoint's blocks are well under it.
+const ARCHIVE_MAX_BYTES: usize = 256 * 1024 * 1024;
+
+type StoredBlock = (BlockRecordV1, Vec<u8>);
+
+fn pack(blocks: &[StoredBlock]) -> Vec<u8> {
+    let mut raw = Vec::new();
+    for (record, receipts) in blocks {
+        raw.extend_from_slice(&(record.input.len() as u32).to_le_bytes());
+        raw.extend_from_slice(&record.input);
+        raw.extend_from_slice(&record.state_hash_after);
+        raw.extend_from_slice(&(receipts.len() as u32).to_le_bytes());
+        raw.extend_from_slice(receipts);
+    }
+    let mut out = vec![ARCHIVE_VERSION];
+    out.extend(miniz_oxide::deflate::compress_to_vec(&raw, ARCHIVE_LEVEL));
+    out
+}
+
+fn unpack(blob: &[u8]) -> Result<Vec<StoredBlock>> {
+    const BAD: StoreError = StoreError::Corrupt("block archive");
+    let Some((&ARCHIVE_VERSION, deflated)) = blob.split_first() else {
+        return Err(BAD);
+    };
+    let raw = miniz_oxide::inflate::decompress_to_vec_with_limit(deflated, ARCHIVE_MAX_BYTES)
+        .map_err(|_| BAD)?;
+    let mut at = 0usize;
+    let mut take = |n: usize| -> Result<&[u8]> {
+        let end = at.checked_add(n).filter(|&e| e <= raw.len()).ok_or(BAD)?;
+        let out = &raw[at..end];
+        at = end;
+        Ok(out)
+    };
+    let mut out = Vec::new();
+    loop {
+        let Ok(len) = take(4) else { break };
+        let input = take(u32::from_le_bytes(len.try_into().expect("4 bytes")) as usize)?.to_vec();
+        let hash: [u8; 32] = take(32)?.try_into().expect("32 bytes");
+        let len = take(4)?;
+        let receipts =
+            take(u32::from_le_bytes(len.try_into().expect("4 bytes")) as usize)?.to_vec();
+        out.push((
+            BlockRecordV1 {
+                input,
+                state_hash_after: hash,
+            },
+            receipts,
+        ));
+    }
+    Ok(out)
+}
+
 pub struct Store {
     conn: Connection,
     /// The head (the full state) is written every this many blocks and at
@@ -162,6 +237,9 @@ pub struct Store {
     /// Block commits wait for the disk (`synchronous=FULL`) unless set to
     /// [`Durability::Normal`] (F-07).
     blocks: Durability,
+    /// The last archive blob read, unpacked: `(first height, blocks)`. A
+    /// validator catching up reads one checkpoint's blocks in a row (F-08).
+    archive_cache: std::sync::Mutex<Option<(u64, std::sync::Arc<Vec<StoredBlock>>)>>,
 }
 
 /// How a block commit reaches the disk (F-07). In WAL mode `Normal` survives
@@ -233,6 +311,7 @@ impl Store {
             conn,
             head_every: 1,
             blocks: Durability::Full,
+            archive_cache: std::sync::Mutex::new(None),
         };
         match store.meta("lane_id")? {
             Some(stored) => {
@@ -369,8 +448,19 @@ impl Store {
         Ok(())
     }
 
-    /// Block `height` and its receipts bytes.
+    /// Block `height` and its receipts bytes, from `blocks` or the archive.
+    /// `None` past the tip, or below a validator's pruned history (see
+    /// [`Store::first_block`]).
     pub fn block(&self, height: u64) -> Result<Option<(BlockRecordV1, Vec<u8>)>> {
+        if let Some(b) = self.raw_block(height)? {
+            return Ok(Some(b));
+        }
+        Ok(self
+            .archive_holding(height)?
+            .and_then(|(first, blocks)| blocks.get((height - first) as usize).cloned()))
+    }
+
+    fn raw_block(&self, height: u64) -> Result<Option<(BlockRecordV1, Vec<u8>)>> {
         let row: Option<(Vec<u8>, Vec<u8>, Vec<u8>)> = self
             .conn
             .prepare_cached(
@@ -392,9 +482,38 @@ impl Store {
         .transpose()
     }
 
-    /// Blocks `from..=to` with their receipts, in order.
+    /// Blocks `from..=to` with their receipts, in order, from the archive
+    /// and `blocks`. A missing one is an error.
     pub fn blocks(&self, from: u64, to: u64) -> Result<Vec<(BlockRecordV1, Vec<u8>)>> {
-        let mut stmt = self.conn.prepare("SELECT input, state_hash_after, receipts FROM blocks WHERE height BETWEEN ?1 AND ?2 ORDER BY height")?;
+        if from > to {
+            return Ok(Vec::new());
+        }
+        let raw_from: Option<i64> = self
+            .conn
+            .prepare_cached("SELECT MIN(height) FROM blocks WHERE height BETWEEN ?1 AND ?2")?
+            .query_row(params![i(from), i(to)], |r| r.get(0))?;
+        let raw_from = raw_from.map_or(to + 1, u);
+        let mut out = Vec::new();
+        let mut h = from;
+        while h < raw_from {
+            let (first, blocks) = self
+                .archive_holding(h)?
+                .ok_or(StoreError::Corrupt("missing blocks"))?;
+            let last = (first + blocks.len() as u64 - 1).min(raw_from - 1);
+            out.extend_from_slice(&blocks[(h - first) as usize..=(last - first) as usize]);
+            h = last + 1;
+        }
+        if raw_from <= to {
+            out.extend(self.raw_blocks(raw_from, to)?);
+        }
+        if out.len() as u64 != to - from + 1 {
+            return Err(StoreError::Corrupt("missing blocks"));
+        }
+        Ok(out)
+    }
+
+    fn raw_blocks(&self, from: u64, to: u64) -> Result<Vec<(BlockRecordV1, Vec<u8>)>> {
+        let mut stmt = self.conn.prepare_cached("SELECT input, state_hash_after, receipts FROM blocks WHERE height BETWEEN ?1 AND ?2 ORDER BY height")?;
         let rows = stmt.query_map(params![i(from), i(to)], |r| {
             Ok((
                 r.get::<_, Vec<u8>>(0)?,
@@ -413,10 +532,143 @@ impl Store {
                 receipts,
             ));
         }
-        if out.len() as u64 != to.saturating_sub(from) + 1 && from <= to {
-            return Err(StoreError::Corrupt("missing blocks"));
-        }
         Ok(out)
+    }
+
+    /// The archived checkpoint that holds `height`, unpacked:
+    /// `(its first height, its blocks)`.
+    fn archive_holding(
+        &self,
+        height: u64,
+    ) -> Result<Option<(u64, std::sync::Arc<Vec<StoredBlock>>)>> {
+        let mut cache = self.archive_cache.lock().expect("archive cache");
+        if let Some((first, blocks)) = cache.as_ref() {
+            if (*first..*first + blocks.len() as u64).contains(&height) {
+                return Ok(Some((*first, blocks.clone())));
+            }
+        }
+        let row: Option<(i64, i64, Vec<u8>)> = self
+            .conn
+            .prepare_cached(
+                "SELECT first_height, last_height, blob FROM block_archive WHERE first_height <= ?1 ORDER BY first_height DESC LIMIT 1",
+            )?
+            .query_row(params![i(height)], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .optional()?;
+        let Some((first, last, blob)) = row else {
+            return Ok(None);
+        };
+        if u(last) < height {
+            return Ok(None);
+        }
+        let blocks = unpack(&blob)?;
+        if blocks.len() as u64 != u(last) - u(first) + 1 {
+            return Err(StoreError::Corrupt("block archive"));
+        }
+        let blocks = std::sync::Arc::new(blocks);
+        *cache = Some((u(first), blocks.clone()));
+        Ok(Some((u(first), blocks)))
+    }
+
+    /// The lowest block height this store can serve, if any (F-08): 1 on a
+    /// sequencer; on a validator, the first block after its oldest kept
+    /// snapshot.
+    pub fn first_block(&self) -> Result<Option<u64>> {
+        let v: Option<i64> = self.conn.query_row(
+            "SELECT MIN(h) FROM (SELECT MIN(height) AS h FROM blocks UNION ALL SELECT MIN(first_height) FROM block_archive)",
+            [],
+            |r| r.get(0),
+        )?;
+        Ok(v.map(u))
+    }
+
+    /// The snapshot taken at block `height`, if the store keeps one:
+    /// `(seq, state)`.
+    pub fn snapshot_at(&self, height: u64) -> Result<Option<(u64, Vec<u8>)>> {
+        let row: Option<(i64, Vec<u8>)> = self
+            .conn
+            .query_row(
+                "SELECT seq, state FROM snapshots WHERE height = ?1",
+                params![i(height)],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        Ok(row.map(|(seq, state)| (u(seq), state)))
+    }
+
+    /// Archives or drops the blocks of up to `limit` accepted checkpoints,
+    /// oldest first, up to and including the oldest snapshot
+    /// [`Store::prune`] keeps: the blocks left start right after a kept
+    /// snapshot (F-08). Returns how many checkpoints' blocks it handled.
+    pub fn prune_history(&mut self, mode: History, limit: usize) -> Result<usize> {
+        let Some(accepted) = self.last_checkpoint_with(CheckpointStatus::Accepted)? else {
+            return Ok(0);
+        };
+        let keep_from = accepted.saturating_sub(KEEP_ACCEPTED_SNAPSHOTS);
+        // Checkpoints are archived in seq order; on a validator, blocks
+        // before the first one left are gone.
+        let after: i64 = match mode {
+            History::Archive => {
+                self.conn
+                    .query_row("SELECT COALESCE(MAX(seq), 0) FROM block_archive", [], |r| {
+                        r.get(0)
+                    })?
+            }
+            History::Drop => 0,
+        };
+        let rows: Vec<(i64, i64, i64)> = {
+            let mut stmt = self.conn.prepare(
+                "SELECT seq, first_height, last_height FROM checkpoints WHERE status = 'accepted' AND seq > ?1 AND seq <= ?2 AND EXISTS (SELECT 1 FROM blocks WHERE height BETWEEN first_height AND last_height) ORDER BY seq LIMIT ?3",
+            )?;
+            let rows = stmt.query_map(params![after, i(keep_from), limit as i64], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+            })?;
+            rows.collect::<std::result::Result<_, _>>()?
+        };
+        let mut done = 0;
+        for (seq, first, last) in rows {
+            let tx = self.conn.transaction()?;
+            if mode == History::Archive {
+                let blocks = {
+                    let mut stmt = tx.prepare_cached("SELECT input, state_hash_after, receipts FROM blocks WHERE height BETWEEN ?1 AND ?2 ORDER BY height")?;
+                    let rows = stmt.query_map(params![first, last], |r| {
+                        Ok((
+                            r.get::<_, Vec<u8>>(0)?,
+                            r.get::<_, Vec<u8>>(1)?,
+                            r.get::<_, Vec<u8>>(2)?,
+                        ))
+                    })?;
+                    let mut out = Vec::new();
+                    for row in rows {
+                        let (input, hash, receipts) = row?;
+                        out.push((
+                            BlockRecordV1 {
+                                input,
+                                state_hash_after: arr32(hash, "state_hash_after")?,
+                            },
+                            receipts,
+                        ));
+                    }
+                    out
+                };
+                if blocks.len() as i64 != last - first + 1 {
+                    return Err(StoreError::Corrupt("missing blocks"));
+                }
+                tx.execute(
+                    "INSERT INTO block_archive (seq, first_height, last_height, blob) VALUES (?1, ?2, ?3, ?4)",
+                    params![seq, first, last, pack(&blocks)],
+                )?;
+            }
+            tx.execute(
+                "DELETE FROM blocks WHERE height BETWEEN ?1 AND ?2",
+                params![first, last],
+            )?;
+            tx.commit()?;
+            done += 1;
+        }
+        if done > 0 {
+            self.release_free_pages()?;
+        }
+        Ok(done)
     }
 
     /// `(height, state)` right after checkpoint `seq` (0 = genesis).
@@ -993,5 +1245,77 @@ mod tests {
         s.vacuum().unwrap();
         assert_eq!(pragma(&s, "auto_vacuum"), 2, "converted");
         assert_eq!(pragma(&s, "freelist_count"), 0);
+    }
+
+    fn all_blocks(s: &Store) -> Vec<StoredBlock> {
+        (1..=40).map(|h| s.block(h).unwrap().unwrap()).collect()
+    }
+
+    #[test]
+    fn the_sequencer_archives_old_blocks_and_serves_them_as_before() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Store::open(&dir.path().join("s.sqlite"), &[1; 32], &[2; 32], &[0; 8]).unwrap();
+        fill(&mut s);
+        let before = all_blocks(&s);
+        // Accepted through 10, so snapshots from 7 stay: blocks of 1..=7 go
+        // to the archive, a pass of 3 checkpoints at a time.
+        assert_eq!(s.prune_history(History::Archive, 3).unwrap(), 3);
+        assert_eq!(s.prune_history(History::Archive, 3).unwrap(), 3);
+        assert_eq!(s.prune_history(History::Archive, 3).unwrap(), 1);
+        assert_eq!(s.prune_history(History::Archive, 3).unwrap(), 0);
+        let raw: i64 = s
+            .conn
+            .query_row("SELECT MIN(height) FROM blocks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(raw, 29, "blocks after snapshot 7 stay as rows");
+        assert_eq!(s.first_block().unwrap(), Some(1));
+        assert_eq!(all_blocks(&s), before, "one at a time");
+        assert_eq!(s.blocks(1, 40).unwrap(), before, "a range across both");
+        assert_eq!(
+            s.blocks(6, 9).unwrap(),
+            before[5..9].to_vec(),
+            "across two archives"
+        );
+        assert!(s.block(41).unwrap().is_none());
+        // Archived blocks go on growing the chain as before.
+        let (r, rc) = before[0].clone();
+        s.commit_block(41, &r, &rc, &[0; 8], None).unwrap();
+        assert_eq!(s.tip().unwrap(), 41);
+    }
+
+    #[test]
+    fn a_validator_drops_old_blocks_down_to_a_kept_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = Store::open(&dir.path().join("v.sqlite"), &[1; 32], &[2; 32], &[0; 8]).unwrap();
+        fill(&mut s);
+        let before = all_blocks(&s);
+        while s.prune(100).unwrap() != Pruned::default() {}
+        assert_eq!(s.prune_history(History::Drop, 100).unwrap(), 7);
+        assert_eq!(s.first_block().unwrap(), Some(29));
+        assert!(
+            s.snapshot_at(28).unwrap().is_some(),
+            "the blocks left follow a kept snapshot"
+        );
+        assert!(s.block(28).unwrap().is_none());
+        assert_eq!(s.blocks(29, 40).unwrap(), before[28..].to_vec());
+        assert!(s.blocks(20, 40).is_err(), "a range into dropped blocks");
+        assert_eq!(s.prune_history(History::Drop, 100).unwrap(), 0);
+    }
+
+    #[test]
+    fn a_damaged_archive_is_an_error() {
+        let blocks = vec![(
+            BlockRecordV1 {
+                input: vec![7; 50],
+                state_hash_after: [3; 32],
+            },
+            vec![1; 9],
+        )];
+        assert_eq!(unpack(&pack(&blocks)).unwrap(), blocks);
+        let mut blob = pack(&blocks);
+        blob[0] = 9;
+        assert!(unpack(&blob).is_err(), "another version");
+        let blob = pack(&blocks);
+        assert!(unpack(&blob[..blob.len() - 3]).is_err(), "cut short");
     }
 }

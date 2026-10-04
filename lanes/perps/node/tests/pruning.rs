@@ -8,7 +8,7 @@ use common::harness::*;
 
 use axum::response::IntoResponse;
 use caravel_perps_node::PerpsApp;
-use caravel_runtime::store::{CheckpointStatus, Pruned, Store, KEEP_ACCEPTED_SNAPSHOTS};
+use caravel_runtime::store::{CheckpointStatus, History, Pruned, Store, KEEP_ACCEPTED_SNAPSHOTS};
 use caravel_testkit::lane::seeds;
 use caravel_types::vectors::pk;
 use serde_json::Value;
@@ -111,6 +111,87 @@ async fn prune_keeps_what_proofs_need() {
     // The lane goes on: new checkpoints seal and are kept until accepted.
     busy_more(&mut t, 145);
     assert_eq!(t.core.store_mut().prune(100).unwrap(), Pruned::default());
+}
+
+/// A file-backed core on `path`, as a node opens it.
+fn on_file(path: &std::path::Path) -> T {
+    let (state, config_hash) = genesis();
+    let store = Store::open(
+        path,
+        &caravel_testkit::lane::config().lane_id,
+        &config_hash,
+        &state,
+    )
+    .unwrap();
+    T::with(caravel_runtime::sequencer::Executor::Native, store)
+}
+
+/// F-08: the sequencer archives the blocks of old accepted checkpoints and
+/// serves them byte for byte as before; it restarts and goes on.
+#[tokio::test]
+async fn the_sequencer_serves_archived_blocks_as_before() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("sequencer.sqlite");
+    let mut t = on_file(&path);
+    busy_lane(&mut t, 125);
+    let accepted = accept_all(t.core.store_mut());
+    let views: Vec<Value> = futures_blocks(&t, 125).await;
+    let store = t.core.store_mut();
+    while store.prune_history(History::Archive, 4).unwrap() > 0 {}
+    let archived = (accepted - KEEP_ACCEPTED_SNAPSHOTS) * 10;
+    let raw: i64 = rusqlite::Connection::open(&path)
+        .unwrap()
+        .query_row("SELECT MIN(height) FROM blocks", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(raw as u64, archived + 1);
+    assert_eq!(
+        futures_blocks(&t, 125).await,
+        views,
+        "every block view is the same"
+    );
+    let (hash, height, now) = (t.core.state_hash(), t.core.height(), t.now);
+    drop(t);
+    let mut t = on_file(&path);
+    assert_eq!((t.core.state_hash(), t.core.height()), (hash, height));
+    t.now = now;
+    busy_more(&mut t, 135);
+}
+
+/// F-08: a validator drops old blocks; asked for one, it says so.
+#[tokio::test]
+async fn dropped_blocks_answer_pruned() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("validator.sqlite");
+    let mut t = on_file(&path);
+    busy_lane(&mut t, 125);
+    let accepted = accept_all(t.core.store_mut());
+    let store = t.core.store_mut();
+    while store.prune(100).unwrap() != Pruned::default() {}
+    while store.prune_history(History::Drop, 4).unwrap() > 0 {}
+    let first = (accepted - KEEP_ACCEPTED_SNAPSHOTS) * 10 + 1;
+    assert_eq!(t.core.store().first_block().unwrap(), Some(first));
+    let gone = caravel_node::api::block_json(&PerpsApp, t.core.store(), first - 1)
+        .expect_err("pruned")
+        .into_response();
+    assert_eq!(gone.status(), axum::http::StatusCode::GONE);
+    assert!(caravel_node::api::block_json(&PerpsApp, t.core.store(), first).is_ok());
+    let missing = caravel_node::api::block_json(&PerpsApp, t.core.store(), 500)
+        .expect_err("past the tip")
+        .into_response();
+    assert_eq!(missing.status(), axum::http::StatusCode::NOT_FOUND);
+    let now = t.now;
+    drop(t);
+    let mut t = on_file(&path);
+    t.now = now;
+    busy_more(&mut t, 135);
+}
+
+async fn futures_blocks(t: &T, to: u64) -> Vec<Value> {
+    let mut out = Vec::new();
+    for h in 1..=to {
+        out.push(body(caravel_node::api::block_json(&PerpsApp, t.core.store(), h)).await);
+    }
+    out
 }
 
 fn busy_more(t: &mut T, height: u64) {

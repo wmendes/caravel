@@ -33,16 +33,34 @@ pub(crate) fn head_every(block_time_ms: u64) -> u64 {
 pub(crate) const PRUNE_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
 /// Rows of each kind one prune pass may drop.
 pub(crate) const PRUNE_ROWS: usize = 200;
+/// Checkpoints whose blocks one pass archives or drops (F-08): a pass holds
+/// the store, so it stays short; `compact` does the backlog at once.
+pub(crate) const HISTORY_PER_PASS: usize = 8;
+
+/// One prune pass (DEC-105, F-08): snapshots and batches, then old blocks.
+pub(crate) fn prune_pass(
+    store: &mut caravel_runtime::store::Store,
+    history: caravel_runtime::store::History,
+) -> caravel_runtime::store::Result<(caravel_runtime::store::Pruned, usize)> {
+    let p = store.prune(PRUNE_ROWS)?;
+    let h = store.prune_history(history, HISTORY_PER_PASS)?;
+    Ok((p, h))
+}
 
 pub(crate) fn log_pruned(
     r: Result<
-        caravel_runtime::store::Result<caravel_runtime::store::Pruned>,
+        caravel_runtime::store::Result<(caravel_runtime::store::Pruned, usize)>,
         tokio::task::JoinError,
     >,
 ) {
     match r {
-        Ok(Ok(p)) if p.snapshots + p.batches > 0 => {
-            tracing::info!(snapshots = p.snapshots, batches = p.batches, "store pruned")
+        Ok(Ok((p, h))) if p.snapshots + p.batches + h > 0 => {
+            tracing::info!(
+                snapshots = p.snapshots,
+                batches = p.batches,
+                checkpoints_of_blocks = h,
+                "store pruned"
+            )
         }
         Ok(Ok(_)) => {}
         Ok(Err(e)) => tracing::warn!("pruning the store: {e}"),

@@ -21,7 +21,7 @@ use caravel_runtime::mempool::{tx_hash, verify_strict};
 use caravel_runtime::sequencer::{
     hex, unhex, Core, Executor, InboxReport, Incident, Produced, SequencerConfig as CoreConfig,
 };
-use caravel_runtime::store::{CheckpointRow, CheckpointStatus, Store};
+use caravel_runtime::store::{CheckpointRow, CheckpointStatus, History, Store};
 use caravel_runtime::views;
 use caravel_runtime::WasmExecutor;
 use serde::de::DeserializeOwned;
@@ -337,11 +337,8 @@ async fn prune_loop<A: NodeApp>(app: Arc<SequencerNode<A>>) {
         tokio::time::sleep(crate::PRUNE_EVERY).await;
         let a = app.clone();
         let r = tokio::task::spawn_blocking(move || {
-            a.core
-                .lock()
-                .expect("core lock")
-                .store_mut()
-                .prune(crate::PRUNE_ROWS)
+            let mut core = a.core.lock().expect("core lock");
+            crate::prune_pass(core.store_mut(), History::Archive)
         })
         .await;
         crate::log_pruned(r);
