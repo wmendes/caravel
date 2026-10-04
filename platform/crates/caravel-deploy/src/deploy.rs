@@ -14,7 +14,6 @@ use caravel_runtime::checkpoint::sha256;
 use crate::address::{asset_contract_id, contract_id, settlement_salt, strkey};
 use crate::chain::{self, Extra};
 use crate::host::HostProvider;
-use crate::local::Local;
 use crate::manifest::{Manifest, Network, Provider, Token};
 use crate::plan::{
     self, Chain, Desired, DesiredHost, Host, Key, NodeReport, Params, Plan, SignerSet, Step,
@@ -454,12 +453,7 @@ pub fn validator_url(m: &Manifest, i: usize) -> Option<String> {
 
 /// The host a deployment runs on, without reading it.
 pub fn host_provider(m: &Manifest, template: &str, state_root: &Path) -> Result<HostProvider> {
-    Ok(match m.env.host.provider {
-        Provider::Local => HostProvider::Local(Local::new(m, template, state_root)?),
-        Provider::Ssh => {
-            HostProvider::Ssh(Box::new(crate::ssh::Ssh::new(m, template, state_root)?))
-        }
-    })
+    HostProvider::named(m, template, state_root, &m.env.primary_host())
 }
 
 /// The host `node` runs on (C-22), without reading it.
@@ -556,12 +550,7 @@ pub async fn prepare(
             );
         }
     }
-    let host_provider = match m.env.host.provider {
-        Provider::Local => HostProvider::Local(Local::new(&m, &template, state_root)?),
-        Provider::Ssh => {
-            HostProvider::Ssh(Box::new(crate::ssh::Ssh::new(&m, &template, state_root)?))
-        }
-    };
+    let host_provider = HostProvider::named(&m, &template, state_root, &m.env.primary_host())?;
     let mut others: Vec<OtherRun> = m
         .env
         .other_hosts()
@@ -616,6 +605,7 @@ pub async fn prepare(
         validator_keys: keys.validators.clone(),
         web: release.web.is_some(),
         sequencer_key: keys.sequencer,
+        images: release.images.clone(),
     };
     let files = render::render(&m, &resolved, &host_provider.root_str(), epoch)?;
     desired.host.files = files

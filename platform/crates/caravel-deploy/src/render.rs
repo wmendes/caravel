@@ -11,6 +11,10 @@
 //! ```
 //!
 //! Paths are absolute, so a config means the same thing wherever it is read.
+//! On a docker host (D-02) the configs name the root the containers mount,
+//! `/opt/caravel`, and the host keeps the files under its own root, beside a
+//! `compose.yml` and, with a public URL, the `Caddyfile` its web container
+//! reads.
 //! No secret is in any of these files: keys are files under `keys/`, and the
 //! sequencer and relayer read theirs from the environment.
 
@@ -20,7 +24,7 @@ use anyhow::Result;
 use serde_json::json;
 
 use crate::address::strkey;
-use crate::manifest::{Manifest, Provider};
+use crate::manifest::{Manifest, Provider, Runtime};
 use crate::plan::Key;
 
 /// What rendering needs besides the lane file: keys and hashes, resolved.
@@ -35,6 +39,27 @@ pub struct Resolved {
     pub web: bool,
     /// The sequencer's request key (`[sequencer] key`, DEC-095).
     pub sequencer_key: Option<Key>,
+    /// The release's images by role (`IMAGES`, DEC-111), for docker hosts.
+    pub images: BTreeMap<String, String>,
+}
+
+/// Where a docker host's containers see the lane's root (D-02).
+pub const RUN_ROOT: &str = "/opt/caravel";
+
+/// An RPC URL as a container reaches it: a network on the host's loopback
+/// (the local network) is `host.docker.internal`, which the compose file
+/// maps to the host on Linux too.
+pub fn container_url(url: &str) -> String {
+    for lo in ["://localhost", "://127.0.0.1"] {
+        if let Some(i) = url.find(lo) {
+            return format!(
+                "{}://host.docker.internal{}",
+                &url[..i],
+                &url[i + lo.len()..]
+            );
+        }
+    }
+    url.to_string()
 }
 
 pub fn g(k: &Key) -> String {
@@ -93,14 +118,26 @@ pub fn render_for(
 ) -> Result<BTreeMap<String, String>> {
     let e = &m.env;
     let primary = e.primary_host();
+    let docker = e.host_spec(host).runtime() == Runtime::Docker;
+    // The host's root, where the files are; the configs name the root their
+    // nodes see, which in a container is RUN_ROOT.
+    let host_root = root;
+    let root = if docker { RUN_ROOT } else { root };
     let passphrase = e.network.passphrase();
+    let rpc = if docker {
+        container_url(m.rpc_url())
+    } else {
+        m.rpc_url().to_string()
+    };
     let settlement = strkey(&r.settlement);
     let engine = format!("{root}/contracts/{}", engine_file(&r.template));
     let engine_hash = hex(&r.engine_wasm_hash);
     let lane = format!("{root}/config/lane.toml");
     // The sequencer, as the relayer beside it reaches it.
     let seq_listen = e.listen_on(&primary, "sequencer");
-    let seq_url = format!("http://{seq_listen}:{}", e.sequencer.port);
+    let seq_url = e
+        .url_of(&primary, "sequencer")
+        .unwrap_or_else(|| format!("http://{seq_listen}:{}", e.sequencer.port));
     let loopback = |port: u16| format!("http://127.0.0.1:{port}");
     let mut out = BTreeMap::new();
 
@@ -202,7 +239,7 @@ pub fn render_for(
             db = q(&format!("{root}/data/{node}.sqlite")),
             pass = q(passphrase),
             settlement = q(&settlement),
-            rpc = q(m.rpc_url()),
+            rpc = q(&rpc),
             poll = e.validator_polling.sequencer_ms,
             stellar = e.validator_polling.stellar_secs,
         );
@@ -230,7 +267,7 @@ pub fn render_for(
         })
         .collect::<Result<_>>()?;
     let mut relayer = json!({
-        "rpcUrl": m.rpc_url(),
+        "rpcUrl": rpc,
         "networkPassphrase": passphrase,
         "settlementContract": settlement,
         "sequencerUrl": seq_url,
@@ -258,7 +295,9 @@ pub fn render_for(
             serde_json::to_string_pretty(&serde_json::to_value(&w.config)?)? + "\n",
         );
     }
-    if m.env.host_spec(host).provider == Provider::Ssh {
+    if docker {
+        out.extend(docker_files(m, r, host, host_root)?);
+    } else if m.env.host_spec(host).provider == Provider::Ssh {
         out.extend(host_files(m, r, host, root));
     }
     Ok(out)
@@ -445,6 +484,177 @@ fn host_files(m: &Manifest, r: &Resolved, host: &str, root: &str) -> BTreeMap<St
         out.insert(caddy, c);
     }
     out
+}
+
+/// A YAML string (JSON's quoting, which YAML reads).
+fn y(s: &str) -> String {
+    serde_json::Value::String(s.to_string()).to_string()
+}
+
+/// A docker host's `compose.yml` and, with a public URL, its `Caddyfile`
+/// (D-02, DEC-112): one service per node it runs, from the release's images,
+/// with the hardening the systemd units have; `web` (Caddy) when it serves
+/// the lane's public API or web app. Paths on the left of a mount are the
+/// host's root; the containers see `/opt/caravel`.
+fn docker_files(
+    m: &Manifest,
+    r: &Resolved,
+    host: &str,
+    root: &str,
+) -> Result<BTreeMap<String, String>> {
+    let e = &m.env;
+    let spec = e.host_spec(host);
+    let primary = e.primary_host() == host;
+    let image = |role: &str| -> Result<String> {
+        r.images.get(role).cloned().ok_or_else(|| {
+            anyhow::anyhow!(
+                "the release has no {role} image: build its images (scripts/build-images.sh) or use a release from CI, which lists them in IMAGES"
+            )
+        })
+    };
+    let node_image = image(&format!("{}-node", r.template))?;
+    // Where a node's port is published: loopback for this machine's checks,
+    // and the private address when another host calls it.
+    let ports = |node: &str, port: u16| -> String {
+        let mut p = vec![format!("127.0.0.1:{port}:{port}")];
+        let reached = if node == "sequencer" {
+            e.run_validators()
+                .any(|(_, v)| e.host_of(&validator_node(&v.name)) != host)
+        } else {
+            !primary
+        };
+        if let (true, Some(a)) = (reached, &spec.private_address) {
+            p.push(format!("{a}:{port}:{port}"));
+        }
+        format!(
+            "    ports: [{}]\n",
+            p.iter().map(|x| y(x)).collect::<Vec<_>>().join(", ")
+        )
+    };
+    let hardening = |node: &str| {
+        format!(
+            "    extra_hosts: [\"host.docker.internal:host-gateway\"]\n    user: \"${{CARAVEL_UID:-10001}}:${{CARAVEL_GID:-10001}}\"\n    read_only: true\n    tmpfs: [/tmp]\n    security_opt: [\"no-new-privileges:true\"]\n    cap_drop: [ALL]\n    restart: unless-stopped\n    labels: {{ caravel.lane: {}, caravel.env: {}, caravel.node: {} }}\n",
+            y(&m.lane.lane.name),
+            y(&m.env_name),
+            y(node)
+        )
+    };
+    let config = format!(
+        "      - {}\n",
+        y(&format!("{root}/config:{RUN_ROOT}/config:ro"))
+    );
+    let data = format!("      - {}\n", y(&format!("{root}/data:{RUN_ROOT}/data")));
+    let key = |name: &str| {
+        format!(
+            "      - {}\n",
+            y(&format!(
+                "{root}/keys/{name}.key:{RUN_ROOT}/keys/{name}.key:ro"
+            ))
+        )
+    };
+    let env_file = format!("    env_file: [{}]\n", y(&format!("{root}/keys/env")));
+    let mut c = format!(
+        "# Generated by caravel ([env.{env}], host {host}): the lane's nodes as containers (DEC-112).\n# caravel apply runs it; caravel logs, status and destroy read it.\nname: {name}\nservices:\n",
+        env = m.env_name,
+        name = y(&spec.compose_project(&m.lane.lane.name, &m.env_name)),
+    );
+    if primary {
+        c += &format!(
+            "  sequencer:\n    image: {img}\n    command: [\"sequencer\", \"--config\", {cfg}]\n{env_file}    environment: {{ RUST_LOG: info }}\n    volumes:\n{config}{data}{k}{ports}{h}",
+            img = y(&node_image),
+            cfg = y(&format!("{RUN_ROOT}/config/sequencer.toml")),
+            k = if r.sequencer_key.is_some() { key("sequencer") } else { String::new() },
+            ports = ports("sequencer", e.sequencer.port),
+            h = hardening("sequencer"),
+        );
+    }
+    for (i, v) in e.run_validators() {
+        let node = validator_node(&v.name);
+        if e.host_of(&node) != host {
+            continue;
+        }
+        c += &format!(
+            "  {node}:\n    image: {img}\n    command: [\"validator\", \"--config\", {cfg}]\n    environment: {{ RUST_LOG: info }}\n    volumes:\n{config}{data}{k}{ports}{dep}{h}",
+            img = y(&node_image),
+            cfg = y(&format!("{RUN_ROOT}/config/{node}.toml")),
+            k = key(&node),
+            ports = ports(&node, validator_port(m, i)),
+            dep = if primary { "    depends_on: [sequencer]\n" } else { "" },
+            h = hardening(&node),
+        );
+    }
+    if primary {
+        c += &format!(
+            "  relayer:\n    image: {img}\n    command: [\"--config\", {cfg}]\n{env_file}    volumes:\n{config}{data}    depends_on: [sequencer]\n{h}",
+            img = y(&image("relayer")?),
+            cfg = y(&format!("{RUN_ROOT}/config/relayer.json")),
+            h = hardening("relayer"),
+        );
+    }
+    let mut out = BTreeMap::new();
+    let web_here = e.web_host().as_deref() == Some(host);
+    if let Some(site) = spec.public_url.as_deref().map(|u| {
+        u.trim_start_matches("https://")
+            .trim_start_matches("http://")
+            .trim_end_matches('/')
+            .to_string()
+    }) {
+        // The app is served where [web] puts it, or beside the sequencer's
+        // API when there is no [web] (as on systemd hosts).
+        let serve_app = r.web && (web_here || (primary && e.web.is_none()));
+        let web_image = match (serve_app, r.images.get(&format!("{}-web", r.template))) {
+            (true, Some(i)) => i.clone(),
+            _ => image("caddy")?,
+        };
+        c += &format!(
+            "  web:\n    image: {img}\n    ports: [\"80:80\", \"443:443\", \"443:443/udp\"]\n    volumes:\n      - {cf}\n{config}      - {cd}\n      - {cc}\n    read_only: true\n    tmpfs: [/tmp]\n    security_opt: [\"no-new-privileges:true\"]\n    cap_drop: [ALL]\n    cap_add: [NET_BIND_SERVICE]\n    restart: unless-stopped\n    labels: {{ caravel.lane: {lane}, caravel.env: {env}, caravel.node: \"web\" }}\n",
+            img = y(&web_image),
+            cf = y(&format!("{root}/config/Caddyfile:/etc/caddy/Caddyfile:ro")),
+            cd = y(&format!("{root}/caddy/data:/data")),
+            cc = y(&format!("{root}/caddy/config:/config")),
+            lane = y(&m.lane.lane.name),
+            env = y(&m.env_name),
+        );
+        let mut f = format!(
+            "# Generated by caravel ([env.{}], host {host}): the lane's public API{}, served by its web container.\n{site} {{\n\tencode gzip\n\n",
+            m.env_name,
+            if serve_app { " and the web app" } else { "" },
+        );
+        if primary {
+            f += &format!(
+                "\thandle /internal/* {{\n\t\trespond 404\n\t}}\n\thandle /v1/* {{\n\t\treverse_proxy sequencer:{}\n\t}}\n",
+                e.sequencer.port
+            );
+        }
+        for (i, v) in e.run_validators() {
+            let node = validator_node(&v.name);
+            if e.host_of(&node) != host {
+                continue;
+            }
+            // Its /v1/sign passes only when the sequencer calls it through
+            // this URL, and then only signed requests are answered (DEC-095).
+            let closed = if e.sign_via_public(&node) {
+                ""
+            } else {
+                "\t\trespond /v1/sign 404\n"
+            };
+            f += &format!(
+                "\thandle_path /validators/{}/* {{\n{closed}\t\treverse_proxy {node}:{}\n\t}}\n",
+                v.name,
+                validator_port(m, i)
+            );
+        }
+        if web_here {
+            f += &web_config_route(RUN_ROOT);
+        }
+        if serve_app {
+            f += &web_route(RUN_ROOT);
+        }
+        f += "}\n";
+        out.insert("Caddyfile".to_string(), f);
+    }
+    out.insert("compose.yml".to_string(), c);
+    Ok(out)
 }
 
 /// Validator `i`'s port (0-based, in file order). The manifest checked it exists.

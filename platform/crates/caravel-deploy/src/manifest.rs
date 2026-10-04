@@ -224,6 +224,18 @@ pub enum Provider {
     Ssh,
 }
 
+/// How a host runs the lane's nodes (M0.8, D-02).
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Runtime {
+    /// Plain processes with PID files (the `local` default).
+    Process,
+    /// systemd units (the `ssh` default).
+    Systemd,
+    /// Containers from the release's images, run with Docker Compose (DEC-112).
+    Docker,
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum Transport {
@@ -263,6 +275,10 @@ pub struct HostSpec {
     /// None keeps the names of a host with one lane.
     #[serde(default)]
     pub namespace: Option<String>,
+    /// How the nodes run: `process` (local default), `systemd` (ssh
+    /// default) or `docker` (M0.8, D-02).
+    #[serde(default)]
+    pub runtime: Option<Runtime>,
 }
 
 fn default_root() -> String {
@@ -270,6 +286,34 @@ fn default_root() -> String {
 }
 
 impl HostSpec {
+    /// How it runs nodes: the given runtime, else its provider's default.
+    pub fn runtime(&self) -> Runtime {
+        self.runtime.unwrap_or(match self.provider {
+            Provider::Local => Runtime::Process,
+            Provider::Ssh => Runtime::Systemd,
+        })
+    }
+
+    /// Its containers' Compose project: `caravel-<lane>-<env>`, and the
+    /// namespace when it has one.
+    pub fn compose_project(&self, lane: &str, env: &str) -> String {
+        // `caravel-` once: a lane named caravel-… is not prefixed again.
+        let lane = lane.strip_prefix("caravel-").unwrap_or(lane);
+        let raw = match &self.namespace {
+            Some(ns) => format!("caravel-{lane}-{env}-{ns}"),
+            None => format!("caravel-{lane}-{env}"),
+        };
+        raw.chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c.to_ascii_lowercase()
+                } else {
+                    '-'
+                }
+            })
+            .collect()
+    }
+
     /// Its systemd units' prefix: `caravel-`, or `caravel-<ns>-`.
     pub fn unit_prefix(&self) -> String {
         match &self.namespace {
@@ -1035,6 +1079,10 @@ impl EnvSpec {
         let to = self.host_of(node);
         let (f, t) = (self.host_spec(from), self.host_spec(&to));
         if from == to {
+            // Containers reach each other by service name (D-02).
+            if t.runtime() == Runtime::Docker {
+                return Some(format!("http://{node}:{port}"));
+            }
             return Some(format!("http://{}:{port}", self.listen_on(&to, node)));
         }
         if f.provider == Provider::Local && t.provider == Provider::Local {
@@ -1072,6 +1120,11 @@ impl EnvSpec {
             self.primary_host() != host
         };
         let spec = self.host_spec(host);
+        // In a container a node listens on all its interfaces; the host
+        // publishes its port where it is reached (D-02).
+        if spec.runtime() == Runtime::Docker {
+            return "0.0.0.0".into();
+        }
         match (&spec.private_address, spec.provider) {
             (Some(a), Provider::Ssh) if reached_from_elsewhere => a.clone(),
             _ => "127.0.0.1".into(),
@@ -1417,6 +1470,16 @@ impl EnvSpec {
         for (name, h) in self.other_hosts() {
             p.extend(host_problems(&format!("hosts.{name}"), &h));
         }
+        // Local hosts reach each other at loopback, which a container can't
+        // use to reach a process beside it, nor a process a container.
+        let local_runtimes: std::collections::BTreeSet<_> = std::iter::once(&self.host)
+            .chain(self.hosts.values())
+            .filter(|h| h.provider == Provider::Local)
+            .map(|h| h.runtime() == Runtime::Docker)
+            .collect();
+        if local_runtimes.len() > 1 {
+            p.push("the deployment's local hosts mix runtime = \"docker\" with processes: give them all the same runtime".into());
+        }
         let h = &self.host;
         p.extend(host_problems("host", h));
         p
@@ -1453,6 +1516,20 @@ fn host_problems(at: &str, h: &HostSpec) -> Vec<String> {
             p.push(format!(
                 "{at}.root = {:?}: an absolute path of letters, digits, '/', '_', '-', '.', not / itself",
                 h.root
+            ));
+        }
+        match (h.provider, h.runtime) {
+            (Provider::Local, Some(Runtime::Systemd)) => p.push(format!(
+                "{at}.runtime = \"systemd\": the local provider runs processes or containers (\"process\" or \"docker\")"
+            )),
+            (Provider::Ssh, Some(Runtime::Process)) => p.push(format!(
+                "{at}.runtime = \"process\": an ssh host runs systemd units or containers (\"systemd\" or \"docker\")"
+            )),
+            _ => {}
+        }
+        if h.runtime() == Runtime::Docker && h.namespace.is_some() && h.public_url.is_some() {
+            p.push(format!(
+                "{at}: with runtime = \"docker\", a lane that serves a public_url runs its own Caddy on ports 80 and 443, so it can't share the host with another lane (no namespace)"
             ));
         }
         if let Some(a) = &h.private_address {

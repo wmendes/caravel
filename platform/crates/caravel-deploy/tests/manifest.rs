@@ -1077,3 +1077,46 @@ validatorUrls = [\"/validators/1\", \"/validators/2\"]
         "{e}"
     );
 }
+
+/// How a host runs its nodes (M0.8, D-02): processes, systemd units or
+/// containers, with each provider's default and the combinations refused.
+#[test]
+fn runtimes() {
+    use caravel_deploy::manifest::Runtime;
+    let m = Manifest::parse(&file(ENV), "testnet").unwrap();
+    assert_eq!(m.env.host.runtime(), Runtime::Systemd);
+    let docker = ENV.replace(
+        "provider = \"ssh\"\n",
+        "provider = \"ssh\"\nruntime = \"docker\"\n",
+    );
+    let m = Manifest::parse(&file(&docker), "testnet").unwrap();
+    assert_eq!(m.env.host.runtime(), Runtime::Docker);
+    // Containers listen on all their interfaces and reach each other by name.
+    assert_eq!(
+        m.env.listen_on(&m.env.primary_host(), "sequencer"),
+        "0.0.0.0"
+    );
+    assert_eq!(
+        m.env.url_of(&m.env.primary_host(), "sequencer").as_deref(),
+        Some("http://sequencer:8080")
+    );
+    // An ssh host doesn't run plain processes.
+    let e = err(&ENV.replace(
+        "provider = \"ssh\"\n",
+        "provider = \"ssh\"\nruntime = \"process\"\n",
+    ));
+    assert!(e.contains("runtime = \"process\""), "{e}");
+    // A docker lane with a public URL runs its own Caddy on 80/443: no namespace.
+    let e = err(&docker.replace(
+        "public_url = \"https://lane.example\"\n",
+        "public_url = \"https://lane.example\"\nnamespace = \"pay\"\n",
+    ));
+    assert!(e.contains("can't share the host"), "{e}");
+    assert_eq!(
+        m.env
+            .host
+            .compose_project("caravel-perps-testnet-0", "testnet"),
+        "caravel-perps-testnet-0-testnet"
+    );
+    assert_eq!(m.env.host.compose_project("pay", "dev"), "caravel-pay-dev");
+}

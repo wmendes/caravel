@@ -43,6 +43,7 @@ fn files() -> std::collections::BTreeMap<String, String> {
         validator_keys: vec![[1; 32], [2; 32], [3; 32]],
         web: true,
         sequencer_key: None,
+        images: Default::default(),
     };
     render(&m, &r, "/opt/caravel", 1).unwrap()
 }
@@ -73,6 +74,7 @@ fn files_for_two_hosts() {
         validator_keys: vec![[1; 32], [2; 32], [3; 32]],
         web: true,
         sequencer_key: Some([5; 32]),
+        images: Default::default(),
     };
     let a = render(&m, &r, "/opt/caravel", 1).unwrap();
     let b = render_for(&m, &r, "b", "/opt/caravel", 1).unwrap();
@@ -333,6 +335,7 @@ fn lane_1_plans_no_changes() {
             validator_keys: keys.validators.clone(),
             web: true,
             sequencer_key: None,
+            images: Default::default(),
         },
         "/opt/caravel",
         1,
@@ -437,6 +440,7 @@ fn files_in_a_namespace() {
         validator_keys: vec![[1; 32], [2; 32], [3; 32]],
         web: true,
         sequencer_key: None,
+        images: Default::default(),
     };
     let f = render(&m, &r, &m.env.host.root, 1).unwrap();
     let names: Vec<&str> = f
@@ -482,6 +486,7 @@ fn the_web_apps_config_is_served() {
         validator_keys: vec![[1; 32], [2; 32], [3; 32]],
         web: true,
         sequencer_key: None,
+        images: Default::default(),
     };
     let f = render(&m, &r, "/opt/caravel", 1).unwrap();
     let web: serde_json::Value = serde_json::from_str(&f["web.json"]).unwrap();
@@ -494,4 +499,104 @@ fn the_web_apps_config_is_served() {
     );
     // Without [web], nothing of it (the pins above).
     assert!(!files().contains_key("web.json"));
+}
+
+/// Lane #1 with `runtime = "docker"` (M0.8, D-02): the same configs, naming
+/// the root the containers see (`/opt/caravel`) and the sequencer by its
+/// service name, plus `compose.yml` and the web container's `Caddyfile`
+/// instead of systemd units and the host's Caddyfile.
+fn docker_files() -> std::collections::BTreeMap<String, String> {
+    let text =
+        std::fs::read_to_string(root().join("lanes/perps/config/lane.caravel-perps.testnet.toml"))
+            .unwrap()
+            .replacen(
+                "[env.testnet.host]\n",
+                "[env.testnet.host]\nruntime = \"docker\"\n",
+                1,
+            );
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("lane.toml");
+    std::fs::write(&path, text).unwrap();
+    let m = Manifest::load(&path, "testnet").unwrap();
+    let r = Resolved {
+        template: "perps".into(),
+        engine_wasm_hash: m.lane.engine_wasm_hash().unwrap().unwrap(),
+        settlement: stellar_strkey::Contract::from_string(
+            "CBIHBEUZYFZQZEQPBJH2ID6CDRDZFEDI6XHAXVOCHG6FO5XWUIGPONWO",
+        )
+        .unwrap()
+        .0,
+        validator_keys: vec![[1; 32], [2; 32], [3; 32]],
+        web: true,
+        sequencer_key: None,
+        images: caravel_deploy::release::parse_images(
+            "perps-node ghcr.io/wmendes/caravel-perps-node@sha256:1111111111111111111111111111111111111111111111111111111111111111\n\
+             relayer ghcr.io/wmendes/caravel-relayer@sha256:2222222222222222222222222222222222222222222222222222222222222222\n\
+             perps-web ghcr.io/wmendes/caravel-perps-web@sha256:3333333333333333333333333333333333333333333333333333333333333333\n\
+             caddy docker.io/library/caddy:2.11.6@sha256:907efba736324e43f891ccb9d760fe5abe545e313419b3d18d63d4ec670dad8d\n",
+        )
+        .unwrap(),
+    };
+    render(&m, &r, "/opt/caravel", 1).unwrap()
+}
+
+#[test]
+fn lane_1_in_containers() {
+    let f = docker_files();
+    assert!(
+        !f.keys()
+            .any(|k| k.starts_with("systemd/") || k.starts_with("caddy/")),
+        "{:?}",
+        f.keys()
+    );
+    for name in [
+        "compose.yml",
+        "Caddyfile",
+        "sequencer.toml",
+        "relayer.json",
+        "validator-1.toml",
+    ] {
+        assert!(f.contains_key(name), "{name} missing: {:?}", f.keys());
+    }
+    assert!(f["sequencer.toml"].contains("listen = \"0.0.0.0:8080\""));
+    assert!(
+        f["sequencer.toml"].contains("engine_wasm = \"/opt/caravel/contracts/perps_engine.wasm\"")
+    );
+    assert!(f["sequencer.toml"].contains("url = \"http://validator-1:8081\""));
+    assert!(f["validator-1.toml"].contains("sequencer_url = \"http://sequencer:8080\""));
+    assert!(f["relayer.json"].contains("\"sequencerUrl\": \"http://sequencer:8080\""));
+    assert!(f["relayer.json"].contains("/opt/caravel/relayer-feeds/perps/dist/index.js"));
+    let c = &f["compose.yml"];
+    assert!(c.contains("name: \"caravel-perps-testnet-0-testnet\""));
+    assert!(c.contains("caravel-perps-node@sha256:1111"));
+    assert!(c.contains("\"127.0.0.1:8080:8080\""));
+    assert!(c.contains("caravel-perps-web@sha256:3333"));
+    assert!(f["Caddyfile"].contains("reverse_proxy sequencer:8080"));
+    assert!(f["Caddyfile"].contains("reverse_proxy validator-2:8082"));
+    assert!(f["Caddyfile"].contains("root * /opt/caravel/web"));
+
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden/render-testnet-docker");
+    if std::env::var_os("UPDATE_GOLDEN").is_some() {
+        let _ = std::fs::remove_dir_all(&dir);
+        for (name, text) in &f {
+            let path = dir.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        }
+        return;
+    }
+    let mut pinned: Vec<String> = walk(&dir)
+        .iter()
+        .map(|e| e.strip_prefix(&dir).unwrap().display().to_string())
+        .collect();
+    pinned.sort();
+    assert_eq!(
+        pinned,
+        f.keys().cloned().collect::<Vec<_>>(),
+        "the set of rendered files changed (UPDATE_GOLDEN=1)"
+    );
+    for (name, text) in &f {
+        let want = std::fs::read_to_string(dir.join(name)).unwrap();
+        assert!(*text == want, "{name} changed:\n{text}");
+    }
 }

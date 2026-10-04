@@ -30,6 +30,7 @@ fn resolved(m: &Manifest) -> Resolved {
         validator_keys: vec![[0x61; 32], [0x62; 32], [0x63; 32]],
         web: false,
         sequencer_key: None,
+        images: Default::default(),
     }
 }
 

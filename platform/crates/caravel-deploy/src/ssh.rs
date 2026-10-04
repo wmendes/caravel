@@ -116,6 +116,11 @@ impl Ssh {
         self.spec.address.as_deref().unwrap_or_default()
     }
 
+    /// The command that runs `script` on the host, for output to this terminal.
+    pub fn remote_command(&self, script: &str) -> Command {
+        self.remote(script)
+    }
+
     fn remote(&self, script: &str) -> Command {
         match self.spec.transport {
             Transport::Ssh => {
