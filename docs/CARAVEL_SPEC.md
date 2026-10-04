@@ -2314,6 +2314,42 @@ Branches are `d-0x-short-name`, stacked. Gates: after D-03 (lanes in Docker on a
 
 ---
 
+### 20.8 Milestone M0.9: a performance cycle
+
+**Decided with the human on 2026-10-04.** The aim is to measure, then fix what doesn't touch consensus: storage, disk I/O, throughput, latency and CI.
+
+What exploration and a live read of lane #1 found:
+- **Storage:** each of the four stores (sequencer and 3 validators, one 20 GB disk) keeps every block since genesis. That was 432,883 rows on 2026-10-04, ~280 B each, ~121 MB per store. Pruning (DEC-105) trims only snapshots and batches, and the files never shrink. Growth is ~190 MB/day at 500 ms and ~485 MB/day at 200 ms.
+- **Disk I/O:** every node rewrites the full state blob and fsyncs on every block.
+- **Throughput:** sustained TPS is bounded by the serial relayer, ~60–90 orders/s at any block time.
+- **Latency:** about 2 s of hard latency is a signer retry sleep.
+- **CI:** a code PR took ~10 min.
+
+The human's calls:
+- validators prune old blocks while the sequencer keeps full history, compressed;
+- consensus-level ideas come back as a costed list, not in this cycle;
+- 200 ms on lane #1 only after the fixes, if the measurements allow;
+- state is persisted at checkpoints and every N blocks, with blocks replayed on restart. Full fsync stays for validator signatures.
+
+Branches are `f-0x-short-name`. Gates: F-04, F-09 and F-14.
+
+| ID | Task | Depends | Status |
+|---|---|---|---|
+| F-01 | **Per-phase metrics.** Lock wait, build, execute, decode, commit, seal, sign-collect and fan-out timings (p50/p99), in `/v1/status` and `caravel status --json` | M0.8 | todo |
+| F-02 | **Load tooling.** `loadgen` past 255 accounts with several requests in flight and a target rate; a local full-stack soak (sequencer, validators, relayer) at 500 and 200 ms | F-01 | todo |
+| F-03 | **Baseline report.** Soak at 500/200 ms (idle, 45 and 100 tx/s) plus lane #1's growth; RESULTS "Performance baseline"; network limits in SOURCES | F-02 | todo |
+| F-04 | **CI, fast path** (DEC-119) — **Gate.** Both workspaces cached; no disk cleanup; four parallel Rust jobs; parity gates concurrent and the perps gate threaded; nextest; main-only cache saves; release built once for the e2e; no cancelled main runs | M0.8 | review |
+| F-05 | **Logs and small files.** Rotation for container and process logs, no ANSI, a capped relayer jsonl, a quieter prune log | F-04 | todo |
+| F-06 | **SQLite housekeeping.** Incremental vacuum after prune, a capped WAL, cached statements, `COUNT(*)` for the signed queue, old cleared flags deleted | F-05 | todo |
+| F-07 | **Lazy state persistence.** Head written at checkpoints and every N blocks, replay on open, `synchronous=NORMAL` for block commits; FULL stays for signing and checkpoint status | F-06 | todo |
+| F-08 | **Block history.** Validators prune blocks older than a few accepted checkpoints; the sequencer archives accepted blocks as one zstd blob per checkpoint (spec §15 and DEC-105 change) | F-07 | todo |
+| F-09 | **Checkpoint cadence by time** — **Gate.** Lane files keep about a checkpoint a minute at any block time; lane #1's storage measured on the new code | F-08 | todo |
+| F-10 | **Signing without the 2 s stall.** Short retries, and `/v1/sign` waits briefly for the follower | F-09 | todo |
+| F-11 | **Validator fetch path.** A raw block endpoint on a read-only connection, outside the core lock, with long-poll | F-10 | todo |
+| F-12 | **Locks and async hygiene.** Mempool and production split, status/views from a per-block snapshot, blocking work off the async runtime, an indexed mempool | F-11 | todo |
+| F-13 | **WebSocket fan-out once per block.** Shared tickers, books, block view and events; only account views per subscriber | F-12 | todo |
+| F-14 | **Relayer pipeline** — **Gate.** Event-driven pickup, no redundant simulation, cached sequence, two checkpoints in flight; soak again; the 200 ms decision for lane #1 | F-13 | todo |
+
 ## 21. Later milestones (not for M0 agents to start without a human go-ahead)
 
 ### M1: Lane framework
@@ -3227,6 +3263,13 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 | DEC-116 | **M0.8 (D-08).** `scripts/build-linux-release.sh <out>` makes a Linux release on any machine with Docker: `cargo build --release --locked` of `caravel-cli` and each template's node in `rust:1.93.0-trixie` (pinned by digest, `versions.json` `images.rust_builder`; `check-versions` requires the toolchain of record), as the calling user, with the target and cargo's cache under `target/linux-<arch>/`, and `RUSTUP_TOOLCHAIN` set so rustup doesn't install `rust-toolchain.toml`'s Wasm target into the image. The architecture is the Docker daemon's (arm64 on Apple silicon, native speed). Everything else comes from this checkout's builds, which don't depend on the platform: the contracts, and the relayer, feeds and web app (their production dependencies are plain JS). `assemble-release.sh` takes the binaries from `CARAVEL_BIN_DIR`, and now resolves its output to a real path, because `npm ci` refused a prefix reached through macOS's `/var` symlink. `E2E_RUNTIME=docker` uses the builder off Linux instead of requiring `E2E_RELEASE_DIR`. **Checked 2026-10-04 on macOS (arm64):** a first build in 3 min 41 s; `E2E_TEMPLATE=payments E2E_RUNTIME=docker` passed every step from a clean checkout build. | A Mac developer can try their own changes in containers without CI | Cross-building amd64 on arm64 (slow under emulation) |
 | DEC-117 | **M0.8 (D-11).** CI's first job, `changes`, diffs the change (a pull request against its base, a push against `before`; a manual run or a new branch counts as everything) and sets three outputs. **code** is false only when every file is docs-like (`docs/`, `docs-site/`, `site/`, `infra/opentofu/`, `.claude/`, `LICENSE*`, any `.md` outside `lanes/perps/engine`); `rust`, `e2e`, `quickstart` and `release` need it. **apps** lists the npm apps whose directories changed (the relayer brings its feed module along), and feeds the `apps` matrix, skipped when empty. **infra** gates the OpenTofu job. A change to `versions.json` or `ci.yml` runs everything. `versions` (pins, frozen engine, dependency rule, copy rules) always runs. `main` has no branch protection, so skipped jobs block nothing. GitHub's own `[skip ci]` in a commit message skips the workflow; `CONTRIBUTING.md` limits it to changes that can't break anything. | A docs or site change waited about 10 minutes for the Rust job on a pull request, and a docs merge ran four e2e runs and a release | Required status checks, if branch protection comes (skipped jobs count as passing) |
 | DEC-118 | **M0.8 (D-15).** `install.sh` puts `$PREFIX/bin` on PATH itself, the way rustup does, instead of asking the user to `export` it. Unless the directory is already on PATH, it writes `$PREFIX/env` (a `case` guard that prepends the directory once) and appends `. "$PREFIX/env"` to `~/.profile`, to `~/.bashrc` and `~/.bash_profile` when they exist, and to zsh's `${ZDOTDIR:-~}/.zshenv` when the user has zsh; for fish it writes `~/.config/fish/conf.d/caravel.fish` (`fish_add_path --prepend`). Each line is added once, so a second install changes nothing. A piped installer can't change the shell that ran it, so it ends with `. "$PREFIX/env"` for that one. `--no-modify-path` or `CARAVEL_NO_MODIFY_PATH=1` touches nothing outside `PREFIX` and prints the `export` line; CI's installs into temp prefixes pass it. **Checked 2026-10-04** with a scratch `HOME` under macOS's bash 3.2: a new zsh and a bash login shell find `caravel`, a second run adds nothing, the opt-out and an already-set PATH leave `HOME` alone. | Every widely used installer (rustup, bun, deno, foundryup) sets PATH; an extra manual step loses people at the first command | — |
+| DEC-119 | **M0.9 (F-04).** CI runs the Rust gates as four parallel jobs, `lint`, `test`, `engine` and `parity`, through one composite setup (`.github/actions/rust-setup`: toolchain, cargo cache, Node, the Stellar CLI and cargo-nextest when asked).
+- **Cache:** the cache covers both workspaces (`.` and `lanes/perps/engine`, whose `target/` was never cached before and was rebuilt from scratch each run), keyed per job role, and only `main` saves; release.yml never saves (its tag and pull-request caches can't be restored elsewhere and pushed the repo past the 10 GB cache limit).
+- **Disk cleanup:** the step is gone. The runner had 87 GB free before it ran, and debug info is off.
+- **Parity gates:** both run at once (`cargo nextest run --run-ignored only -E 'binary(parity)'`). The perps gate spreads its 50 independent lanes over every core, one `Dual` per thread, the same 10,050 blocks: 5.2 s instead of serial locally (15 cores).
+- **Tests:** they run under nextest 0.9.146 (pinned in `versions.json`, checked), and doc tests run separately.
+- **Local builds:** the root `[profile.dev]` keeps line tables only (the contracts build with the release profile, and their hashes are unchanged).
+- **Main:** the release job's build is the e2e's input (`E2E_RELEASE_DIR`; the e2e then builds nothing), instead of four separate LTO builds. `cancel-in-progress` applies to pull requests only, so every main merge gets a finished run. | A code PR took ~10 min with the Rust gates in one serial job; the gates are unchanged, only how they run | Skipping the frozen engine's tests when nothing it depends on changed (a gate policy change for the human) |
 
 Agents append new decisions here as `DEC-018+` with the same columns.
 

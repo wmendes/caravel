@@ -42,7 +42,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install toolchain from rust-toolchain.toml
         run: rustup toolchain install && rustup show active-toolchain
+      # Tag and pull-request caches can't be restored anywhere else (F-04): don't save them.
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: false
       - name: Install Stellar CLI
         run: |
           curl -sSfL -o stellar-cli.tar.gz \
@@ -81,6 +84,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
+          save-if: false
       - uses: actions/setup-node@v4
         with:
           node-version: "22"

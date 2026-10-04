@@ -52,6 +52,11 @@ codegen-units = 1
 lto = true
 
 # Fast crypto in debug test builds; our own crates stay unoptimized.
+# Line tables only (F-04): backtraces keep file:line, links are faster and
+# target/ is a fraction of the size. CI turns debug info off entirely.
+[profile.dev]
+debug = "line-tables-only"
+
 [profile.dev.package.curve25519-dalek]
 opt-level = 3
 [profile.dev.package.ed25519-dalek]

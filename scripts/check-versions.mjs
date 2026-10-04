@@ -91,6 +91,10 @@ for (const [file, re] of [
   else if (m[1] !== versions.stellar_cli) fail(`${file} pins the Stellar CLI ${m[1]}, versions.json says ${versions.stellar_cli}`);
 }
 
+// cargo-nextest, which CI's test jobs install (F-04).
+if (!/^\d+\.\d+\.\d+$/.test(versions.nextest ?? "")) fail("versions.json nextest must be an exact version");
+else if (read(".github/workflows/ci.yml").match(/NEXTEST_VERSION: "([^"]+)"/)?.[1] !== versions.nextest) fail(`ci.yml NEXTEST_VERSION must be ${versions.nextest}`);
+
 // --- Container base images (M0.8, D-01): each Dockerfile's FROM is the pinned image, by digest.
 for (const [file, key] of [
   ["docker/node.Dockerfile", "debian"],

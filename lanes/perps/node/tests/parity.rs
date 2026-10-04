@@ -77,17 +77,40 @@ fn ten_thousand_random_blocks_match_native() {
     random_parity(1..=50, 200);
 }
 
+/// Seeds are independent lanes, so they run on every core (F-04): each thread
+/// builds its own `Dual` (it holds `Rc`s) and returns its counts.
 fn random_parity(seeds: std::ops::RangeInclusive<u64>, blocks: usize) {
-    let dual = Dual::new();
-    for seed in seeds {
-        let mut lane = Lane::new(dual.clone(), config());
-        drive(&mut lane, &mut Rng::new(seed), blocks);
-        lane.checkpoint();
-    }
+    let seeds: Vec<u64> = seeds.collect();
+    let threads = std::thread::available_parallelism()
+        .map_or(1, |n| n.get())
+        .min(seeds.len())
+        .max(1);
+    let (calls, max_cpu) = std::thread::scope(|s| {
+        let workers: Vec<_> = (0..threads)
+            .map(|t| {
+                let mine: Vec<u64> = seeds.iter().copied().skip(t).step_by(threads).collect();
+                s.spawn(move || {
+                    let dual = Dual::new();
+                    for seed in mine {
+                        let mut lane = Lane::new(dual.clone(), config());
+                        drive(&mut lane, &mut Rng::new(seed), blocks);
+                        lane.checkpoint();
+                    }
+                    (dual.calls.get(), dual.max_cpu.get())
+                })
+            })
+            .collect();
+        workers.into_iter().fold((0, 0), |(c, m), w| {
+            let (wc, wm) = w.join().expect("a parity worker panicked");
+            (c + wc, m.max(wm))
+        })
+    });
+    assert!(
+        calls >= (seeds.len() * blocks) as u64,
+        "every random block ran through both paths ({calls})"
+    );
     eprintln!(
-        "parity: {} blocks, max host cpu per block {} insns",
-        dual.calls.get(),
-        dual.max_cpu.get()
+        "parity: {calls} blocks on {threads} threads, max host cpu per block {max_cpu} insns"
     );
 }
 

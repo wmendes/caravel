@@ -10,9 +10,11 @@ on:
 permissions:
   contents: read
 
+# A newer push cancels an older run on a pull request; on main every merge
+# gets a finished run (F-04).
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -22,6 +24,11 @@ env:
   # Must match versions.json "opentofu"; the digest is from the release's SHA256SUMS.
   TOFU_VERSION: "1.13.1"
   TOFU_SHA256: "378ada19d4bc70c43732004e8159be771b23b9a5afdf059e5f8a2b3fa2c70a69"
+  # Must match versions.json "nextest".
+  NEXTEST_VERSION: "0.9.146"
+  # Tests need no debug info, and it doubles link time and disk.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
 
 jobs:
   # What a change can affect (DEC-117), so a docs-only change doesn't wait for
@@ -130,45 +137,37 @@ jobs:
           done
       - run: for f in infra/opentofu/modules/caravel-host-gcp/startup.sh infra/opentofu/bootstrap-state.sh; do bash -n "$f"; done
 
-  rust:
+  # The Rust gates, split into four jobs that run side by side (F-04). Each
+  # restores the cargo cache of both workspaces that main saved.
+  lint:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
-    # Two workspaces (root and the frozen engine) build debug targets here, and
-    # the runner's disk ran out linking caravel-perps-node (ld bus error). Tests
-    # need no debug info; the Wasm builds use the release profile, unaffected.
-    env:
-      CARGO_PROFILE_DEV_DEBUG: "0"
-      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
-      - name: Free disk space (preinstalled SDKs Caravel does not use)
-        run: |
-          df -h / | tail -1
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
-          df -h / | tail -1
       - uses: actions/checkout@v4
-      - name: Install toolchain from rust-toolchain.toml
-        run: rustup toolchain install && rustup show active-toolchain
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/rust-setup
         with:
-          node-version: "22"
-      - name: Install Stellar CLI
-        run: |
-          curl -sSfL -o stellar-cli.tar.gz \
-            "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
-          echo "${STELLAR_CLI_SHA256}  stellar-cli.tar.gz" | sha256sum -c -
-          mkdir -p "$HOME/.local/bin"
-          tar xzf stellar-cli.tar.gz -C "$HOME/.local/bin" stellar
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      - run: stellar --version
+          cache-key: lint
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       # The frozen perps engine workspace (DEC-051): checked, never reformatted.
       - run: cargo fmt --all --manifest-path lanes/perps/engine/Cargo.toml -- --check
       - run: cargo clippy --workspace --all-targets --manifest-path lanes/perps/engine/Cargo.toml -- -D warnings
-      # The parity tests load the Wasm of record, so build it first. This also
-      # checks sizes and that the hashes match versions.json (INV-D7).
+
+  test:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: test
+          stellar-cli: "true"
+          nextest: "true"
+      - run: stellar --version
+      # The tests load the Wasm of record, so build it first. This also checks
+      # sizes and that the hashes match versions.json (INV-D7).
       - run: ./scripts/build-contracts.sh
       # The Wasm of record comes from this x86_64 Linux build (DEC-033): deploys
       # take these files, and they are kept for diffing when a hash differs.
@@ -178,13 +177,8 @@ jobs:
           name: contracts-wasm
           path: target/contracts/*.wasm
           if-no-files-found: ignore
-      - run: cargo test --workspace --locked
-      - name: Frozen perps engine tests (vectors, scenarios, properties)
-        run: cargo test --workspace --locked --manifest-path lanes/perps/engine/Cargo.toml
-      - name: Parity gate, 10,000 random blocks (INV-P5)
-        run: |
-          cargo test --locked -p caravel-perps-node --test parity -- --ignored
-          cargo test --locked -p caravel-payments-node --test parity -- --ignored
+      - run: cargo nextest run --workspace --locked
+      - run: cargo test --workspace --locked --doc
       # The docs site's CLI reference is generated from `caravel help` (H-12).
       - name: The CLI reference matches the CLI
         run: cargo build --locked -p caravel-cli && CARAVEL_BIN=target/debug/caravel ./scripts/check-cli-docs.sh
@@ -192,6 +186,39 @@ jobs:
         run: |
           cargo build --locked --manifest-path lanes/perps/engine/Cargo.toml -p caravel-types -p caravel-merkle -p caravel-perps --target wasm32v1-none
           cargo build --locked -p caravel-core -p caravel-app-sdk -p caravel-payments --target wasm32v1-none
+
+  engine:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: engine
+          nextest: "true"
+      - name: Frozen perps engine tests (vectors, scenarios, properties)
+        run: |
+          cargo nextest run --workspace --locked --manifest-path lanes/perps/engine/Cargo.toml
+          cargo test --workspace --locked --doc --manifest-path lanes/perps/engine/Cargo.toml
+
+  # INV-P5: 10,000 random blocks through the native build and the Wasm, both
+  # templates at once (nextest runs the two gates in parallel processes; the
+  # perps gate also spreads its 50 lanes over every core).
+  parity:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/rust-setup
+        with:
+          cache-key: test
+          stellar-cli: "true"
+          nextest: "true"
+      - run: ./scripts/build-contracts.sh
+      - name: Parity gates, 10,000 random blocks each (INV-P5)
+        run: cargo nextest run --workspace --locked --run-ignored only -E 'binary(parity)' --no-capture
 
   apps:
     needs: changes
@@ -218,7 +245,7 @@ jobs:
   # and a 2 GB image, so it runs on main and on demand only, not on every pull
   # request.
   e2e:
-    needs: changes
+    needs: [changes, release]
     if: github.event_name != 'pull_request' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -226,28 +253,26 @@ jobs:
       fail-fast: false
       matrix:
         template: [perps, payments]
-        # Processes, and containers from images built here from the checkout (D-03).
+        # Processes, and containers from the images the release job pushed (D-03).
         runtime: [process, docker]
     steps:
       - uses: actions/checkout@v4
-      - name: Install toolchain from rust-toolchain.toml
-        run: rustup toolchain install && rustup show active-toolchain
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/rust-setup
         with:
-          node-version: "22"
-      - name: Install Stellar CLI
-        run: |
-          curl -sSfL -o stellar-cli.tar.gz \
-            "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
-          echo "${STELLAR_CLI_SHA256}  stellar-cli.tar.gz" | sha256sum -c -
-          mkdir -p "$HOME/.local/bin"
-          tar xzf stellar-cli.tar.gz -C "$HOME/.local/bin" stellar
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          cache-key: release
+          stellar-cli: "true"
+      # The release job's build, used as is (F-04): the e2e builds nothing.
+      - uses: actions/download-artifact@v4
+        with:
+          name: caravel-release-linux-x86_64
+          path: release
+      - name: Restore the binaries' execute bits (artifacts drop them)
+        run: chmod +x release/bin/*
       - run: ./scripts/e2e-local.sh
         env:
           E2E_TEMPLATE: ${{ matrix.template }}
           E2E_RUNTIME: ${{ matrix.runtime }}
+          E2E_RELEASE_DIR: ${{ github.workspace }}/release
 
   # The README's quickstart, run as written after ./scripts/install.sh
   # (C-14, Gate G3): the same conditions as the e2e.
@@ -258,20 +283,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - name: Install toolchain from rust-toolchain.toml
-        run: rustup toolchain install && rustup show active-toolchain
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/rust-setup
         with:
-          node-version: "22"
-      - name: Install Stellar CLI
-        run: |
-          curl -sSfL -o stellar-cli.tar.gz \
-            "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
-          echo "${STELLAR_CLI_SHA256}  stellar-cli.tar.gz" | sha256sum -c -
-          mkdir -p "$HOME/.local/bin"
-          tar xzf stellar-cli.tar.gz -C "$HOME/.local/bin" stellar
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          cache-key: release
+          stellar-cli: "true"
       - run: ./scripts/check-quickstart.sh
 
   # What the testnet VM runs (T-012, DEC-046): the node binary, the Wasm of
@@ -287,20 +302,10 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
-      - name: Install toolchain from rust-toolchain.toml
-        run: rustup toolchain install && rustup show active-toolchain
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
+      - uses: ./.github/actions/rust-setup
         with:
-          node-version: "22"
-      - name: Install Stellar CLI
-        run: |
-          curl -sSfL -o stellar-cli.tar.gz \
-            "https://github.com/stellar/stellar-cli/releases/download/v${STELLAR_CLI_VERSION}/stellar-cli-${STELLAR_CLI_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
-          echo "${STELLAR_CLI_SHA256}  stellar-cli.tar.gz" | sha256sum -c -
-          mkdir -p "$HOME/.local/bin"
-          tar xzf stellar-cli.tar.gz -C "$HOME/.local/bin" stellar
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          cache-key: release
+          stellar-cli: "true"
       - run: ./scripts/build-contracts.sh
       # Each node reports this commit in /v1/status (the deploy tool's host check).
       - run: cargo build --release --locked -p caravel-cli -p caravel-perps-node -p caravel-payments-node
