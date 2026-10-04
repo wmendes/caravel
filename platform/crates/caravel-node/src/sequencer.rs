@@ -301,8 +301,8 @@ async fn block_loop<A: NodeApp>(app: Arc<SequencerNode<A>>, config_hash: [u8; 32
             let t_queue = std::time::Instant::now();
             let waiting = core
                 .store()
-                .checkpoints_with(CheckpointStatus::Signed)
-                .map_or(0, |v| v.len());
+                .count_checkpoints_with(CheckpointStatus::Signed)
+                .unwrap_or(0);
             a.record("queue_read", t_queue.elapsed());
             core.set_queue_len(waiting);
             core.produce_block(now_ms())
@@ -365,8 +365,11 @@ async fn signer_loop<A: NodeApp>(app: Arc<SequencerNode<A>>) {
         // The lowest checkpoint still waiting for signatures, in seq order.
         let next = {
             let core = app.core.lock().expect("core lock");
-            match core.store().checkpoints_with(CheckpointStatus::Sequenced) {
-                Ok(rows) => rows.into_iter().next().map(|row| {
+            match core
+                .store()
+                .first_checkpoint_with(CheckpointStatus::Sequenced)
+            {
+                Ok(row) => row.map(|row| {
                     let check = core.precheck_row(&row);
                     (row, check)
                 }),
@@ -828,10 +831,8 @@ async fn internal_feed<A: NodeApp>(
 async fn internal_pending<A: NodeApp>(State(app): AppState<A>, headers: HeaderMap) -> ApiResult {
     authorized(&app, &headers)?;
     let row = app
-        .store(|s| s.checkpoints_with(CheckpointStatus::Signed))
-        .map_err(ApiError::internal)?
-        .into_iter()
-        .next();
+        .store(|s| s.first_checkpoint_with(CheckpointStatus::Signed))
+        .map_err(ApiError::internal)?;
     match row {
         None => Ok(StatusCode::NO_CONTENT.into_response()),
         Some(row) => ok(json!({
