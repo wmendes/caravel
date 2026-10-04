@@ -8,14 +8,12 @@ The lane file you try locally is the one you deploy. Add a testnet deployment wi
 
 ## Prepare a host
 
-A host is a Linux machine you can reach over ssh (or Google Cloud's IAP), with:
+A host is a Linux machine you can reach over ssh (or Google Cloud's IAP) with passwordless `sudo`. How its nodes run decides what else it needs:
 
-- systemd and passwordless `sudo`;
-- an unprivileged `caravel` user and the lane's root, `/opt/caravel` by default;
-- Node.js 22 or later, `rsync` and `curl`;
-- Caddy, if the deployment has a `public_url`.
+- **Containers** (`runtime = "docker"` in the host, see [Lanes in containers](lanes-in-docker.md)): Docker Engine with the Compose plugin, and `curl`. The release's images bring the nodes, the relayer and Caddy.
+- **systemd** (the default for ssh hosts): an unprivileged `caravel` user and the lane's root, `/opt/caravel` by default; Node.js 22 or later, `rsync` and `curl`; Caddy, if the deployment has a `public_url`.
 
-`caravel plan` checks all of this and lists what's missing. The repository's `lanes/perps/deploy/testnet/provision.sh` sets up an Ubuntu host this way. It installs Caddy and Node.js, creates the user and root, and adds swap.
+`caravel plan` checks all of this and lists what's missing. To make a Google Cloud VM with Docker on it, use the repository's infrastructure as code ([Machines on Google Cloud](machines-on-gcp.md)). For a systemd host, `lanes/perps/deploy/testnet/provision.sh` sets up Ubuntu: it installs Caddy and Node.js, creates the user and root, and adds swap.
 
 ## Add a testnet deployment
 
@@ -55,7 +53,7 @@ caravel apply --env testnet
 caravel status --env testnet
 ```
 
-`apply` deploys the settlement contract on testnet, installs the release on the host, writes the node configs, systemd units and Caddyfile, streams the validators' and relayer's keys over the ssh connection into the host's `keys/` (mode 600), and starts the nodes. Keys never touch your disk or a command line.
+`apply` deploys the settlement contract on testnet, installs the release on the host, writes the node configs and the systemd units and Caddyfile (or the compose file, for containers), streams the validators' and relayer's keys over the ssh connection into the host's `keys/` (mode 600), and starts the nodes. Keys never touch your disk or a command line.
 
 On a machine that isn't x86_64 Linux, install the release built by CI for the host (`--release-dir`). The plan refuses a binary built for another platform.
 
