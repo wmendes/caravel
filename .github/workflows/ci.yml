@@ -24,6 +24,62 @@ env:
   TOFU_SHA256: "378ada19d4bc70c43732004e8159be771b23b9a5afdf059e5f8a2b3fa2c70a69"
 
 jobs:
+  # What a change can affect (DEC-117), so a docs-only change doesn't wait for
+  # the Rust build, the e2e or the release. When in doubt, a file is code.
+  # `[skip ci]` in a commit message skips this workflow altogether
+  # (CONTRIBUTING.md says when).
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+      apps: ${{ steps.diff.outputs.apps }}
+      infra: ${{ steps.diff.outputs.infra }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          all='["platform/relayer","lanes/perps/relayer-feeds","lanes/perps/web","docs-site"]'
+          if [[ "$EVENT" == pull_request ]]; then
+            files="$(git diff --name-only "$BASE...$HEAD")"
+          elif [[ "$EVENT" == push && -n "$BEFORE" && ! "$BEFORE" =~ ^0+$ ]] && git cat-file -e "$BEFORE" 2> /dev/null; then
+            files="$(git diff --name-only "$BEFORE" "$GITHUB_SHA")"
+          else
+            { echo "code=true"; echo "apps=$all"; echo "infra=true"; } >> "$GITHUB_OUTPUT"
+            echo "everything ($EVENT)"; exit 0
+          fi
+          echo "$files"
+          code=false; infra=false; apps=()
+          has() { grep -qE "$1" <<< "$files"; }
+          while IFS= read -r f; do
+            [[ -z "$f" ]] && continue
+            case "$f" in
+              lanes/perps/engine/*) code=true ;;
+              # Not code for the Rust build and e2e; docs-site and infra have jobs of their own.
+              docs/* | docs-site/* | site/* | infra/opentofu/* | .claude/* | LICENSE* | *.md) ;;
+              *) code=true ;;
+            esac
+          done <<< "$files"
+          if has '^(versions\.json|\.github/workflows/ci\.yml)$'; then
+            apps_json="$all"; infra=true
+          else
+            for a in platform/relayer lanes/perps/relayer-feeds lanes/perps/web docs-site; do
+              if has "^$a/"; then apps+=("$a"); fi
+            done
+            # The feed module runs inside the relayer: test it with the relayer.
+            if has '^platform/relayer/' && ! has '^lanes/perps/relayer-feeds/'; then apps+=(lanes/perps/relayer-feeds); fi
+            apps_json="$(printf '%s\n' "${apps[@]}" | jq -Rnc '[inputs | select(length > 0)]')"
+            if has '^infra/opentofu/'; then infra=true; fi
+          fi
+          { echo "code=$code"; echo "apps=$apps_json"; echo "infra=$infra"; } >> "$GITHUB_OUTPUT"
+          echo "code=$code apps=$apps_json infra=$infra"
+
   versions:
     runs-on: ubuntu-latest
     steps:
@@ -50,6 +106,8 @@ jobs:
   # Machines as code (M0.8, D-04): every OpenTofu root and module is formatted
   # and valid, offline (no backend, no cloud credentials).
   infra:
+    needs: changes
+    if: needs.changes.outputs.infra == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -73,6 +131,8 @@ jobs:
       - run: for f in infra/opentofu/modules/caravel-host-gcp/startup.sh infra/opentofu/bootstrap-state.sh; do bash -n "$f"; done
 
   rust:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     # Two workspaces (root and the frozen engine) build debug targets here, and
     # the runner's disk ran out linking caravel-perps-node (ld bus error). Tests
@@ -134,11 +194,13 @@ jobs:
           cargo build --locked -p caravel-core -p caravel-app-sdk -p caravel-payments --target wasm32v1-none
 
   apps:
+    needs: changes
+    if: needs.changes.outputs.apps != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        app: [platform/relayer, lanes/perps/relayer-feeds, lanes/perps/web, docs-site]
+        app: ${{ fromJSON(needs.changes.outputs.apps) }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -156,7 +218,8 @@ jobs:
   # and a 2 GB image, so it runs on main and on demand only, not on every pull
   # request.
   e2e:
-    if: github.event_name != 'pull_request'
+    needs: changes
+    if: github.event_name != 'pull_request' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -189,7 +252,8 @@ jobs:
   # The README's quickstart, run as written after ./scripts/install.sh
   # (C-14, Gate G3): the same conditions as the e2e.
   quickstart:
-    if: github.event_name != 'pull_request'
+    needs: changes
+    if: github.event_name != 'pull_request' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -214,7 +278,8 @@ jobs:
   # record (x86_64 Linux, DEC-033) and the relayer build, from one commit on
   # main. The VM runs Ubuntu 24.04 like this runner, so glibc matches.
   release:
-    if: github.event_name != 'pull_request'
+    needs: changes
+    if: github.event_name != 'pull_request' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-24.04
     # Pushes this commit's container images to GHCR (D-01, DEC-111).
     permissions:
