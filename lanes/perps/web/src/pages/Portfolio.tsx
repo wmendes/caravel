@@ -1,134 +1,355 @@
-import { useState } from "react";
+/**
+ * The account: where every dollar is (on Stellar or on the lane), what it is
+ * doing, and the actions that move it: get test USDC, deposit, withdraw,
+ * claim (DEC-106).
+ */
+import { useState, type ReactNode } from "react";
 
 import { lane, type Account, type Proof } from "../api/lane";
 import { explain, stellar } from "../api/stellar";
-import { Chip, Empty, Signed, Skel, useToast } from "../components/ui";
+import { FundPanel } from "../components/Fund";
+import { Chip, Empty, SidePill, Signed, Skel, Tabs, useToast } from "../components/ui";
 import { config } from "../config";
-import { parseUsdc, short, usdc } from "../format";
+import { base, baseAmount, parseUsdc, perUnit, price, short, usdc } from "../format";
+import { Link } from "../router";
 import { useApp, usePoll } from "../state";
 import { explainReject, laneIds, send, type LaneIds } from "../trade";
+
+type Action = "fund" | "deposit" | "withdraw";
+type Claim = Proof & { claimed: boolean };
 
 export function Portfolio() {
   const { address, connect, connecting, status, account } = useApp();
   const [wallet, setWallet] = useState<bigint | null | undefined>(undefined);
-  const [claims, setClaims] = useState<(Proof & { claimed: boolean })[] | null>(null);
+  const [claims, setClaims] = useState<Claim[] | null>(null);
+  const [action, setAction] = useState<Action | null>(null);
+  const [depositAmount, setDepositAmount] = useState("");
 
   usePoll(async () => {
     if (!address) return;
     const [w, p] = await Promise.all([stellar.usdcBalance(address), lane.withdrawalProofs(address).catch(() => ({ withdrawals: [] as Proof[] }))]);
     setWallet(w);
-    const withStatus = await Promise.all(p.withdrawals.map(async (x) => ({ ...x, claimed: await stellar.isClaimed(x.seq, x.index).catch(() => false) })));
-    setClaims(withStatus);
+    setClaims(await Promise.all(p.withdrawals.map(async (x) => ({ ...x, claimed: await stellar.isClaimed(x.seq, x.index).catch(() => false) }))));
   }, 5000, [address]);
 
   if (!address) {
     return (
       <div className="page">
-        <div className="page-head">
+        <header className="page-head">
           <div>
             <h1>Portfolio</h1>
-            <p>Your USDC on Stellar, your lane account, and withdrawals ready to claim.</p>
+            <p>Your USDC on Stellar, your account on the lane, and withdrawals ready to claim.</p>
           </div>
-        </div>
-        <div className="section">
+        </header>
+        <section className="section">
           <Empty
-            title="Connect a wallet to see your balances"
+            title="Connect a wallet to see your account"
             action={
               <button className="btn stellar" disabled={connecting} onClick={() => void connect()}>
                 {connecting ? "Connecting…" : "Connect wallet"}
               </button>
             }
           >
-            Any Stellar wallet on testnet.
+            Any Stellar wallet on testnet. New to testnet? Once connected, Get test USDC funds you in one signature.
           </Empty>
-        </div>
+        </section>
       </div>
     );
   }
 
-  const v = (x: string | undefined) => (account === undefined ? <Skel w={90} h={18} /> : account === null ? "–" : usdc(x));
+  // Default action: fund an empty wallet, otherwise deposit.
+  const current: Action = action ?? ((wallet === null || wallet === 0n) && !account ? "fund" : "deposit");
+  const open = claims?.filter((c) => !c.claimed) ?? [];
+  const claimable = open.reduce((s, c) => s + BigInt(c.amount ?? "0"), 0n);
+  const equity = account ? BigInt(account.equity) : null;
+  const upnl = account ? BigInt(account.equity) - BigInt(account.collateral) : null;
+  const mm = account ? BigInt(account.maintenance_margin) : 0n;
+  const ratio = equity && equity > 0n ? Number((mm * 10_000n) / equity) / 100 : 0;
+
   return (
     <div className="page">
-      <div className="page-head">
-        <div>
-          <h1>Portfolio</h1>
-          <p>
-            <span className="mono">{short(address, 6)}</span>. Your USDC sits in the settlement contract on Stellar; the lane keeps the account of your share.
+      <header className="acct-head">
+        <div className="acct-id">
+          <span className="label">Account</span>
+          <AddressLine address={address} />
+        </div>
+        <div className="acct-figs">
+          <Fig k="Equity" chip="soft" v={account === undefined ? <Skel w={110} h={22} /> : account === null ? "No deposit yet" : `${usdc(equity)} USDC`} big />
+          <Fig k="Unrealized PnL" v={upnl === null ? "–" : <Signed value={upnl}>{usdc(upnl)}</Signed>} />
+          <Fig k="Margin ratio" v={account ? `${ratio.toFixed(2)}%` : "–"} hint="Maintenance margin over equity; at 100% the account can be liquidated." />
+          <Fig k="Ready to claim" chip="settled" v={claims === null ? <Skel w={70} h={18} /> : `${usdc(claimable)} USDC`} />
+        </div>
+      </header>
+
+      <div className="acct-grid">
+        <div className="acct-main">
+          <section className="section" aria-label="Balances">
+            <div className="section-head">
+              <h3>Where your USDC is</h3>
+              <span className="hint">Settled is on Stellar; soft is on the lane until the next checkpoint.</span>
+            </div>
+            <div className="table-wrap">
+              <table className="table ledger">
+                <tbody>
+                  <Row where="Your Stellar wallet" chip="settled" amount={wallet === undefined ? undefined : wallet} note={wallet === null ? "No USDC trustline yet" : "Yours to deposit"} />
+                  <Row where="Lane collateral" chip="soft" amount={account === undefined ? undefined : account ? BigInt(account.collateral) : null} note="Deposits, less withdrawals, plus realized PnL and fees" />
+                  <Row where="Held as margin" chip="soft" amount={account === undefined ? undefined : account ? BigInt(account.initial_margin) : null} note="Initial margin of positions and open orders" />
+                  <Row where="Free to withdraw" chip="soft" amount={account === undefined ? undefined : account ? BigInt(account.free_collateral) : null} note="Claimable on Stellar after the next checkpoint" strong />
+                  <Row where="Claimable on Stellar" chip="settled" amount={claims === null ? undefined : claimable} note={open.length ? `${open.length} withdrawal${open.length > 1 ? "s" : ""} ready` : "Nothing waiting"} />
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <Holdings account={account} claims={claims} address={address} />
+
+          <details className="section">
+            <summary>Forced withdrawal through Stellar</summary>
+            <ForcedWithdrawal address={address} />
+          </details>
+        </div>
+
+        <aside className="acct-side" aria-label="Move funds">
+          <section className="section">
+            <Tabs
+              label="Move funds"
+              value={current}
+              onChange={setAction}
+              tabs={[
+                { id: "fund", label: "Get test USDC" },
+                { id: "deposit", label: "Deposit" },
+                { id: "withdraw", label: "Withdraw" },
+              ]}
+            />
+            <div className="section-body">
+              {current === "fund" && (
+                <FundPanel
+                  address={address}
+                  wallet={wallet}
+                  onFunded={(v) => {
+                    setWallet((w) => (typeof w === "bigint" ? w + v : v));
+                    setDepositAmount(usdc(v, 0).replace(/,/g, ""));
+                    setAction("deposit");
+                  }}
+                />
+              )}
+              {current === "deposit" && <Deposit key={depositAmount} address={address} wallet={wallet} initial={depositAmount} onNeedFunds={() => setAction("fund")} />}
+              {current === "withdraw" && <Withdraw address={address} ids={laneIds(status)} account={account ?? null} />}
+            </div>
+          </section>
+          <p className="hint side-note">
+            Money moves in three steps: deposit on Stellar, trade on the lane, then withdraw and claim on Stellar once a checkpoint is accepted. <Link to="/escape">If the lane stops</Link>, you can still exit on Stellar.
           </p>
-        </div>
+        </aside>
       </div>
+    </div>
+  );
+}
 
-      <div className="board">
-        <div className="statrow">
-          <div className="stat">
-            <span className="k">
-              USDC in your wallet <Chip kind="settled">Stellar</Chip>
-            </span>
-            <span className="v num">{wallet === undefined ? <Skel w={90} h={18} /> : wallet === null ? "No trustline" : usdc(wallet)}</span>
-            <span className="sub">Ready to deposit</span>
-          </div>
-          <div className="stat">
-            <span className="k">
-              Lane collateral <Chip kind="soft">soft</Chip>
-            </span>
-            <span className="v num">{v(account?.collateral)}</span>
-            <span className="sub">Deposits, less withdrawals, plus realized PnL</span>
-          </div>
-          <div className="stat">
-            <span className="k">
-              Equity <Chip kind="soft">soft</Chip>
-            </span>
-            <span className="v num">{v(account?.equity)}</span>
-            <span className="sub">{account ? <Signed value={BigInt(account.equity) - BigInt(account.collateral)}>{usdc(BigInt(account.equity) - BigInt(account.collateral))}</Signed> : "–"} unrealized</span>
-          </div>
-          <div className="stat">
-            <span className="k">
-              Free collateral <Chip kind="soft">soft</Chip>
-            </span>
-            <span className="v num">{v(account?.free_collateral)}</span>
-            <span className="sub">What you can withdraw now</span>
-          </div>
-        </div>
-        <div className="flow">
-          <div>
-            <b>1 · Deposit on Stellar</b>
-            <span className="faint">Your wallet signs a Stellar transaction. The lane credits it within seconds.</span>
-          </div>
-          <div>
-            <b>2 · Trade on the lane</b>
-            <span className="faint">Fills are instant and soft until a checkpoint carries them to Stellar.</span>
-          </div>
-          <div>
-            <b>3 · Withdraw, then claim</b>
-            <span className="faint">After the next accepted checkpoint, claim the USDC on Stellar with a proof.</span>
-          </div>
-        </div>
-      </div>
+function AddressLine({ address }: { address: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <span className="addr">
+      <span className="mono">{short(address, 8)}</span>
+      <button
+        type="button"
+        className="btn ghost sm"
+        onClick={() => {
+          void navigator.clipboard?.writeText(address).then(() => {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1200);
+          });
+        }}
+      >
+        {copied ? "Copied" : "Copy"}
+      </button>
+      <a className="btn ghost sm" href={`${config.explorerUrl}/account/${address}`} target="_blank" rel="noreferrer">
+        stellar.expert ↗
+      </a>
+    </span>
+  );
+}
 
-      {wallet === null && (
-        <div className="section">
-          <div className="section-head">
-            <h3>Get testnet USDC</h3>
+function Fig({ k, v, chip, hint, big }: { k: string; v: ReactNode; chip?: "soft" | "settled"; hint?: string; big?: boolean }) {
+  return (
+    <div className={`fig ${big ? "big" : ""}`}>
+      <span className="k" title={hint}>
+        {k} {chip && <Chip kind={chip}>{chip}</Chip>}
+      </span>
+      <span className="v num">{v}</span>
+    </div>
+  );
+}
+
+function Row({ where, chip, amount, note, strong }: { where: string; chip: "soft" | "settled"; amount: bigint | null | undefined; note: string; strong?: boolean }) {
+  return (
+    <tr>
+      <td>
+        <span className="where">
+          <Chip kind={chip}>{chip}</Chip> <span className={strong ? "ink" : undefined}>{where}</span>
+        </span>
+      </td>
+      <td className={`r num ${strong ? "ink" : ""}`}>{amount === undefined ? <Skel w={80} /> : amount === null ? "–" : `${usdc(amount)} USDC`}</td>
+      <td className="faint note">{note}</td>
+    </tr>
+  );
+}
+
+function Holdings({ account, claims, address }: { account: Account | null | undefined; claims: Claim[] | null; address: string }) {
+  const { markets } = useApp();
+  const [tab, setTab] = useState<"positions" | "orders" | "claims">("positions");
+  const positions = account?.positions ?? [];
+  const orders = account?.open_orders ?? [];
+  const open = claims?.filter((c) => !c.claimed) ?? [];
+  const { busy, msg, run } = useAction();
+  return (
+    <section className="section">
+      <Tabs
+        label="Holdings"
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { id: "positions", label: "Positions", count: positions.length },
+          { id: "orders", label: "Open orders", count: orders.length },
+          { id: "claims", label: "Claims", count: open.length },
+        ]}
+      />
+      {tab === "positions" &&
+        (positions.length === 0 ? (
+          <Empty
+            title="No open positions"
+            action={
+              <Link to="/trade/BTC-PERP" className="btn sm" style={{ textDecoration: "none" }}>
+                Trade
+              </Link>
+            }
+          />
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Market</th>
+                  <th className="r">Size</th>
+                  <th className="r">Entry</th>
+                  <th className="r">Mark</th>
+                  <th className="r">Unrealized PnL</th>
+                  <th className="r">Liq. (est.)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {positions.map((p) => {
+                  const m = markets.find((x) => x.market_id === p.market_id);
+                  if (!m) return null;
+                  return (
+                    <tr key={p.market_id}>
+                      <td>
+                        <Link to={`/trade/${m.symbol}`} style={{ textDecoration: "none", fontWeight: 600 }}>
+                          {p.symbol}
+                        </Link>{" "}
+                        <SidePill long={p.lots > 0} />
+                      </td>
+                      <td className="r">
+                        {baseAmount(Math.abs(p.lots), m)} {base(m.symbol)}
+                      </td>
+                      <td className="r">{p.entry_price ? price(perUnit(p.entry_price, m)) : "–"}</td>
+                      <td className="r">{price(perUnit(p.mark_price, m))}</td>
+                      <td className="r">
+                        <Signed value={BigInt(p.upnl)}>{usdc(p.upnl)}</Signed>
+                      </td>
+                      <td className="r dim">{p.liq_price ? price(perUnit(p.liq_price, m)) : "–"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
+        ))}
+      {tab === "orders" &&
+        (orders.length === 0 ? (
+          <Empty title="No open orders">Limit and post-only orders rest here until they fill or you cancel them on the Trade page.</Empty>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Market</th>
+                  <th>Side</th>
+                  <th className="r">Price</th>
+                  <th className="r">Remaining</th>
+                </tr>
+              </thead>
+              <tbody>
+                {orders.map((o) => {
+                  const m = markets.find((x) => x.market_id === o.market_id);
+                  if (!m) return null;
+                  return (
+                    <tr key={o.order_id}>
+                      <td>{m.symbol}</td>
+                      <td>
+                        <SidePill long={o.side === "buy"} />
+                      </td>
+                      <td className="r">{price(perUnit(o.price, m))}</td>
+                      <td className="r">
+                        {baseAmount(o.lots_remaining, m)} {base(m.symbol)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ))}
+      {tab === "claims" &&
+        (claims === null ? (
           <div className="section-body">
-            <p className="dim">
-              Add the USDC asset (<span className="mono">{config.usdcAsset}</span>) in your wallet, then get testnet USDC from the{" "}
-              <a href={config.faucetUrl} target="_blank" rel="noreferrer">
-                Circle faucet
-              </a>{" "}
-              (choose Stellar testnet).
-            </p>
+            <Skel w="100%" />
           </div>
+        ) : open.length === 0 ? (
+          <Empty title="Nothing to claim">A withdrawal shows here once its checkpoint is accepted on Stellar, about a minute after you make it.</Empty>
+        ) : (
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Checkpoint</th>
+                <th className="r">Amount</th>
+                <th className="r">
+                  <span className="sr-only">Claim</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {open.map((c) => (
+                <tr key={`${c.seq}-${c.index}`}>
+                  <td>
+                    <Chip kind="settled">#{c.seq}</Chip>
+                  </td>
+                  <td className="r">{usdc(c.amount ?? "0")} USDC</td>
+                  <td className="r">
+                    <button
+                      className="btn sm stellar"
+                      disabled={busy}
+                      onClick={() =>
+                        void run(async () => {
+                          const hash = await stellar.claimWithdrawal(address, { seq: c.seq, index: c.index, amount: c.amount ?? "0", proof: c.proof });
+                          return `Claimed on Stellar (${short(hash, 6)}).`;
+                        })
+                      }
+                    >
+                      Claim
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ))}
+      {msg && (
+        <div className="section-body">
+          <p className={`msg ${msg.ok ? "ok" : "err"}`}>{msg.text}</p>
         </div>
       )}
-
-      <div className="cols">
-        <Deposit address={address} wallet={wallet} />
-        <Withdraw address={address} ids={laneIds(status)} account={account ?? null} />
-      </div>
-      <Claims address={address} claims={claims} />
-      <ForcedWithdrawal address={address} />
-    </div>
+    </section>
   );
 }
 
@@ -166,43 +387,45 @@ function Amount({ id, value, onChange, placeholder, max }: { id: string; value: 
   );
 }
 
-function Deposit({ address, wallet }: { address: string; wallet: bigint | null | undefined }) {
-  const [amount, setAmount] = useState("");
+function Deposit({ address, wallet, initial, onNeedFunds }: { address: string; wallet: bigint | null | undefined; initial: string; onNeedFunds: () => void }) {
+  const [amount, setAmount] = useState(initial);
   const { busy, msg, run } = useAction();
   const v = parseUsdc(amount);
   const tooMuch = v !== null && typeof wallet === "bigint" && v > wallet;
   return (
-    <section className="section">
-      <div className="section-head">
-        <h3>Deposit</h3>
-        <Chip kind="settled">on Stellar</Chip>
+    <div className="action">
+      <div className="field">
+        <span className="flabel">
+          <label htmlFor="dep">Deposit into the lane</label>
+          <span className="faint num">Wallet: {typeof wallet === "bigint" ? `${usdc(wallet)} USDC` : "–"}</span>
+        </span>
+        <Amount id="dep" value={amount} onChange={setAmount} placeholder="100" max={wallet} />
+        {tooMuch && <span className="hint down">More than your wallet holds.</span>}
       </div>
-      <div className="section-body">
-        <div className="field">
-          <span className="flabel">
-            <label htmlFor="dep">Amount</label>
-            <span className="faint num">Wallet: {typeof wallet === "bigint" ? `${usdc(wallet)} USDC` : "–"}</span>
-          </span>
-          <Amount id="dep" value={amount} onChange={setAmount} placeholder="100" max={wallet} />
-          {tooMuch && <span className="hint down">More than your wallet holds.</span>}
-        </div>
-        <button
-          className="btn stellar block"
-          disabled={busy || v === null || v < 10_000_000n || tooMuch}
-          onClick={() =>
-            void run(async () => {
-              const hash = await stellar.deposit(address, v!);
-              setAmount("");
-              return `Deposited on Stellar (${short(hash, 6)}). The lane credits it within seconds.`;
-            })
-          }
-        >
-          {busy ? "Sign in your wallet…" : "Deposit on Stellar"}
-        </button>
-        <p className="hint">At least 1 USDC. It moves from your wallet into the settlement contract; the relayer reports it to the lane.</p>
-        {msg && <p className={`msg ${msg.ok ? "ok" : "err"}`}>{msg.text}</p>}
-      </div>
-    </section>
+      <button
+        className="btn stellar lg block"
+        disabled={busy || v === null || v < 10_000_000n || tooMuch}
+        onClick={() =>
+          void run(async () => {
+            const hash = await stellar.deposit(address, v!);
+            setAmount("");
+            return `Deposited on Stellar (${short(hash, 6)}). The lane credits it within seconds.`;
+          })
+        }
+      >
+        {busy ? "Sign in your wallet…" : "Deposit on Stellar"}
+      </button>
+      {(wallet === null || wallet === 0n) && (
+        <p className="hint">
+          No USDC in your wallet yet.{" "}
+          <button type="button" className="linkish" onClick={onNeedFunds}>
+            Get test USDC
+          </button>
+        </p>
+      )}
+      <p className="hint">At least 1 USDC. It moves into the settlement contract on Stellar; the relayer reports it to the lane, which credits it within seconds.</p>
+      {msg && <p className={`msg ${msg.ok ? "ok" : "err"}`}>{msg.text}</p>}
+    </div>
   );
 }
 
@@ -213,98 +436,31 @@ function Withdraw({ address, ids, account }: { address: string; ids: LaneIds | n
   const free = account ? BigInt(account.free_collateral) : null;
   const tooMuch = v !== null && free !== null && v > free;
   return (
-    <section className="section">
-      <div className="section-head">
-        <h3>Withdraw</h3>
-        <Chip kind="soft">from the lane</Chip>
+    <div className="action">
+      <div className="field">
+        <span className="flabel">
+          <label htmlFor="wd">Withdraw from the lane</label>
+          <span className="faint num">Free: {free !== null ? `${usdc(free)} USDC` : "–"}</span>
+        </span>
+        <Amount id="wd" value={amount} onChange={setAmount} max={free} />
+        {tooMuch && <span className="hint down">More than your free collateral.</span>}
       </div>
-      <div className="section-body">
-        <div className="field">
-          <span className="flabel">
-            <label htmlFor="wd">Amount</label>
-            <span className="faint num">Free: {free !== null ? `${usdc(free)} USDC` : "–"}</span>
-          </span>
-          <Amount id="wd" value={amount} onChange={setAmount} max={free} />
-          {tooMuch && <span className="hint down">More than your free collateral.</span>}
-        </div>
-        <button
-          className="btn block"
-          disabled={busy || !ids || !account || v === null || v <= 0n || tooMuch}
-          onClick={() =>
-            void run(async () => {
-              const hash = await send(ids!, address, { kind: "withdraw", amount: v! }, null);
-              setAmount("");
-              return `Withdrawal queued in the lane (${short(hash, 6)}). Claim it below once its checkpoint is accepted on Stellar.`;
-            }, explainReject)
-          }
-        >
-          {busy ? "Sign in your wallet…" : "Withdraw from the lane"}
-        </button>
-        <p className="hint">Signed in your wallet. It leaves your lane collateral now and becomes claimable on Stellar after the next accepted checkpoint.</p>
-        {msg && <p className={`msg ${msg.ok ? "ok" : "err"}`}>{msg.text}</p>}
-      </div>
-    </section>
-  );
-}
-
-function Claims({ address, claims }: { address: string; claims: (Proof & { claimed: boolean })[] | null }) {
-  const { busy, msg, run } = useAction();
-  const open = claims?.filter((c) => !c.claimed) ?? [];
-  return (
-    <section className="section">
-      <div className="section-head">
-        <h3>Ready to claim on Stellar</h3>
-        {open.length > 0 && <Chip kind="settled">{open.length} ready</Chip>}
-      </div>
-      {claims === null ? (
-        <div className="section-body">
-          <Skel w="100%" />
-        </div>
-      ) : open.length === 0 ? (
-        <Empty title="Nothing to claim">Withdrawals appear here once their checkpoint is accepted on Stellar.</Empty>
-      ) : (
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Checkpoint</th>
-              <th className="r">Amount</th>
-              <th className="r">
-                <span className="sr-only">Claim</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {open.map((c) => (
-              <tr key={`${c.seq}-${c.index}`}>
-                <td>
-                  <Chip kind="settled">#{c.seq}</Chip>
-                </td>
-                <td className="r">{usdc(c.amount ?? "0")} USDC</td>
-                <td className="r">
-                  <button
-                    className="btn sm stellar"
-                    disabled={busy}
-                    onClick={() =>
-                      void run(async () => {
-                        const hash = await stellar.claimWithdrawal(address, { seq: c.seq, index: c.index, amount: c.amount ?? "0", proof: c.proof });
-                        return `Claimed on Stellar (${short(hash, 6)}).`;
-                      })
-                    }
-                  >
-                    Claim
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      {msg && (
-        <div className="section-body">
-          <p className={`msg ${msg.ok ? "ok" : "err"}`}>{msg.text}</p>
-        </div>
-      )}
-    </section>
+      <button
+        className="btn lg block"
+        disabled={busy || !ids || !account || v === null || v <= 0n || tooMuch}
+        onClick={() =>
+          void run(async () => {
+            const hash = await send(ids!, address, { kind: "withdraw", amount: v! }, null);
+            setAmount("");
+            return `Withdrawal queued in the lane (${short(hash, 6)}). It shows under Claims once its checkpoint is accepted on Stellar.`;
+          }, explainReject)
+        }
+      >
+        {busy ? "Sign in your wallet…" : "Withdraw"}
+      </button>
+      <p className="hint">Signed in your wallet. The amount leaves your lane collateral now and becomes claimable on Stellar after the next accepted checkpoint, about a minute.</p>
+      {msg && <p className={`msg ${msg.ok ? "ok" : "err"}`}>{msg.text}</p>}
+    </div>
   );
 }
 
@@ -313,32 +469,31 @@ function ForcedWithdrawal({ address }: { address: string }) {
   const { busy, msg, run } = useAction();
   const v = parseUsdc(amount);
   return (
-    <details className="section">
-      <summary>Forced withdrawal through Stellar</summary>
-      <div className="section-body" style={{ maxWidth: 560 }}>
-        <p className="hint">
-          Asks for a withdrawal through Stellar instead of the lane. The lane must process it within the force-inclusion window, or anyone can freeze the settlement contract. It only releases free collateral and does not close positions.
-        </p>
-        <div className="field">
-          <label htmlFor="fw">Amount</label>
-          <Amount id="fw" value={amount} onChange={setAmount} />
-        </div>
-        <div>
-          <button
-            className="btn stellar"
-            disabled={busy || v === null || v <= 0n}
-            onClick={() =>
-              void run(async () => {
-                const hash = await stellar.requestForcedWithdrawal(address, v!);
-                return `Requested on Stellar (${short(hash, 6)}).`;
-              })
-            }
-          >
-            {busy ? "Sign in your wallet…" : "Request on Stellar"}
-          </button>
-        </div>
-        {msg && <p className={`msg ${msg.ok ? "ok" : "err"}`}>{msg.text}</p>}
+    <div className="section-body" style={{ maxWidth: 560 }}>
+      <p className="hint">
+        Asks for a withdrawal through Stellar instead of the lane. The lane must process it within the force-inclusion window, or anyone can freeze the settlement contract. It only releases free collateral and does not close positions.
+      </p>
+      <div className="field">
+        <label htmlFor="fw" className="flabel">
+          Amount
+        </label>
+        <Amount id="fw" value={amount} onChange={setAmount} />
       </div>
-    </details>
+      <div>
+        <button
+          className="btn stellar"
+          disabled={busy || v === null || v <= 0n}
+          onClick={() =>
+            void run(async () => {
+              const hash = await stellar.requestForcedWithdrawal(address, v!);
+              return `Requested on Stellar (${short(hash, 6)}).`;
+            })
+          }
+        >
+          {busy ? "Sign in your wallet…" : "Request on Stellar"}
+        </button>
+      </div>
+      {msg && <p className={`msg ${msg.ok ? "ok" : "err"}`}>{msg.text}</p>}
+    </div>
   );
 }

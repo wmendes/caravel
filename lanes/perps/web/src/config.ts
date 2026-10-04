@@ -23,6 +23,10 @@ export type Config = {
   usdcAsset: string;
   explorerUrl: string;
   faucetUrl: string;
+  /** Horizon, for the DEX quote of the "Get test USDC" flow; empty turns the flow off. */
+  horizonUrl: string;
+  /** Friendbot, which funds a new testnet account with XLM; empty turns that step off. */
+  friendbotUrl: string;
 };
 
 export const config: Config = {
@@ -36,9 +40,11 @@ export const config: Config = {
   usdcAsset: env.VITE_USDC_ASSET ?? "USDC:GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
   explorerUrl: env.VITE_EXPLORER_URL ?? "https://stellar.expert/explorer/testnet",
   faucetUrl: "https://faucet.circle.com",
+  horizonUrl: env.VITE_HORIZON_URL ?? "https://horizon-testnet.stellar.org",
+  friendbotUrl: env.VITE_FRIENDBOT_URL ?? "https://friendbot.stellar.org",
 };
 
-const URLS: (keyof Config)[] = ["sequencerUrl", "rpcUrl", "explorerUrl", "faucetUrl"];
+const URLS: (keyof Config)[] = ["sequencerUrl", "rpcUrl", "explorerUrl", "faucetUrl", "horizonUrl", "friendbotUrl"];
 
 /**
  * Lays a deployment's config over `target`: known keys of the right type
