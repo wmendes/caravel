@@ -451,7 +451,7 @@ dependencies = [
 
 [[package]]
 name = "caravel-app-sdk"
-version = "0.3.0"
+version = "0.2.0"
 dependencies = [
  "caravel-app-sdk",
  "caravel-core",
@@ -478,7 +478,7 @@ dependencies = [
 
 [[package]]
 name = "caravel-core"
-version = "0.3.0"
+version = "0.2.0"
 dependencies = [
  "caravel-core",
  "proptest",
@@ -560,7 +560,7 @@ dependencies = [
 
 [[package]]
 name = "caravel-payments"
-version = "0.3.0"
+version = "0.2.0"
 dependencies = [
  "caravel-app-sdk",
  "caravel-core",
@@ -2197,7 +2197,7 @@ checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "payments-engine"
-version = "0.3.0"
+version = "0.2.0"
 dependencies = [
  "caravel-app-sdk",
  "caravel-core",
@@ -2954,7 +2954,7 @@ dependencies = [
 
 [[package]]
 name = "settlement"
-version = "0.3.0"
+version = "0.2.0"
 dependencies = [
  "caravel-app-sdk",
  "caravel-core",

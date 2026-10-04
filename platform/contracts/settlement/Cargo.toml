@@ -1,7 +1,10 @@
 [package]
 name = "settlement"
 description = "Caravel settlement contract: USDC vault, inbox, checkpoints, withdrawals, freeze and escape"
-version.workspace = true
+# Built into a contract of record: its version stays put when the workspace
+# version moves, because on x86_64 Linux a version change can reorder the
+# Wasm (DEC-033, DEC-122). It changes with the contract.
+version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
