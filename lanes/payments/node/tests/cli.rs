@@ -234,4 +234,18 @@ fn validate_notes_a_fast_checkpoint_cadence() {
     );
     m.lane.node.checkpoint_every_blocks = 60;
     assert!(caravel_cli::deployment_notes(&m).is_empty(), "one a minute");
+    // With the time rules (K-02), the note says when checkpoints come, and
+    // that empty blocks end an idle batch before an hour.
+    m.lane.node.checkpoint_every_blocks = 100_000;
+    m.lane.node.checkpoint_urgent_ms = Some(5_000);
+    m.lane.node.checkpoint_busy_ms = Some(60_000);
+    m.lane.node.checkpoint_idle_ms = Some(3_600_000);
+    let notes = caravel_cli::deployment_notes(&m);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(
+        notes[0].contains("within 5 s of a deposit or withdrawal, 60 s of a trade")
+            && notes[0].contains("empty blocks"),
+        "{}",
+        notes[0]
+    );
 }

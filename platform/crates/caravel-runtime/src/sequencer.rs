@@ -191,6 +191,8 @@ pub struct Core<A: LaneApp> {
     end_reason: Option<EndReason>,
     /// Why the last sealed batch ended.
     last_end_reason: Option<EndReason>,
+    /// How many batches ended for each reason since the core opened (K-02).
+    end_reasons: BTreeMap<&'static str, u64>,
 }
 
 impl<A: LaneApp> Core<A> {
@@ -294,6 +296,7 @@ impl<A: LaneApp> Core<A> {
             backpressure: false,
             end_reason: None,
             last_end_reason: None,
+            end_reasons: BTreeMap::new(),
             perf: crate::perf::Perf::new(),
         })
     }
@@ -327,6 +330,16 @@ impl<A: LaneApp> Core<A> {
     /// Why the last sealed batch ended (K-02).
     pub fn last_end_reason(&self) -> Option<EndReason> {
         self.last_end_reason
+    }
+
+    /// Batches sealed for each reason since the core opened.
+    pub fn end_reasons(&self) -> &BTreeMap<&'static str, u64> {
+        &self.end_reasons
+    }
+
+    /// The node's checkpoint rules.
+    pub fn checkpoint_rules(&self) -> (u32, Option<CheckpointTiming>) {
+        (self.cfg.checkpoint_every_blocks, self.cfg.checkpoint_timing)
     }
 
     pub fn height(&self) -> u64 {
@@ -617,6 +630,7 @@ impl<A: LaneApp> Core<A> {
             self.budget.opened_at(built.block.timestamp_ms);
             if let Some(r) = self.end_reason {
                 self.last_end_reason = Some(r);
+                *self.end_reasons.entry(r.as_str()).or_default() += 1;
             }
             Some(row)
         } else {

@@ -492,6 +492,30 @@ key = \"${{local.prefix}}-v${{each.value}}\"
         e.contains("[env.testnet.node]") && e.contains("block_time_ms"),
         "{e}"
     );
+    // Checkpoints by time must stay inside the contract's windows (K-02):
+    // here escape_timeout_secs is 1800 and force_inclusion_window_secs 600.
+    let timed = |urgent: u64, idle: u64| {
+        std::fs::write(
+            &path,
+            lane.replace(
+                "checkpoint_every_blocks = 5",
+                &format!("checkpoint_urgent_ms = {urgent}, checkpoint_busy_ms = {}, checkpoint_idle_ms = {idle}", urgent.max(60_000)),
+            ),
+        )
+        .unwrap();
+        Manifest::load(&path, "testnet").map_err(|e| format!("{e:#}"))
+    };
+    assert!(timed(5_000, 900_000).is_ok(), "half of each window");
+    let e = timed(5_000, 900_001).unwrap_err();
+    assert!(
+        e.contains("[env.testnet]") && e.contains("checkpoint_idle_ms") && e.contains("frozen"),
+        "{e}"
+    );
+    let e = timed(300_001, 900_000).unwrap_err();
+    assert!(
+        e.contains("checkpoint_urgent_ms") && e.contains("deposit"),
+        "{e}"
+    );
 }
 
 /// A rule broken in a deployment points at where its value is written,

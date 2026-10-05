@@ -1683,9 +1683,32 @@ pub fn deployment_notes(m: &Manifest) -> Vec<String> {
     let mut notes = Vec::new();
     let node = &m.lane.node;
     let every_ms = node.block_time_ms * node.checkpoint_every_blocks;
-    if m.env.network != caravel_deploy::manifest::Network::Local
-        && every_ms < CHECKPOINT_NOTE_BELOW_MS
-    {
+    let off_local = m.env.network != caravel_deploy::manifest::Network::Local;
+    if let Some(t) = node.checkpoint_timing() {
+        // An idle batch also ends when it is full (§14.2 b): an empty block
+        // adds 129 B, and feed updates make it fill sooner.
+        let empty_fill_ms = node.max_batch_bytes / 129 * node.block_time_ms;
+        let idle_ms = t.idle_ms.min(empty_fill_ms).min(every_ms);
+        if off_local {
+            notes.push(format!(
+                "checkpoints: within {:.0} s of a deposit or withdrawal, {:.0} s of a trade, and at most every {} idle{}",
+                t.urgent_ms as f64 / 1000.0,
+                t.busy_ms as f64 / 1000.0,
+                minutes(idle_ms),
+                if idle_ms < t.idle_ms {
+                    format!(
+                        " (sooner than checkpoint_idle_ms: {} of {} ms blocks fill a batch)",
+                        if idle_ms == every_ms { "checkpoint_every_blocks" } else { "empty blocks" },
+                        node.block_time_ms
+                    )
+                } else {
+                    String::new()
+                }
+            ));
+        }
+        return notes;
+    }
+    if off_local && every_ms < CHECKPOINT_NOTE_BELOW_MS {
         notes.push(format!(
             "a checkpoint every {:.1} s ({} blocks of {} ms): each is a Stellar transaction the relayer submits after the last one lands. For one a minute, set checkpoint_every_blocks = {}",
             every_ms as f64 / 1000.0,
@@ -1695,6 +1718,17 @@ pub fn deployment_notes(m: &Manifest) -> Vec<String> {
         ));
     }
     notes
+}
+
+/// `ms` as minutes or hours, for notes.
+fn minutes(ms: u64) -> String {
+    if ms >= 3_600_000 && ms.is_multiple_of(3_600_000) {
+        format!("{} h", ms / 3_600_000)
+    } else if ms >= 60_000 {
+        format!("{:.0} min", ms as f64 / 60_000.0)
+    } else {
+        format!("{:.0} s", ms as f64 / 1000.0)
+    }
 }
 
 /// The identities a deployment names, in a stable order.
