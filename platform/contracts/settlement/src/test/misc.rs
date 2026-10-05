@@ -348,6 +348,9 @@ fn entries_live_120_days() {
     assert_eq!(ttls(&h, &DataKey::Inbox(0)), (TARGET, TARGET));
     h.sync_inbox();
     h.lane.block();
+    // Only a checkpoint with withdrawals keeps a record (K-04).
+    h.lane.withdraw(A, 30 * USDC);
+    h.lane.block();
     let cp = h.checkpoint();
     h.accept(&cp);
     assert_eq!(ttls(&h, &DataKey::Ckpt(1)).1, TARGET);
