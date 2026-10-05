@@ -781,6 +781,10 @@ impl Manifest {
                 merged
             }
         };
+        let problems = checkpoint_problems(&lane.node, &spec.settlement_params);
+        if !problems.is_empty() {
+            bail!("[env.{env}]: {}", problems.join("; "));
+        }
         Ok(Self {
             lane,
             env_name: env.to_string(),
@@ -1557,6 +1561,34 @@ fn host_problems(at: &str, h: &HostSpec) -> Vec<String> {
                 ));
             }
         }
+    }
+    p
+}
+
+/// A deployment's checkpoints by time must stay well inside the settlement
+/// contract's windows (K-02): an idle lane gets an accepted checkpoint at
+/// least every `escape_timeout_secs` or anyone may freeze it, and an inbox
+/// message must be in one within `force_inclusion_window_secs`. Half of
+/// each leaves room for signing, the relayer and a slow ledger.
+pub fn checkpoint_problems(
+    node: &caravel_node::lane_toml::NodeSection,
+    sp: &SettlementParams,
+) -> Vec<String> {
+    let Some(t) = node.checkpoint_timing() else {
+        return Vec::new();
+    };
+    let mut p = Vec::new();
+    if t.idle_ms > sp.escape_timeout_secs * 1000 / 2 {
+        p.push(format!(
+            "node.checkpoint_idle_ms {} is more than half of settlement_params.escape_timeout_secs ({} s): an idle lane could be frozen",
+            t.idle_ms, sp.escape_timeout_secs
+        ));
+    }
+    if t.urgent_ms > sp.force_inclusion_window_secs * 1000 / 2 {
+        p.push(format!(
+            "node.checkpoint_urgent_ms {} is more than half of settlement_params.force_inclusion_window_secs ({} s): a deposit could miss the window",
+            t.urgent_ms, sp.force_inclusion_window_secs
+        ));
     }
     p
 }

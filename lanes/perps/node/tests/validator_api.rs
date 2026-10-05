@@ -566,6 +566,14 @@ async fn validators_follow_sign_and_refuse_a_tampered_chain() {
     assert_eq!(none.status(), 404);
     assert!(t.elapsed() >= std::time::Duration::from_millis(300));
 
+    // K-02: the checkpoint rules and why batches ended. This lane has no
+    // time rules, so every batch ended on checkpoint_every_blocks.
+    let cp = &seq_status["checkpoint_policy"];
+    assert!(cp["idle_ms"].is_null(), "{cp}");
+    assert_eq!(cp["last_end_reason"], "blocks", "{cp}");
+    assert!(cp["end_reasons"]["blocks"].as_u64().unwrap() >= 1, "{cp}");
+    assert!(cp["open_batch"]["blocks"].as_u64().is_some(), "{cp}");
+
     // No fixed retry sleep between a seal and its signatures any more (F-10):
     // before, a validator one poll behind cost 2 s.
     assert!(

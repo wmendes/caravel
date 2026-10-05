@@ -2376,7 +2376,7 @@ Branches `k-0x-…`; the gate is after K-06.
 | ID | Task | Depends on | Status |
 |---|---|---|---|
 | K-01 | **Checkpoints by time and content** (§14.2 d–f, DEC-123). `[node]` `checkpoint_urgent_ms`, `checkpoint_busy_ms`, `checkpoint_idle_ms`; the batch tracks its content and age, rebuilt on restart; `checkpoint_end` returns why it ended | – | review |
-| K-02 | **Guards and visibility.** `caravel validate` errors against the escape and force-inclusion windows, and a note with the expected idle cadence; `/v1/status` `checkpoint_policy` with why the last batch ended | K-01 | todo |
+| K-02 | **Guards and visibility.** A deployment whose `checkpoint_idle_ms` is more than half of `escape_timeout_secs`, or whose `checkpoint_urgent_ms` is more than half of `force_inclusion_window_secs`, is refused when the lane file loads (`plan`, `apply` and `validate` alike). `validate` notes when checkpoints come, including when empty blocks fill an idle batch before `checkpoint_idle_ms`. `/v1/status` `checkpoint_policy`: the rules, the open batch (blocks, bytes, age, content), and the last and counted end reasons | K-01 | review |
 | K-03 | **Lane files and docs.** Lane #1 and the templates adopt the settings; the lane-file reference explains cadence and cost | K-02 | todo |
 | K-04 | **Settlement contract v2.** `Ckpt(seq)` only for checkpoints with withdrawals; a new hash of record | K-03 | todo |
 | K-05 | **Readers without a record.** The relayer's reconcile and replay fall back to `LastCkpt` and the `ckpt` event, and replay checks the header chain | K-04 | todo |

@@ -525,6 +525,30 @@ async fn signer_loop<A: NodeApp>(app: Arc<SequencerNode<A>>) {
 const SIGN_IDLE: Duration = Duration::from_secs(2);
 const SIGN_RETRY_FIRST: Duration = Duration::from_millis(150);
 
+/// `/v1/status` `checkpoint_policy` (K-02): the node's rules, the open
+/// batch, and why batches ended.
+fn checkpoint_policy<A: NodeApp>(core: &Core<A>, last_block_ms: u64) -> Value {
+    let (every, timing) = core.checkpoint_rules();
+    let b = core.batch();
+    let c = b.content();
+    json!({
+        "checkpoint_every_blocks": every,
+        "urgent_ms": timing.map(|t| t.urgent_ms),
+        "busy_ms": timing.map(|t| t.busy_ms),
+        "idle_ms": timing.map(|t| t.idle_ms),
+        "open_batch": {
+            "blocks": b.blocks(),
+            "bytes": b.used(),
+            "age_ms": b.age_ms(last_block_ms),
+            "inbox": c.inbox,
+            "users": c.users,
+            "withdrawals": c.withdrawals,
+        },
+        "last_end_reason": core.last_end_reason().map(|r| r.as_str()),
+        "end_reasons": core.end_reasons(),
+    })
+}
+
 /// `/v1/status` `perf` (F-01): each phase's p50 / p99 / max in microseconds,
 /// over the last `perf::WINDOW` samples, from the core and the node.
 pub(crate) fn perf_json(
@@ -786,6 +810,7 @@ fn status_body<A: NodeApp>(app: &SequencerNode<A>) -> ApiResult {
         "host_metering": metering,
         "perf": perf_json(&core.perf, &app.perf.lock().expect("perf lock")),
         "backpressure": core.backpressure(),
+        "checkpoint_policy": checkpoint_policy(&core, st.last_timestamp_ms),
         "signers": app.signers.as_ref().map(|s| json!({
             "epoch": s.epoch.to_string(),
             "threshold": s.threshold,
