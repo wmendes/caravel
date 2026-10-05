@@ -3,7 +3,7 @@ Lane demo-pay-0 · env local · network local
   settlement CC3UKZIZZ2LOLG6ZXQ3UNAEAP5JSCTWSSU4X33RU3VIAJMYUDZCSC6D4 (derived from the admin and the lane), admin GCQK…AGP5, token CADF…T54G
   signers: 2 of 3 at epoch 1
 
-! the settlement contract runs 8a2fafbd…, not fb68ee32…: it was upgraded outside this tool, or settlement_wasm is wrong
+! the settlement contract runs 8a2fafbd…, not ffddd99e…: it was upgraded outside this tool, or settlement_wasm is wrong
 ! validator-2 reports another config_hash than its files give
 
 0 step(s), 2 problem(s). Apply refuses until they are fixed.

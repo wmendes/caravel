@@ -1484,7 +1484,7 @@ Reject (panic with a `contracterror` code) on the first failure:
    - `unprocessed_deposits = cum(InboxCount) − cum(header.inbox_through)`;
    - require `withdrawals_total ≤ usdc.balance(this) − outstanding − unprocessed_deposits`.
 9. Effects:
-   - store `Ckpt(seq)`;
+   - store `Ckpt(seq)` if `withdrawal_count > 0` (since the M0.10 build, DEC-124; earlier builds store it for every checkpoint);
    - update `LastCkpt`, with `accepted_at = now`;
    - `TotalWithdrawalsCommitted += withdrawals_total`;
    - emit `Checkpoint`.
@@ -1752,7 +1752,7 @@ Rules:
    - `H(genesis(config)) == genesis_state_hash`.
 2. List accepted checkpoints via `Checkpoint` events (`getEvents`) and `checkpoint(seq)` views.
 3. For each seq, fetch the `submit_checkpoint` transaction (RPC `getTransaction` by hash, from event metadata) and extract the `header` and `batch` arguments from the envelope XDR.
-4. Check `H(header) == Ckpt(seq).header_hash` and `H(batch) == header.batch_hash`.
+4. Check `H(header) == Ckpt(seq).header_hash` (for a checkpoint without a record, DEC-124: the `ckpt` event's `header_hash`, and every header's `prev_header_hash` chains to the next up to `LastCkpt.header_hash`) and `H(batch) == header.batch_hash`.
 5. Execute every block through the executor. Check:
    - each `state_hash_after`;
    - the header's `last_block_hash`, `state_hash`, all commitment fields and `inbox_acc`.
@@ -2378,7 +2378,7 @@ Branches `k-0x-…`; the gate is after K-06.
 | K-01 | **Checkpoints by time and content** (§14.2 d–f, DEC-123). `[node]` `checkpoint_urgent_ms`, `checkpoint_busy_ms`, `checkpoint_idle_ms`; the batch tracks its content and age, rebuilt on restart; `checkpoint_end` returns why it ended | – | review |
 | K-02 | **Guards and visibility.** A deployment whose `checkpoint_idle_ms` is more than half of `escape_timeout_secs`, or whose `checkpoint_urgent_ms` is more than half of `force_inclusion_window_secs`, is refused when the lane file loads (`plan`, `apply` and `validate` alike). `validate` notes when checkpoints come, including when empty blocks fill an idle batch before `checkpoint_idle_ms`. `/v1/status` `checkpoint_policy`: the rules, the open batch (blocks, bytes, age, content), and the last and counted end reasons | K-01 | review |
 | K-03 | **Lane files and docs.** Lane #1: urgent 5 s, busy 60 s, idle 1 h, a 7,200-block cap (its `config_hash` is unchanged: `[node]` is not hashed). The scaffolds and the local perps lane: 2 s, 10 s, 15 s, a 60-block cap, inside the local drill's 20 s and 30 s windows. The payments local lane keeps the block rule as its coverage. The lane-file reference and the settlement concept page explain the rules, what a checkpoint costs, the idle floor and the contract's limits | K-02 | review |
-| K-04 | **Settlement contract v2.** `Ckpt(seq)` only for checkpoints with withdrawals; a new hash of record | K-03 | todo |
+| K-04 | **Settlement contract v2** (DEC-124). `Ckpt(seq)` only for checkpoints with withdrawals; build of record `ffddd99e…` (x86_64 Linux, CI); `fb68ee32…` stays a known build | K-03 | review |
 | K-05 | **Readers without a record.** The relayer's reconcile and replay fall back to `LastCkpt` and the `ckpt` event, and replay checks the header chain | K-04 | todo |
 | K-06 | **Ship and measure** — **Gate.** e2e on v2, lane #1's plan unchanged, a soak (checkpoints and XLM a day, withdrawal latency, the fee breakdown recorded), then the policy on lane #1 | K-05 | todo |
 
@@ -3310,6 +3310,7 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 - Amends §15 and DEC-105 ("blocks are never pruned"), by the human's call (2026-10-04). | Four full copies of every block on one disk, ~485 MB a day at 200 ms. Three of the four stores now stay flat, and the sequencer's blocks take ~40% of their size | — |
 | DEC-122 | **M0.9 (F-15): contract crates keep their own version.** `settlement`, `payments-engine` and the workspace crates built into them (`caravel-core`, `caravel-app-sdk`, `caravel-payments`) set `version = "0.2.0"` instead of the workspace's. The workspace bump to 0.3.0 changed the settlement Wasm on x86_64 Linux (`d2c67d28…` instead of `fb68ee32…`, CI on #128), because a crate's version goes into its `-C metadata` and that can reorder functions (DEC-033). The 0.1 → 0.2 bump happened not to. Lane #1's settlement contract is the `fb68ee32…` build, so a release version must not move the contracts of record. Their version changes only with a new contract | A release is not a contract change; the hashes of record stay reproducible from any later tag | — |
 | DEC-123 | **M0.10 (K-01): checkpoints by time and content.** `builder::checkpoint_end` takes an `EndInput` and returns an `EndReason`: `full` (b), `withdrawals` (c), `blocks` (a), then, with `SequencerConfig.checkpoint_timing`, `urgent`, `busy` or `idle` (§14.2 d–f). `BatchBudget` keeps the open batch's `BatchContent` (inbox, users, withdrawals, from `Built::content()`) and the block time it opened at. `Core::open` rebuilds both: the open time from the last checkpoint header's `last_block_timestamp_ms`, and the content by decoding the open batch's blocks. Ages are in block time, so a restart or a slow block loop changes nothing. Lane files without the three settings keep rule (a) alone | The human wants deposits and withdrawals on Stellar within seconds and fewer idle checkpoints (2026-10-05); when a batch ends is sequencer policy, and nothing else counts blocks (DEC-104) | — |
+| DEC-124 | **M0.10 (K-04): the settlement contract keeps a record only for checkpoints with withdrawals.** `check_and_accept` writes `Ckpt(seq)` only when `withdrawal_count > 0`: the claims read it (`claim_withdrawal`, the `checkpoint` view), and it keeps its 120-day TTL. Every check, `LastCkpt`, the `ckpt` event (with `header_hash`), claims, escape and freeze are unchanged. The build of record is `ffddd99e…` (x86_64 Linux, CI, 2026-10-05); `fb68ee32…`, which kept a record of every checkpoint, stays in `versions.json` as `settlement_v1_wasm_sha256` and among the known builds. Lane #1 keeps its own contract (`8a2fafbd…`, DEC-061); moving it would mean a new lane. Readers that looked up any `Ckpt(seq)` (the relayer's reconcile, replay) fall back to `LastCkpt` and the `ckpt` event (K-05). Approved by the human with the M0.10 plan (2026-10-05) | Rent for that entry was 0.3326 of a checkpoint's 0.3432 XLM (seq 7,747, decoded from RPC). Without it a checkpoint costs about 0.011 XLM plus about 0.0005 XLM per KB of batch | — |
 Agents append new decisions here as `DEC-018+` with the same columns.
 
 ---
