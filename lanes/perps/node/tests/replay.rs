@@ -169,6 +169,9 @@ struct FakeStellar {
     config: OnChainConfig,
     checkpoints: Vec<(Vec<u8>, Vec<u8>)>,
     claimed: Mutex<BTreeSet<(u64, u32)>>,
+    /// As the M0.10 contract: a record only for a checkpoint with
+    /// withdrawals, and an event for every one (DEC-124).
+    v2: bool,
 }
 
 impl FakeStellar {
@@ -190,6 +193,7 @@ impl FakeStellar {
             },
             checkpoints,
             claimed: Mutex::new(BTreeSet::new()),
+            v2: false,
         }
     }
 }
@@ -215,6 +219,24 @@ impl ReplaySource for FakeStellar {
                 header_hash: sha256(h),
                 withdrawal_count: CheckpointHeaderV1::decode(h).unwrap().withdrawal_count,
                 stellar_ledger: 100 + seq as u32,
+            })
+            .filter(|r| !self.v2 || r.withdrawal_count > 0))
+    }
+
+    async fn checkpoint_event(
+        &self,
+        seq: u64,
+        from_ledger: Option<u32>,
+    ) -> Result<Option<CheckpointRecord>> {
+        let ledger = 100 + seq as u32;
+        Ok(self
+            .checkpoints
+            .get(seq as usize - 1)
+            .filter(|_| from_ledger.is_none_or(|f| f <= ledger))
+            .map(|(h, _)| CheckpointRecord {
+                header_hash: sha256(h),
+                withdrawal_count: 0,
+                stellar_ledger: ledger,
             }))
     }
 
@@ -256,6 +278,57 @@ async fn replay_reproduces_every_checkpoint_through_the_wasm() {
     assert!(r.summary.starts_with("OK seq=1..2 final_state_hash="));
 }
 
+/// DEC-124: on the M0.10 contract only checkpoints with withdrawals keep
+/// a record; replay reads the others from their events and ends the same.
+#[tokio::test]
+async fn replay_reads_checkpoints_without_a_record_from_their_events() {
+    let (core, wasm_hash) = produced();
+    let mut src = FakeStellar::from(&core, wasm_hash, 2);
+    src.v2 = true;
+    let records = [
+        src.checkpoint(1).await.unwrap().is_some(),
+        src.checkpoint(2).await.unwrap().is_some(),
+    ];
+    assert!(
+        records.contains(&false),
+        "some checkpoint has no record: {records:?}"
+    );
+    let outcome = run(&src, wasm_hash).await.unwrap();
+    let v1 = run(&FakeStellar::from(&core, wasm_hash, 2), wasm_hash)
+        .await
+        .unwrap();
+    assert_eq!(outcome.final_state, v1.final_state);
+    assert_eq!(
+        replay::report(&outcome).summary,
+        replay::report(&v1).summary
+    );
+}
+
+/// A header that is not the one the event recorded is caught as before.
+#[tokio::test]
+async fn replay_finds_a_tampered_event_header() {
+    let (core, wasm_hash) = produced();
+    let mut inner = FakeStellar::from(&core, wasm_hash, 2);
+    inner.v2 = true;
+    let seq = if inner.checkpoint(1).await.unwrap().is_none() {
+        1
+    } else {
+        2
+    };
+    let src = TamperedRecord {
+        inner,
+        seq,
+        header_hash: [9; 32],
+    };
+    let Err(e) = run(&src, wasm_hash).await else {
+        panic!("a tampered event header replays")
+    };
+    assert!(
+        format!("{e:#}").contains("the header hash Stellar recorded"),
+        "{e:#}"
+    );
+}
+
 #[tokio::test]
 async fn replay_finds_tampering() {
     let (core, wasm_hash) = produced();
@@ -285,7 +358,7 @@ async fn replay_finds_tampering() {
     .unwrap();
     expect(
         e,
-        "checkpoint 2: H(header) from the transaction is not Ckpt(seq).header_hash",
+        "checkpoint 2: H(header) from the transaction is not the header hash Stellar recorded",
     );
 
     // A batch that does not hash to header.batch_hash.
@@ -352,6 +425,19 @@ impl ReplaySource for TamperedRecord {
     }
     async fn checkpoint(&self, seq: u64) -> Result<Option<CheckpointRecord>> {
         let mut r = self.inner.checkpoint(seq).await?;
+        if seq == self.seq {
+            if let Some(r) = r.as_mut() {
+                r.header_hash = self.header_hash;
+            }
+        }
+        Ok(r)
+    }
+    async fn checkpoint_event(
+        &self,
+        seq: u64,
+        from_ledger: Option<u32>,
+    ) -> Result<Option<CheckpointRecord>> {
+        let mut r = self.inner.checkpoint_event(seq, from_ledger).await?;
         if seq == self.seq {
             if let Some(r) = r.as_mut() {
                 r.header_hash = self.header_hash;

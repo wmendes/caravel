@@ -50,6 +50,14 @@ pub trait ReplaySource {
     async fn config(&self) -> Result<OnChainConfig>;
     async fn last_checkpoint(&self) -> Result<LastCheckpoint>;
     async fn checkpoint(&self, seq: u64) -> Result<Option<CheckpointRecord>>;
+    /// What a checkpoint without a record (DEC-124) was, from its `ckpt`
+    /// event: the header hash and the ledger, searched from `from_ledger`
+    /// or the oldest ledger the source keeps. `withdrawal_count` is 0.
+    async fn checkpoint_event(
+        &self,
+        seq: u64,
+        from_ledger: Option<u32>,
+    ) -> Result<Option<CheckpointRecord>>;
     /// The `header` and `batch` arguments of the transaction that accepted `seq`.
     async fn checkpoint_args(
         &self,
@@ -142,11 +150,19 @@ pub async fn replay<A: NodeApp, S: ReplaySource>(
     let mut prev_header = [0u8; 32];
     let mut prev_block_hash = [0u8; 32];
     let mut out = Vec::new();
+    let mut from_ledger = None;
     for seq in 1..=last.seq {
-        let record = src
-            .checkpoint(seq)
-            .await?
-            .ok_or_else(|| mismatch(seq, "no Ckpt record on Stellar"))?;
+        // A checkpoint with withdrawals has a record; since DEC-124 one
+        // without has only its event. The header chain, checked below and
+        // against last_checkpoint(), ties them together either way.
+        let record = match src.checkpoint(seq).await? {
+            Some(r) => r,
+            None => src
+                .checkpoint_event(seq, from_ledger)
+                .await?
+                .ok_or_else(|| mismatch(seq, "no Ckpt record and no ckpt event on Stellar"))?,
+        };
+        from_ledger = Some(record.stellar_ledger);
         let (header_bytes, batch_bytes) = src
             .checkpoint_args(seq, &record)
             .await
@@ -154,7 +170,7 @@ pub async fn replay<A: NodeApp, S: ReplaySource>(
         if sha256(&header_bytes) != record.header_hash {
             return Err(mismatch(
                 seq,
-                "H(header) from the transaction is not Ckpt(seq).header_hash",
+                "H(header) from the transaction is not the header hash Stellar recorded (Ckpt(seq) or its ckpt event)",
             ));
         }
         let header = CheckpointHeaderV1::decode(&header_bytes)
@@ -396,6 +412,52 @@ impl ReplaySource for RpcSource {
             header_hash: bytes32(field(&m, "header_hash")?, "header_hash")?,
             withdrawal_count: *withdrawal_count,
             stellar_ledger: *stellar_ledger,
+        }))
+    }
+
+    async fn checkpoint_event(
+        &self,
+        seq: u64,
+        from_ledger: Option<u32>,
+    ) -> Result<Option<CheckpointRecord>> {
+        let start = match from_ledger {
+            Some(l) => u64::from(l),
+            None => self.rpc.call("getHealth", json!({})).await?["oldestLedger"]
+                .as_u64()
+                .ok_or_else(|| anyhow!("getHealth: no oldestLedger"))?,
+        };
+        let topics = vec![
+            sym("ckpt").to_xdr_base64(Limits::none())?,
+            ScVal::U64(seq).to_xdr_base64(Limits::none())?,
+        ];
+        let events = self
+            .rpc
+            .call(
+                "getEvents",
+                json!({ "startLedger": start, "filters": [{ "type": "contract", "contractIds": [self.contract_strkey()], "topics": [topics] }], "pagination": { "limit": 5 } }),
+            )
+            .await
+            .with_context(|| format!("getEvents from ledger {start} (RPC keeps about 7 days; older data needs an archive or a validator store)"))?;
+        let Some(e) = events["events"].as_array().and_then(|e| e.first()) else {
+            return Ok(None);
+        };
+        let ledger = e["ledger"]
+            .as_u64()
+            .and_then(|l| u32::try_from(l).ok())
+            .ok_or_else(|| anyhow!("ckpt event without a ledger"))?;
+        let value = ScVal::from_xdr_base64(
+            e["value"]
+                .as_str()
+                .ok_or_else(|| anyhow!("ckpt event without a value"))?,
+            crate::stellar_rpc::read_limits(),
+        )?;
+        let ScVal::Map(Some(m)) = &value else {
+            bail!("ckpt event value is not a map")
+        };
+        Ok(Some(CheckpointRecord {
+            header_hash: bytes32(field(m, "header_hash")?, "header_hash")?,
+            withdrawal_count: 0,
+            stellar_ledger: ledger,
         }))
     }
 

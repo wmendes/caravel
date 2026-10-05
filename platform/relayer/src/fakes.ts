@@ -12,6 +12,8 @@ export class FakeSettlement implements SettlementApi {
   submits = 0;
   /** The relayer's `last_checkpoint()` reads. */
   lastReads = 0;
+  /** As the M0.10 contract with checkpoints that have no withdrawals: no records (DEC-124). */
+  noRecords = false;
 
   deposit(laneAccount: Uint8Array, amount: bigint, enqueuedAt: bigint): void {
     const index = BigInt(this.inboxMsgs.length);
@@ -39,13 +41,14 @@ export class FakeSettlement implements SettlementApi {
   }
 
   async checkpoint(seq: bigint): Promise<CheckpointRecord | null> {
+    if (this.noRecords) return null;
     const c = this.accepted.find((a) => a.seq === seq);
     return c ? { headerHash: sha256(c.header), stellarLedger: c.ledger } : null;
   }
 
-  async findCheckpointTx(seq: bigint, fromLedger: number): Promise<{ hash: string; ledger: number } | null> {
+  async findCheckpointTx(seq: bigint, fromLedger = 0): Promise<{ hash: string; ledger: number; headerHash: Uint8Array } | null> {
     const c = this.accepted.find((a) => a.seq === seq && a.ledger >= fromLedger);
-    return c ? { hash: c.hash, ledger: c.ledger } : null;
+    return c ? { hash: c.hash, ledger: c.ledger, headerHash: sha256(c.header) } : null;
   }
 
   async submitCheckpoint(p: PendingCheckpoint): Promise<SubmitResult> {
