@@ -44,6 +44,21 @@ pub struct CheckpointRecord {
     pub stellar_ledger: u32,
 }
 
+/// Ledgers to stay inside RPC's retention window when searching from its
+/// start (about a minute of ledgers).
+const RPC_WINDOW_MARGIN: u64 = 12;
+/// Pages of `getEvents` one search follows before giving up.
+const MAX_EVENT_PAGES: usize = 64;
+
+/// The ledger an RPC events cursor points at (the high 32 bits of its TOID).
+fn cursor_ledger(cursor: &str) -> u64 {
+    cursor
+        .split('-')
+        .next()
+        .and_then(|t| t.parse::<u64>().ok())
+        .map_or(0, |toid| toid >> 32)
+}
+
 /// Where replay reads Stellar's data from: RPC, or a fake in tests.
 #[allow(async_fn_in_trait)]
 pub trait ReplaySource {
@@ -420,25 +435,45 @@ impl ReplaySource for RpcSource {
         seq: u64,
         from_ledger: Option<u32>,
     ) -> Result<Option<CheckpointRecord>> {
+        // RPC's window moves on as ledgers close: start a minute or so
+        // inside it, or the oldest ledger may be gone by the time we ask.
         let start = match from_ledger {
             Some(l) => u64::from(l),
-            None => self.rpc.call("getHealth", json!({})).await?["oldestLedger"]
-                .as_u64()
-                .ok_or_else(|| anyhow!("getHealth: no oldestLedger"))?,
+            None => {
+                self.rpc.call("getHealth", json!({})).await?["oldestLedger"]
+                    .as_u64()
+                    .ok_or_else(|| anyhow!("getHealth: no oldestLedger"))?
+                    + RPC_WINDOW_MARGIN
+            }
         };
         let topics = vec![
             sym("ckpt").to_xdr_base64(Limits::none())?,
             ScVal::U64(seq).to_xdr_base64(Limits::none())?,
         ];
-        let events = self
-            .rpc
-            .call(
-                "getEvents",
-                json!({ "startLedger": start, "filters": [{ "type": "contract", "contractIds": [self.contract_strkey()], "topics": [topics] }], "pagination": { "limit": 5 } }),
-            )
-            .await
-            .with_context(|| format!("getEvents from ledger {start} (RPC keeps about 7 days; older data needs an archive or a validator store)"))?;
-        let Some(e) = events["events"].as_array().and_then(|e| e.first()) else {
+        let filters = json!([{ "type": "contract", "contractIds": [self.contract_strkey()], "topics": [topics] }]);
+        let mut req =
+            json!({ "startLedger": start, "filters": filters, "pagination": { "limit": 5 } });
+        // RPC scans a bounded range of ledgers per call: follow its cursor to
+        // the latest ledger (a week of testnet is about a dozen pages).
+        let mut found = None;
+        for _ in 0..MAX_EVENT_PAGES {
+            let events = self
+                .rpc
+                .call("getEvents", req)
+                .await
+                .with_context(|| format!("getEvents from ledger {start} (RPC keeps about 7 days; older data needs an archive or a validator store)"))?;
+            if let Some(e) = events["events"].as_array().and_then(|e| e.first()) {
+                found = Some(e.clone());
+                break;
+            }
+            let cursor = events["cursor"].as_str().unwrap_or_default().to_string();
+            let latest = events["latestLedger"].as_u64().unwrap_or(0);
+            if cursor.is_empty() || cursor_ledger(&cursor) >= latest {
+                break;
+            }
+            req = json!({ "filters": filters, "pagination": { "cursor": cursor, "limit": 5 } });
+        }
+        let Some(e) = found else {
             return Ok(None);
         };
         let ledger = e["ledger"]

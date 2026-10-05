@@ -10,8 +10,11 @@
 #   BLOCK_MS=200 TPS=100 ACCOUNTS=48 INFLIGHT=2 ./scripts/soak-lane.sh
 #   TPS=0 DURATION=600 ./scripts/soak-lane.sh      # idle: storage of empty blocks
 #
-# CHECKPOINT_EVERY defaults to one checkpoint a minute at BLOCK_MS, as on
-# lane #1. SKIP_BUILD=1 reuses the builds; KEEP=1 leaves the lane running.
+# CHECKPOINT_EVERY defaults to one checkpoint a minute at BLOCK_MS. With
+# URGENT_MS, BUSY_MS and IDLE_MS the lane checkpoints by time and content
+# (§14.2 d-f, as lane #1: 5000, 60000 and an hour), and CHECKPOINT_EVERY
+# defaults to an hour of blocks; without them, the scaffold's own times
+# apply. SKIP_BUILD=1 reuses the builds; KEEP=1 leaves the lane running.
 # The summary is the last line of stdout and $WORK/summary.json; the
 # per-report rows are $WORK/load.csv and the node samples $WORK/samples.jsonl.
 set -euo pipefail
@@ -20,7 +23,12 @@ START_TIME=$(date +%s)
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 BLOCK_MS="${BLOCK_MS:-500}"
-CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-$(( 60000 / BLOCK_MS ))}"
+if [[ -n "${URGENT_MS:-}${BUSY_MS:-}${IDLE_MS:-}" ]]; then
+  : "${URGENT_MS:?set URGENT_MS, BUSY_MS and IDLE_MS together}" "${BUSY_MS:?}" "${IDLE_MS:?}"
+  CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-$(( 3600000 / BLOCK_MS ))}"
+else
+  CHECKPOINT_EVERY="${CHECKPOINT_EVERY:-$(( 60000 / BLOCK_MS ))}"
+fi
 TPS="${TPS:-45}"
 DURATION="${DURATION:-600}"
 ACCOUNTS="${ACCOUNTS:-24}"
@@ -74,8 +82,11 @@ fi
 log "lane: ${BLOCK_MS} ms blocks, a checkpoint every $CHECKPOINT_EVERY"
 (cd "$WORK" && "$CARAVEL" init perps scaffold --name soak-perps --prefix soak --port "$PORT") > "$WORK/logs/init.log" 2>&1 \
   || { cat "$WORK/logs/init.log"; fail "caravel init"; }
+TIMES=()
+[[ -n "${URGENT_MS:-}" ]] && TIMES=(-e "s/^checkpoint_urgent_ms = [0-9]*/checkpoint_urgent_ms = $URGENT_MS/" \
+  -e "s/^checkpoint_busy_ms = [0-9]*/checkpoint_busy_ms = $BUSY_MS/" -e "s/^checkpoint_idle_ms = [0-9]*/checkpoint_idle_ms = $IDLE_MS/")
 { echo 'include = ["soak-env.toml"]'; sed -e "s/^block_time_ms = [0-9]*/block_time_ms = $BLOCK_MS/" \
-    -e "s/^checkpoint_every_blocks = [0-9]*/checkpoint_every_blocks = $CHECKPOINT_EVERY/" "$WORK/scaffold/lane.toml"; } > "$LANE"
+    -e "s/^checkpoint_every_blocks = [0-9]*/checkpoint_every_blocks = $CHECKPOINT_EVERY/" ${TIMES[@]+"${TIMES[@]}"} "$WORK/scaffold/lane.toml"; } > "$LANE"
 grep -q "^block_time_ms = $BLOCK_MS" "$LANE" || fail "block_time_ms not set"
 cp "$ROOT/scripts/soak/env.toml" "$WORK/soak-env.toml"
 {
@@ -137,11 +148,21 @@ else
 fi
 kill "$SAMPLER" 2>/dev/null || true; SAMPLER=
 H1="$(height)"; S1="$(stores)"; T1=$(date +%s)
+POLICY="$(q api /v1/status | jq -c '.checkpoint_policy // null')"
+# The relayer's checkpoints during the load, with their fees (K-06).
+METRICS="$STATE/data/relayer-checkpoints.jsonl"
+CKPTS="$(jq -s -c --argjson t0 "$T0" --argjson t1 "$T1" '
+  map(select((.submitted_at | sub("\\.[0-9]+Z$"; "Z") | fromdate) as $t | $t >= $t0 and $t <= $t1)) |
+  { n: length,
+    fee_stroops: (map(.fee_charged_stroops | tonumber) | add // 0),
+    rent_stroops: (map(.rent_fee_stroops // "0" | tonumber) | add // 0),
+    fee_p50_stroops: (map(.fee_charged_stroops | tonumber) | sort | .[length / 2 | floor] // null),
+    batch_p50: (map(.batch_bytes) | sort | .[length / 2 | floor] // null) }' "$METRICS" 2>/dev/null || echo null)"
 
 jq -n -c \
   --argjson block_ms "$BLOCK_MS" --argjson every "$CHECKPOINT_EVERY" --argjson tps "$TPS" --argjson accounts "$ACCOUNTS" \
   --argjson inflight "$INFLIGHT" --argjson h0 "$H0" --argjson h1 "$H1" --argjson t0 "$T0" --argjson t1 "$T1" \
-  --argjson s0 "$S0" --argjson s1 "$S1" \
+  --argjson s0 "$S0" --argjson s1 "$S1" --argjson policy "$POLICY" --argjson ckpts "$CKPTS" \
   --slurpfile load <(grep '"final":true' "$WORK/load.jsonl") --slurpfile samples "$WORK/samples.jsonl" '
   ($t1 - $t0) as $secs | ($h1 - $h0) as $blocks |
   {
@@ -160,6 +181,9 @@ jq -n -c \
       rss_mb_max: ((map(.rss_kb) | max) / 1024 | round),
       perf: (map(select(.perf != null)) | last | .perf // null)
     } }) | from_entries),
+    checkpoints: ($ckpts + { per_day: (if $ckpts then ($ckpts.n / $secs * 86400 | round) else null end),
+                             xlm_per_day: (if $ckpts then ($ckpts.fee_stroops / 1e7 / $secs * 86400 * 10 | round / 10) else null end),
+                             end_reasons: $policy.end_reasons }),
     result: ($load[0] // null | if . then del(.hard_samples, .perf) else . end)
   }' | tee "$WORK/summary.json"
 echo "soak done in $(( $(date +%s) - START_TIME )) s, work dir $WORK" >&2

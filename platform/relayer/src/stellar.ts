@@ -10,6 +10,16 @@ import type { PendingCheckpoint } from "./sequencer.js";
 
 /** A source account for read-only simulations; it need not exist. */
 const NULL_ACCOUNT = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+/** Ledgers to stay inside RPC's retention window when searching from its start. */
+const RPC_WINDOW_MARGIN = 12;
+/** Pages of `getEvents` one search follows before giving up. */
+const MAX_EVENT_PAGES = 64;
+
+/** The ledger an RPC events cursor points at (its high 32 bits of the TOID). */
+export function cursorLedger(cursor: string): number {
+  const toid = cursor.split("-")[0] ?? "0";
+  return Number(BigInt(toid) >> 32n);
+}
 /** Each Stellar RPC call gives up after this long; the loop retries. */
 export const RPC_TIMEOUT_MS = 30_000;
 
@@ -35,6 +45,19 @@ export interface SubmitResult {
   minResourceFee: bigint;
   /** Signed envelope size. */
   txSizeBytes: number;
+  /** Stroops, from the transaction's Soroban metadata (K-06), when present: rent is part of `refundableFee`. */
+  rentFee?: bigint | undefined;
+  refundableFee?: bigint | undefined;
+  nonRefundableFee?: bigint | undefined;
+}
+
+/** The resource fees a transaction's metadata reports (`sorobanMeta.ext.v1`). */
+export function feeBreakdown(meta: unknown): { rentFee?: bigint | undefined; refundableFee?: bigint | undefined; nonRefundableFee?: bigint | undefined } {
+  const m = meta as { v4?: { sorobanMeta?: unknown }; v3?: { sorobanMeta?: unknown } } | undefined;
+  const sm = (m?.v4?.sorobanMeta ?? m?.v3?.sorobanMeta) as { ext?: { v1?: Record<string, unknown> } } | undefined;
+  const v1 = sm?.ext?.v1;
+  const big = (v: unknown) => (typeof v === "bigint" || typeof v === "number" || typeof v === "string" ? BigInt(v) : undefined);
+  return v1 ? { rentFee: big(v1.rentFeeCharged), refundableFee: big(v1.totalRefundableResourceFeeCharged), nonRefundableFee: big(v1.totalNonRefundableResourceFeeCharged) } : {};
 }
 
 export interface SettlementApi {
@@ -154,9 +177,17 @@ export class RpcSettlement implements SettlementApi {
   }
 
   async findCheckpointTx(seq: bigint, fromLedger?: number): Promise<{ hash: string; ledger: number; headerHash: Uint8Array } | null> {
-    const startLedger = fromLedger ?? (await this.c.server.getHealth()).oldestLedger;
+    // RPC's window moves on as ledgers close: start a minute or so inside it.
+    const startLedger = fromLedger ?? (await this.c.server.getHealth()).oldestLedger + RPC_WINDOW_MARGIN;
     const topics = [[xdr.ScVal.scvSymbol("ckpt").toXDR("base64"), u64(seq).toXDR("base64")]];
-    const res = await this.c.server.getEvents({ startLedger, filters: [{ type: "contract", contractIds: [this.c.contractId], topics }], limit: 5 });
+    const filters: rpc.Api.EventFilter[] = [{ type: "contract", contractIds: [this.c.contractId], topics }];
+    // RPC scans a bounded range of ledgers per call: follow its cursor to
+    // the latest ledger (a week of testnet is about a dozen pages).
+    let res = await this.c.server.getEvents({ startLedger, filters, limit: 5 });
+    for (let page = 1; res.events.length === 0 && page < MAX_EVENT_PAGES; page++) {
+      if (cursorLedger(res.cursor) >= res.latestLedger) break;
+      res = await this.c.server.getEvents({ cursor: res.cursor, filters, limit: 5 });
+    }
     const e = res.events[0];
     if (!e) return null;
     const data = scValToNative(e.value) as Record<string, unknown>;
@@ -188,6 +219,7 @@ export class RpcSettlement implements SettlementApi {
       feeCharged: BigInt(done.resultXdr.feeCharged),
       minResourceFee: BigInt(sim.minResourceFee),
       txSizeBytes,
+      ...feeBreakdown(done.resultMetaXdr),
     };
   }
 }
