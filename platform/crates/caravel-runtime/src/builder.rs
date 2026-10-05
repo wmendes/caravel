@@ -10,7 +10,7 @@ use caravel_core::state::StateFrameV1;
 use caravel_core::tx::kind;
 
 use crate::app::{FeedUpdate, LaneApp};
-use crate::checkpoint::BatchBudget;
+use crate::checkpoint::{BatchBudget, BatchContent, CheckpointTiming, EndReason};
 use crate::mempool::Mempool;
 
 /// Where a block entry came from, so a fatal entry can be quarantined.
@@ -54,6 +54,22 @@ pub struct Built {
 }
 
 impl Built {
+    /// What this block holds that someone waits for on Stellar (K-01).
+    pub fn content(&self) -> BatchContent {
+        let mut c = BatchContent::default();
+        for e in &self.block.entries {
+            match e {
+                Entry::Inbox(_) => c.inbox = true,
+                Entry::User(tx) => {
+                    c.users = true;
+                    c.withdrawals |= tx.kind == kind::WITHDRAW;
+                }
+                Entry::Feed(_) => {}
+            }
+        }
+        c
+    }
+
     pub fn inbox_entries(&self) -> usize {
         self.sources
             .iter()
@@ -187,15 +203,46 @@ pub fn build<A: LaneApp>(input: &BuildInput<'_, A>) -> Built {
     }
 }
 
-/// Whether the block being built ends the batch (spec §14.2 a, b, c).
-pub fn checkpoint_end(
-    budget: &BatchBudget,
-    block_len: usize,
-    checkpoint_every_blocks: u32,
-    pending_at_start: usize,
-    max_pending: usize,
-) -> bool {
-    budget.blocks() + 1 >= checkpoint_every_blocks
-        || budget.must_end_after(block_len)
-        || pending_at_start >= max_pending / 2
+/// The block being built, as `checkpoint_end` sees it.
+pub struct EndInput<'a> {
+    pub budget: &'a BatchBudget,
+    pub block_len: usize,
+    pub block: BatchContent,
+    pub timestamp_ms: u64,
+    pub checkpoint_every_blocks: u32,
+    pub timing: Option<&'a CheckpointTiming>,
+    pub pending_at_start: usize,
+    pub max_pending: usize,
+}
+
+/// Whether the block being built ends the batch, and why (spec §14.2 a, b,
+/// c; K-01's time rules when the node sets them). Sequencer policy only:
+/// validators and the engine accept a batch of any length.
+pub fn checkpoint_end(i: &EndInput) -> Option<EndReason> {
+    if i.budget.must_end_after(i.block_len) {
+        return Some(EndReason::Full);
+    }
+    if i.pending_at_start >= i.max_pending / 2 {
+        return Some(EndReason::Withdrawals);
+    }
+    if i.budget.blocks() + 1 >= i.checkpoint_every_blocks {
+        return Some(EndReason::Blocks);
+    }
+    let t = i.timing?;
+    let held = i.budget.content().or(i.block);
+    // A batch opens with its first block after genesis: this one, if none.
+    let age = match i.budget.opened_ms() {
+        Some(_) => i.budget.age_ms(i.timestamp_ms),
+        None => 0,
+    };
+    let waiting_on_stellar = held.inbox || held.withdrawals || i.pending_at_start > 0;
+    if waiting_on_stellar && age >= t.urgent_ms {
+        Some(EndReason::Urgent)
+    } else if held.users && age >= t.busy_ms {
+        Some(EndReason::Busy)
+    } else if age >= t.idle_ms {
+        Some(EndReason::Idle)
+    } else {
+        None
+    }
 }

@@ -67,6 +67,7 @@ fn produced() -> (Core<PerpsApp>, [u8; 32]) {
     let cfg = SequencerConfig {
         ids: ids(wasm_hash),
         checkpoint_every_blocks: 10,
+        checkpoint_timing: None,
         max_batch_bytes: 96_000,
         mempool_max: 1000,
         mempool_max_per_account: 100,

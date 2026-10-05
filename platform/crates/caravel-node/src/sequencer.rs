@@ -262,7 +262,8 @@ pub async fn start<A: NodeApp>(
     }
     let core_cfg = CoreConfig {
         ids: cfg.header_ids(),
-        checkpoint_every_blocks: cfg.lane.node.checkpoint_every_blocks as u32,
+        checkpoint_every_blocks: cfg.lane.node.checkpoint_every_blocks.min(u32::MAX as u64) as u32,
+        checkpoint_timing: cfg.lane.node.checkpoint_timing(),
         max_batch_bytes: cfg.lane.node.max_batch_bytes as usize,
         mempool_max: cfg.mempool_max,
         mempool_max_per_account: cfg.mempool_max_per_account,

@@ -68,8 +68,41 @@ pub struct AppSection {
 #[serde(deny_unknown_fields)]
 pub struct NodeSection {
     pub block_time_ms: u64,
+    /// At most this many blocks a batch. With the time rules below it is
+    /// only a cap.
     pub checkpoint_every_blocks: u64,
     pub max_batch_bytes: u64,
+    /// K-01's time rules, all three or none: a batch holding a deposit,
+    /// forced withdrawal or withdrawal ends once it is this old ...
+    #[serde(default)]
+    pub checkpoint_urgent_ms: Option<u64>,
+    /// ... one holding user transactions, once it is this old ...
+    #[serde(default)]
+    pub checkpoint_busy_ms: Option<u64>,
+    /// ... and any batch, once it is this old.
+    #[serde(default)]
+    pub checkpoint_idle_ms: Option<u64>,
+}
+
+impl NodeSection {
+    /// The time rules, if the lane file sets them (checked by
+    /// `check_node_settings`).
+    pub fn checkpoint_timing(&self) -> Option<caravel_runtime::checkpoint::CheckpointTiming> {
+        match (
+            self.checkpoint_urgent_ms,
+            self.checkpoint_busy_ms,
+            self.checkpoint_idle_ms,
+        ) {
+            (Some(urgent_ms), Some(busy_ms), Some(idle_ms)) => {
+                Some(caravel_runtime::checkpoint::CheckpointTiming {
+                    urgent_ms,
+                    busy_ms,
+                    idle_ms,
+                })
+            }
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -265,6 +298,15 @@ impl LaneFile {
         if n.checkpoint_every_blocks == 0 {
             bail!("node.checkpoint_every_blocks must be at least 1");
         }
+        match (n.checkpoint_urgent_ms, n.checkpoint_busy_ms, n.checkpoint_idle_ms) {
+            (None, None, None) => {}
+            (Some(u), Some(b), Some(i)) => {
+                if u == 0 || u > b || b > i {
+                    bail!("node.checkpoint_urgent_ms <= checkpoint_busy_ms <= checkpoint_idle_ms, and all above 0; got {u}, {b}, {i}");
+                }
+            }
+            _ => bail!("node.checkpoint_urgent_ms, checkpoint_busy_ms and checkpoint_idle_ms go together: set all three or none"),
+        }
         if n.max_batch_bytes as usize > caravel_core::batch::MAX_BATCH_BYTES {
             bail!(
                 "node.max_batch_bytes must be at most {}",
@@ -365,6 +407,37 @@ greeting = "hi"
     #[serde(deny_unknown_fields)]
     struct Demo {
         greeting: String,
+    }
+
+    #[test]
+    fn checkpoint_timing_is_all_three_or_none_and_in_order() {
+        let with = |extra: &str| {
+            LaneFile::parse(&FILE.replace(
+                "max_batch_bytes = 96000",
+                &format!("max_batch_bytes = 96000\n{extra}"),
+            ))
+            .and_then(|f| f.check_node_settings().map(|()| f))
+        };
+        assert_eq!(with("").unwrap().node.checkpoint_timing(), None);
+        let f = with(
+            "checkpoint_urgent_ms = 5000\ncheckpoint_busy_ms = 60000\ncheckpoint_idle_ms = 3600000",
+        )
+        .unwrap();
+        assert_eq!(
+            f.node.checkpoint_timing(),
+            Some(caravel_runtime::checkpoint::CheckpointTiming {
+                urgent_ms: 5000,
+                busy_ms: 60000,
+                idle_ms: 3600000
+            })
+        );
+        assert!(with("checkpoint_urgent_ms = 5000").is_err(), "one alone");
+        assert!(with("checkpoint_urgent_ms = 9000\ncheckpoint_busy_ms = 6000\ncheckpoint_idle_ms = 60000").is_err(), "urgent above busy");
+        assert!(
+            with("checkpoint_urgent_ms = 0\ncheckpoint_busy_ms = 6000\ncheckpoint_idle_ms = 60000")
+                .is_err(),
+            "zero"
+        );
     }
 
     #[test]

@@ -44,13 +44,79 @@ pub fn block_hash(record: &BlockRecordV1) -> [u8; 32] {
     ))
 }
 
-/// Bytes used by the batch being built (spec §14.2).
+/// Bytes used by the batch being built (spec §14.2), and (K-01) what it
+/// holds and since when it is open.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BatchBudget {
     pub max_batch_bytes: usize,
     pub max_block_bytes: usize,
     used: usize,
     blocks: u32,
+    content: BatchContent,
+    /// The timestamp of the block that sealed the previous checkpoint, or
+    /// of the batch's first block after genesis.
+    opened_ms: Option<u64>,
+}
+
+/// What a block, or the open batch, holds that someone waits for on
+/// Stellar (K-01).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BatchContent {
+    /// An inbox entry: a deposit or a forced withdrawal.
+    pub inbox: bool,
+    /// A user transaction.
+    pub users: bool,
+    /// A WITHDRAW transaction.
+    pub withdrawals: bool,
+}
+
+impl BatchContent {
+    pub fn or(self, o: Self) -> Self {
+        Self {
+            inbox: self.inbox || o.inbox,
+            users: self.users || o.users,
+            withdrawals: self.withdrawals || o.withdrawals,
+        }
+    }
+}
+
+/// When a batch ends by time (K-01), all in milliseconds of block time
+/// since the batch opened. A node setting, not consensus.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CheckpointTiming {
+    /// A deposit, forced withdrawal or withdrawal is waiting.
+    pub urgent_ms: u64,
+    /// User transactions are waiting.
+    pub busy_ms: u64,
+    /// Nothing is waiting: the heartbeat.
+    pub idle_ms: u64,
+}
+
+/// Why a block ended its batch (spec §14.2; K-01).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EndReason {
+    /// (a) `checkpoint_every_blocks`.
+    Blocks,
+    /// (b) the next block might not fit.
+    Full,
+    /// (c) the withdrawal queue is half full.
+    Withdrawals,
+    Urgent,
+    Busy,
+    Idle,
+}
+
+impl EndReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Blocks => "blocks",
+            Self::Full => "full",
+            Self::Withdrawals => "withdrawals",
+            Self::Urgent => "urgent",
+            Self::Busy => "busy",
+            Self::Idle => "idle",
+        }
+    }
 }
 
 impl BatchBudget {
@@ -60,7 +126,22 @@ impl BatchBudget {
             max_block_bytes,
             used: BATCH_HEADER_LEN,
             blocks: 0,
+            content: BatchContent::default(),
+            opened_ms: None,
         }
+    }
+
+    pub fn content(&self) -> BatchContent {
+        self.content
+    }
+
+    pub fn opened_ms(&self) -> Option<u64> {
+        self.opened_ms
+    }
+
+    /// How long the batch has been open at block time `timestamp_ms`.
+    pub fn age_ms(&self, timestamp_ms: u64) -> u64 {
+        self.opened_ms.map_or(0, |o| timestamp_ms.saturating_sub(o))
     }
 
     pub fn used(&self) -> usize {
@@ -97,9 +178,23 @@ impl BatchBudget {
         self.blocks += 1;
     }
 
+    /// Records a block's content and time (K-01). The first block after
+    /// genesis opens the batch.
+    pub fn note(&mut self, content: BatchContent, timestamp_ms: u64) {
+        self.content = self.content.or(content);
+        self.opened_ms.get_or_insert(timestamp_ms);
+    }
+
+    /// Starts the next batch: empty, its age set by `opened_at`.
     pub fn reset(&mut self) {
         self.used = BATCH_HEADER_LEN;
         self.blocks = 0;
+        self.content = BatchContent::default();
+    }
+
+    /// The previous checkpoint was sealed by the block at `sealed_ms`.
+    pub fn opened_at(&mut self, sealed_ms: u64) {
+        self.opened_ms = Some(sealed_ms);
     }
 }
 
