@@ -261,6 +261,11 @@ pub struct Freeze {
 }
 
 /// A deployment, seen by its users.
+/// How often a flow looks again while it waits on the lane (K-09).
+const POLL: Duration = Duration::from_millis(250);
+/// Blocks fetched at once when a flow reads a checkpoint's blocks (K-09).
+const BLOCK_FETCHES: usize = 16;
+
 pub struct Flows {
     pub m: Manifest,
     pub admin: Key,
@@ -872,6 +877,7 @@ impl Flows {
         seq: u64,
         who: &Key,
         mine: Mine<'_>,
+        upto: Option<u64>,
         deadline: Instant,
     ) -> Option<(i128, usize)> {
         let read = |path: String| async move {
@@ -882,7 +888,7 @@ impl Flows {
                 if Instant::now() > deadline {
                     return None;
                 }
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                tokio::time::sleep(POLL).await;
             }
         };
         let c = read(format!("/v1/checkpoints/{seq}")).await?;
@@ -890,10 +896,15 @@ impl Flows {
             num(&c["first_block_height"])?,
             num(&c["last_block_height"])?,
         );
+        let last = upto.map_or(last, |u| u.min(last));
+        // Fetched BLOCK_FETCHES at a time, scanned in order (K-09).
+        use futures_util::StreamExt;
+        let mut blocks = futures_util::stream::iter(first..=last)
+            .map(|h| read(format!("/v1/blocks/{h}")))
+            .buffered(BLOCK_FETCHES);
         let mut before: Vec<i128> = Vec::new();
-        for h in first..=last {
-            let b = read(format!("/v1/blocks/{h}")).await?;
-            match scan_block(&b, who, mine, &mut before) {
+        while let Some(b) = blocks.next().await {
+            match scan_block(&b?, who, mine, &mut before) {
                 Ok(Some(found)) => return Some(found),
                 Ok(None) => {}
                 Err(_) => return None,
@@ -934,7 +945,7 @@ impl Flows {
                                 Some(c) if is(&c) => hi = mid,
                                 Some(_) => lo = mid + 1,
                                 None if Instant::now() > deadline => return None,
-                                None => tokio::time::sleep(Duration::from_secs(1)).await,
+                                None => tokio::time::sleep(POLL).await,
                             }
                         }
                         return Some(hi);
@@ -946,7 +957,7 @@ impl Flows {
             if Instant::now() > deadline {
                 return None;
             }
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            tokio::time::sleep(POLL).await;
         }
     }
 
@@ -972,7 +983,7 @@ impl Flows {
             if Instant::now() > deadline {
                 return None;
             }
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            tokio::time::sleep(POLL).await;
         }
     }
 
@@ -1040,11 +1051,17 @@ impl Flows {
                 g(&who)
             );
         }
-        let rank = self
-            .queued_by(&api, seq, &who, Mine::Tx(&sent.hex), deadline)
-            .await
-            .filter(|(a, _)| *a == amount)
-            .map(|(_, r)| r);
+        // Which leaf is this one matters only when the account has several of
+        // the same amount in the checkpoint; then the blocks up to this one's
+        // say (K-09: a quiet lane's checkpoint can span hundreds of blocks).
+        let rank = if candidates.len() == 1 {
+            None
+        } else {
+            self.queued_by(&api, seq, &who, Mine::Tx(&sent.hex), Some(height), deadline)
+                .await
+                .filter(|(a, _)| *a == amount)
+                .map(|(_, r)| r)
+        };
         self.take_leaf(identity, &candidates, rank, claim, decimals, &mut out)
             .await;
         Ok(out)
@@ -1087,7 +1104,7 @@ impl Flows {
         out["processed"] = json!(true);
         // The lane queues at most what the account can withdraw.
         let Some((queued, rank)) = self
-            .queued_by(&api, seq, &who, Mine::Inbox(index), deadline)
+            .queued_by(&api, seq, &who, Mine::Inbox(index), None, deadline)
             .await
         else {
             out["timed_out"] = json!(true);
