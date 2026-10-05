@@ -280,3 +280,21 @@ The same soak on the M0.9 stack (F-01 to F-14), same machine and settings as the
 - **Validators write less per block:** commit p50 is 60 to 100 µs instead of 250 to 360 µs (a lazy head, `synchronous=NORMAL`).
 - **Unchanged:** soft latency (half a block plus the round trip), the engine's execute time (consensus is untouched), and the throughput limits of the baseline. A checkpoint is still one Stellar transaction at a time, so on testnet sustained load stays near 85 to 90 tx/s.
 - **For lane #1 at 200 ms:** idle, the four stores would grow about 83 MB a day together instead of about 410 MB (and less than today's 190 MB at 500 ms). CPU is the open question: a 200 ms block executes in about 10 ms on this laptop, and lane #1 runs four nodes on an e2-small, whose two shared vCPUs sustain about half a vCPU. That needs measuring on the VM (F-14 gate).
+
+## Lane #1 on 0.3.0 (2026-10-05)
+
+`caravel apply` with the v0.3.0 release, at 05:57 to 06:00 UTC: a new release, the containers' log caps, and all five nodes restarted. Nothing changed on Stellar (engine `4571cd25`, `config_hash` `f4b9db09`). Checkpoint 7,722 was sealed, signed and accepted on the new release within 90 s.
+
+On the VM (e2-small, 2 shared vCPUs, pd-standard), from the sequencer's `/v1/status` `perf` and `docker stats`, a few minutes after the restart:
+
+| Measure | Lane #1 | Local soak, 500 ms idle |
+|---|---|---|
+| Execute a block, p50 / p99 | 14.5 / 25.1 ms | 8.5 / 10.2 ms |
+| Commit a block, p50 / p99 | 2.2 / 3.5 ms | 0.5 / 2.5 ms |
+| Seal to signed, p50 | 144 ms (2.0 s before) | 9 ms |
+| CPU, all five containers | about 17% of one vCPU | – |
+| Memory, all containers | about 176 MB | – |
+
+The sequencer's `lock_wait` peaked at 190 ms while it archived the old checkpoints' blocks, 8 at a time. That is harmless at 500 ms blocks, but it needs to move outside the lock before any faster block time.
+
+**200 ms stays off for lane #1.** All four nodes execute every block, so 200 ms would mean about 43% of one vCPU while idle. An e2-small sustains about half of one, which leaves no room for load.
