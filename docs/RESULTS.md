@@ -328,3 +328,20 @@ Batch size still adds about 0.0005 XLM per KB. A full 84 KB idle batch on v2 sho
 | The same with `urgent_ms = 30000` | ~1,000 XLM | ~970 XLM |
 
 So the new rules cut idle cost 80% on lane #1's contract and 97% on v2, and deposits settle within about 5 s at almost no cost on v2. Withdrawals are different. Each checkpoint that carries them pays the record's rent on either contract. Making them claimable in seconds under steady withdrawal traffic costs one record per `urgent_ms`, and `urgent_ms` is that trade-off's knob.
+
+## Lane #1 on 0.4.0 (2026-10-05)
+
+`caravel apply` with v0.4.0 at 08:25 to 08:28 UTC: the release, the image digests in `compose.yml`, the new checkpoint settings in `lane.toml`, and the five nodes restarted. Nothing changed on Stellar, and the settlement contract stays v1 (`8a2fafbd…`).
+
+- **Idle:** the first batch after the restart ended `full` after about 4.5 minutes (84 KB), and checkpoint 7,868 was accepted at 08:31:02. Before, a checkpoint came every 60 s.
+- **A withdrawal of 1 USDC** (`caravel withdraw`, a throwaway account from T-014):
+
+  | Time (UTC) | Step |
+  |---|---|
+  | ~08:32:20 | the withdrawal is sent |
+  | 08:32:21.6 | its block seals checkpoint 7,869 (`urgent`) |
+  | 08:32:21.66 | signed by all three validators |
+  | 08:32:27.5 | accepted on Stellar |
+
+  **About 7 s from the withdrawal to claimable**, against up to about 66 s before. The checkpoint paid the record's rent: 0.3452 XLM, of which 0.3308 was rent. The command as a whole took 110 s: about 45 s before it sent the withdrawal and about a minute after acceptance to land its claim. That is the CLI's own flow, a follow-up.
+- **Expected cost:** with lane #1's light traffic, about 288 idle checkpoints a day at ~0.35 XLM (~100 XLM a day, against ~494). A withdrawal-triggered checkpoint costs ~0.35 XLM as before.
