@@ -1610,6 +1610,13 @@ Set `CHECKPOINT_END` on the block being built when any of these holds:
   - the sequencer includes fewer INBOX entries or WITHDRAW txs to keep it;
   - it sets END whenever `pending_at_block_start ≥ max_pending_withdrawals / 2`, so the queue drains at the commitment.
 
+With the node settings `checkpoint_urgent_ms`, `checkpoint_busy_ms` and `checkpoint_idle_ms` (all three or none, M0.10 K-01, DEC-123), the batch also ends by its age: the block time since the block that sealed the previous checkpoint (or, after genesis, since the batch's first block):
+- **(d) urgent:** the batch holds an inbox entry (a deposit or forced withdrawal), a WITHDRAW, or a withdrawal is pending, and its age is ≥ `checkpoint_urgent_ms`;
+- **(e) busy:** it holds user transactions and its age is ≥ `checkpoint_busy_ms`;
+- **(f) idle:** its age is ≥ `checkpoint_idle_ms`, whatever it holds.
+
+`checkpoint_every_blocks` then only caps a batch, and (b) still ends a long idle one: at 0.5 s blocks an empty block adds 129 B, so 96 KB of empty and oracle-only blocks fill in about 5 minutes. This is sequencer policy: validators, the engines and the settlement contract accept a batch of any length. The settlement contract's limits still bind it: an accepted checkpoint every `escape_timeout_secs`, and an inbox message in one within `force_inclusion_window_secs`.
+
 ### 14.3 Checkpoint assembly
 
 After a `CHECKPOINT_END` block:
@@ -2351,6 +2358,29 @@ Branches are `f-0x-short-name`. Gates: F-04, F-09 and F-14.
 | F-13 | **WebSocket fan-out once per block.** `publish` builds a `BlockFrame` per block: the block input decoded once, the `block` message serialized once, and each user transaction's `receipt` message (events rendered, hash computed) once. A subscriber's work is filtering receipts by its account and the app's own per-subscriber views; before, every socket decoded the block, rendered every event and hashed every transaction | F-12 | review |
 | F-14 | **Relayer pipeline** — **Gate.** The relayer asks for the next signed checkpoint with `?wait_ms=5000` and the sequencer holds the request until the signer stores one (a watch on the last signed seq), instead of a 2 s poll. The checkpoint right after one this run saw accepted goes out without reading `last_checkpoint()` first (the contract refuses any other seq, so a surprise fails the simulation; any error brings the read back). The relayer's account is kept between submissions (building a transaction advances its sequence; any failure drops it), and inclusion is polled every 250 ms instead of every second. **Not done:** two checkpoints in flight. Simulating seq N+1 fails until N is applied, because the contract checks `seq = last + 1` and simulation cannot see a pending transaction; doing it would mean hand-built footprints. It goes on the out-of-cycle list with the bigger batch. The native `opt-level=3` speedup was not tried. GETs to the sequencer are sent again once if the connection drops. Re-run (`docs/RESULTS.md` "After the M0.9 fixes"): hard latency about 2.5 s lower at every load, seal to signed 9 to 15 ms instead of 2.0 s, validator stores flat, the sequencer's 2.4× smaller. **200 ms for lane #1: no** (the human, 2026-10-05). On the e2-small, a block executes in 14.5 ms (p50) and the five containers use about 17% of one vCPU at 500 ms; at 200 ms that becomes about 43% of the ~0.5 vCPU the machine sustains, with no room for load | F-13 | done |
 | F-15 | **Caravel 0.3.0.** The workspace version for the M0.9 release, whose tag pushes the images lane #1 deploys. The contract crates keep 0.2.0 so their Wasm stays byte for byte the one of record (DEC-122). Released 2026-10-05 with notes from the cycle | F-14 | done |
+
+### 20.9 Milestone M0.10: checkpoints when needed, and cheaper ones
+
+**Decided with the human on 2026-10-05.** Lane #1 sealed a checkpoint every 60 s, busy or idle, at about 0.343 XLM each (~494 XLM a day), and a withdrawal waited up to a minute to become claimable. A decoded checkpoint transaction (seq 7,747) shows the fee:
+- 0.3432 XLM charged in all;
+- **0.3326 XLM (97%) is rent** for the `Ckpt(seq)` persistent entry, written with a 120-day TTL even when the checkpoint has no withdrawals;
+- 0.0104 XLM is everything else;
+- the inclusion fee is 100 stroops.
+
+The human's calls:
+- deposits and withdrawals on Stellar within about 5 s, trades within 60 s, an idle heartbeat of 1 h (the batch cap makes it about 5 min at 0.5 s blocks);
+- a settlement contract that writes `Ckpt(seq)` only for checkpoints with withdrawals, for new lanes (lane #1 keeps its contract).
+
+Branches `k-0x-…`; the gate is after K-06.
+
+| ID | Task | Depends on | Status |
+|---|---|---|---|
+| K-01 | **Checkpoints by time and content** (§14.2 d–f, DEC-123). `[node]` `checkpoint_urgent_ms`, `checkpoint_busy_ms`, `checkpoint_idle_ms`; the batch tracks its content and age, rebuilt on restart; `checkpoint_end` returns why it ended | – | review |
+| K-02 | **Guards and visibility.** `caravel validate` errors against the escape and force-inclusion windows, and a note with the expected idle cadence; `/v1/status` `checkpoint_policy` with why the last batch ended | K-01 | todo |
+| K-03 | **Lane files and docs.** Lane #1 and the templates adopt the settings; the lane-file reference explains cadence and cost | K-02 | todo |
+| K-04 | **Settlement contract v2.** `Ckpt(seq)` only for checkpoints with withdrawals; a new hash of record | K-03 | todo |
+| K-05 | **Readers without a record.** The relayer's reconcile and replay fall back to `LastCkpt` and the `ckpt` event, and replay checks the header chain | K-04 | todo |
+| K-06 | **Ship and measure** — **Gate.** e2e on v2, lane #1's plan unchanged, a soak (checkpoints and XLM a day, withdrawal latency, the fee breakdown recorded), then the policy on lane #1 | K-05 | todo |
 
 ## 21. Later milestones (not for M0 agents to start without a human go-ahead)
 
@@ -3279,6 +3309,7 @@ Pyth was the first choice. Hermes has required a Pyth Terminal API key since 202
 - **zstd was the plan; deflate it is:** on soak blocks zstd -3 gave 2.44× and deflate 2.4×, because signatures and keys do not compress. The `zstd` crate binds C under BSD-3-Clause, and `miniz_oxide` is pure Rust (checked with `cargo info`, 2026-10-04).
 - Amends §15 and DEC-105 ("blocks are never pruned"), by the human's call (2026-10-04). | Four full copies of every block on one disk, ~485 MB a day at 200 ms. Three of the four stores now stay flat, and the sequencer's blocks take ~40% of their size | — |
 | DEC-122 | **M0.9 (F-15): contract crates keep their own version.** `settlement`, `payments-engine` and the workspace crates built into them (`caravel-core`, `caravel-app-sdk`, `caravel-payments`) set `version = "0.2.0"` instead of the workspace's. The workspace bump to 0.3.0 changed the settlement Wasm on x86_64 Linux (`d2c67d28…` instead of `fb68ee32…`, CI on #128), because a crate's version goes into its `-C metadata` and that can reorder functions (DEC-033). The 0.1 → 0.2 bump happened not to. Lane #1's settlement contract is the `fb68ee32…` build, so a release version must not move the contracts of record. Their version changes only with a new contract | A release is not a contract change; the hashes of record stay reproducible from any later tag | — |
+| DEC-123 | **M0.10 (K-01): checkpoints by time and content.** `builder::checkpoint_end` takes an `EndInput` and returns an `EndReason`: `full` (b), `withdrawals` (c), `blocks` (a), then, with `SequencerConfig.checkpoint_timing`, `urgent`, `busy` or `idle` (§14.2 d–f). `BatchBudget` keeps the open batch's `BatchContent` (inbox, users, withdrawals, from `Built::content()`) and the block time it opened at. `Core::open` rebuilds both: the open time from the last checkpoint header's `last_block_timestamp_ms`, and the content by decoding the open batch's blocks. Ages are in block time, so a restart or a slow block loop changes nothing. Lane files without the three settings keep rule (a) alone | The human wants deposits and withdrawals on Stellar within seconds and fewer idle checkpoints (2026-10-05); when a batch ends is sequencer policy, and nothing else counts blocks (DEC-104) | — |
 Agents append new decisions here as `DEC-018+` with the same columns.
 
 ---

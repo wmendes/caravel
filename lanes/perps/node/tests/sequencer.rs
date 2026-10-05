@@ -14,9 +14,11 @@ use caravel_core::state::StateFrameV1;
 use caravel_core::tx::TxEnvelopeV1;
 use caravel_perps_node::{app, PerpsApp};
 use caravel_runtime::builder::{self, BuildInput};
-use caravel_runtime::checkpoint::{self, settlement_addr_hash, sha256, BatchBudget};
+use caravel_runtime::checkpoint::{
+    self, settlement_addr_hash, sha256, BatchBudget, CheckpointTiming, EndReason,
+};
 use caravel_runtime::mempool::{Mempool, Reject};
-use caravel_runtime::sequencer::{self, Executor, InboxReport, Incident};
+use caravel_runtime::sequencer::{self, Executor, InboxReport, Incident, SequencerConfig};
 use caravel_runtime::store::{CheckpointStatus, Store};
 use caravel_testkit::lane::{config, seeds, BTC, BTC_PRICE, TICK, USDC};
 use caravel_types::fatal;
@@ -489,17 +491,31 @@ fn checkpoint_policy() {
     for _ in 0..9 {
         b.add(100);
     }
-    assert!(builder::checkpoint_end(&b, 100, 10, 0, 512));
-    assert!(!builder::checkpoint_end(&budget, 100, 10, 0, 512));
+    assert_eq!(end(&b, 10, 0), Some(EndReason::Blocks));
+    assert_eq!(end(&budget, 10, 0), None);
     // (b) the next block might not fit.
     let mut b = budget;
     for _ in 0..7 {
         b.add(11_940);
     }
-    assert!(builder::checkpoint_end(&b, 100, 100, 0, 512));
+    assert_eq!(end(&b, 100, 0), Some(EndReason::Full));
     // (c) half the pending queue is used.
-    assert!(builder::checkpoint_end(&budget, 100, 100, 256, 512));
-    assert!(!builder::checkpoint_end(&budget, 100, 100, 255, 512));
+    assert_eq!(end(&budget, 100, 256), Some(EndReason::Withdrawals));
+    assert_eq!(end(&budget, 100, 255), None);
+}
+
+/// `checkpoint_end` for a 100-byte block with no time rules.
+fn end(b: &BatchBudget, every: u32, pending: usize) -> Option<EndReason> {
+    builder::checkpoint_end(&builder::EndInput {
+        budget: b,
+        block_len: 100,
+        block: Default::default(),
+        timestamp_ms: 0,
+        checkpoint_every_blocks: every,
+        timing: None,
+        pending_at_start: pending,
+        max_pending: 512,
+    })
 }
 
 #[test]
@@ -522,4 +538,110 @@ fn settlement_addr_hash_is_the_contract_address_xdr() {
         .to_xdr(Limits::none())
         .unwrap();
     assert_eq!(settlement_addr_hash(&id), sha256(&xdr));
+}
+
+// --- Checkpoints by time and content (K-01) ---------------------------------------------
+
+/// 1 s blocks (the harness), urgent 5 s, busy 20 s, idle 60 s, no block cap.
+fn timed() -> SequencerConfig {
+    SequencerConfig {
+        checkpoint_every_blocks: u32::MAX,
+        checkpoint_timing: Some(CheckpointTiming {
+            urgent_ms: 5_000,
+            busy_ms: 20_000,
+            idle_ms: 60_000,
+        }),
+        ..seq_config()
+    }
+}
+
+/// Blocks until the next checkpoint: its height and why it ended.
+fn next_checkpoint(t: &mut T, prices: bool, limit: u64) -> (u64, EndReason) {
+    for _ in 0..limit {
+        if prices {
+            t.prices();
+        }
+        let p = t.block();
+        if p.checkpoint.is_some() {
+            return (p.height, t.core.last_end_reason().unwrap());
+        }
+    }
+    panic!("no checkpoint within {limit} blocks");
+}
+
+#[test]
+fn an_idle_lane_checkpoints_on_its_heartbeat() {
+    let mut t = T::with_config(Executor::Native, store_in_memory(), timed());
+    // Prices alone are not activity: the batch ends when it is 60 s old.
+    // The first batch opens with block 1, so it ends at block 61.
+    assert_eq!(next_checkpoint(&mut t, true, 100), (61, EndReason::Idle));
+    assert_eq!(next_checkpoint(&mut t, true, 100), (121, EndReason::Idle));
+}
+
+#[test]
+fn deposits_and_withdrawals_checkpoint_within_the_urgent_time() {
+    let mut t = T::with_config(Executor::Native, store_in_memory(), timed());
+    t.prices();
+    assert_eq!(next_checkpoint(&mut t, true, 100), (61, EndReason::Idle));
+    // A quiet stretch, then a deposit: its own block is already 5 s past
+    // the last seal, so it ends the batch.
+    for _ in 0..10 {
+        t.prices();
+        assert!(t.block().checkpoint.is_none());
+    }
+    t.deposit(seeds::A, 1_000 * USDC);
+    let p = t.block();
+    assert!(p.checkpoint.is_some(), "the deposit's block seals");
+    assert_eq!(t.core.last_end_reason(), Some(EndReason::Urgent));
+    // Right after a seal a withdrawal waits for the urgent time: 5 s.
+    t.prices();
+    t.block();
+    t.tx(seeds::A, TxBody::Withdraw { amount: 10 * USDC });
+    let at = t.core.height() + 1;
+    let (h, why) = next_checkpoint(&mut t, true, 100);
+    assert_eq!(why, EndReason::Urgent);
+    assert_eq!(h, at + 3, "5 s after the seal at {}", at - 2);
+}
+
+#[test]
+fn trades_checkpoint_within_the_busy_time() {
+    let mut t = T::with_config(Executor::Native, store_in_memory(), timed());
+    t.deposit(seeds::A, 10_000 * USDC);
+    t.deposit(seeds::B, 10_000 * USDC);
+    t.prices();
+    let (sealed, why) = next_checkpoint(&mut t, true, 100);
+    assert_eq!(why, EndReason::Urgent);
+    t.order(seeds::A, BTC, Side::Buy, BTC_PRICE - TICK, 1);
+    let (h, why) = next_checkpoint(&mut t, true, 100);
+    assert_eq!((h, why), (sealed + 20, EndReason::Busy));
+}
+
+#[test]
+fn a_restart_keeps_the_open_batch_age_and_content() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("lane.sqlite");
+    let (state, config_hash) = genesis();
+    let open = || Store::open(&path, &config().lane_id, &config_hash, &state).unwrap();
+    // The reference: no restart.
+    let mut r = T::with_config(Executor::Native, store_in_memory(), timed());
+    r.deposit(seeds::A, 10_000 * USDC);
+    r.prices();
+    let (sealed, _) = next_checkpoint(&mut r, true, 100);
+    r.order(seeds::A, BTC, Side::Buy, BTC_PRICE - TICK, 1);
+    let want = next_checkpoint(&mut r, true, 100);
+    // The same, stopped 7 blocks into the busy batch.
+    let mut t = T::with_config(Executor::Native, open(), timed());
+    t.deposit(seeds::A, 10_000 * USDC);
+    t.prices();
+    assert_eq!(next_checkpoint(&mut t, true, 100).0, sealed);
+    t.order(seeds::A, BTC, Side::Buy, BTC_PRICE - TICK, 1);
+    for _ in 0..7 {
+        t.prices();
+        t.block();
+    }
+    let now = t.now;
+    drop(t);
+    let mut t = T::with_config(Executor::Native, open(), timed());
+    t.now = now;
+    assert_eq!(next_checkpoint(&mut t, true, 100), want);
 }

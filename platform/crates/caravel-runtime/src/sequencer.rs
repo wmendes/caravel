@@ -13,7 +13,9 @@ use caravel_core::state::StateFrameV1;
 
 use crate::app::{FeedUpdate, LaneApp, StepOutput};
 use crate::builder::{self, BuildInput, Built, Source};
-use crate::checkpoint::{self, block_hash, sha256, BatchBudget, HeaderIds};
+use crate::checkpoint::{
+    self, block_hash, sha256, BatchBudget, CheckpointTiming, EndReason, HeaderIds,
+};
 use crate::executor::{ExecError, Metering, WasmExecutor};
 use crate::mempool::{self, Mempool, Reject};
 use crate::store::{CheckpointRow, CheckpointStatus, Store, StoreError};
@@ -82,6 +84,8 @@ impl Executor {
 pub struct SequencerConfig {
     pub ids: HeaderIds,
     pub checkpoint_every_blocks: u32,
+    /// K-01's time rules; `None` keeps `checkpoint_every_blocks` alone.
+    pub checkpoint_timing: Option<CheckpointTiming>,
     pub max_batch_bytes: usize,
     pub mempool_max: usize,
     pub mempool_max_per_account: usize,
@@ -183,6 +187,10 @@ pub struct Core<A: LaneApp> {
     /// Per-phase timings of block production (F-01): build, execute, decode,
     /// commit, seal.
     pub perf: crate::perf::Perf,
+    /// Why the block being built ends its batch, if it does (K-01).
+    end_reason: Option<EndReason>,
+    /// Why the last sealed batch ended.
+    last_end_reason: Option<EndReason>,
 }
 
 impl<A: LaneApp> Core<A> {
@@ -210,12 +218,31 @@ impl<A: LaneApp> Core<A> {
                 .ok_or(CoreError::Corrupt("head block"))?;
             block_hash(&record)
         };
-        // The open batch: blocks after the last CHECKPOINT_END.
+        // The open batch: blocks after the last CHECKPOINT_END, with what
+        // they hold and since when (K-01).
         let mut budget = BatchBudget::new(cfg.max_batch_bytes, limits.max_block_bytes as usize);
+        if frame.checkpoint_seq > 0 {
+            let row = store
+                .checkpoint(frame.checkpoint_seq)?
+                .ok_or(CoreError::Corrupt("last checkpoint"))?;
+            let header = CheckpointHeaderV1::decode(&row.header)
+                .map_err(|_| CoreError::Corrupt("last checkpoint header"))?;
+            budget.opened_at(header.last_block_timestamp_ms);
+        }
         let batch_start = frame.last_commitment.last_block_height + 1;
         if batch_start <= height {
             for (record, _) in store.blocks(batch_start, height)? {
                 budget.add(record.input.len());
+                let input = BlockInputV1::decode(&record.input)
+                    .map_err(|_| CoreError::Corrupt("open batch block"))?;
+                let built = Built {
+                    block: input,
+                    sources: Vec::new(),
+                    included: HashSet::new(),
+                    dropped: HashSet::new(),
+                    encoded_len: record.input.len(),
+                };
+                budget.note(built.content(), built.block.timestamp_ms);
             }
         }
         let last_header_hash = match frame.checkpoint_seq {
@@ -265,6 +292,8 @@ impl<A: LaneApp> Core<A> {
             budget,
             last_header_hash,
             backpressure: false,
+            end_reason: None,
+            last_end_reason: None,
             perf: crate::perf::Perf::new(),
         })
     }
@@ -288,6 +317,16 @@ impl<A: LaneApp> Core<A> {
 
     pub fn state_hash(&self) -> [u8; 32] {
         sha256(&self.state_bytes)
+    }
+
+    /// The open batch: its size, content and age (K-02).
+    pub fn batch(&self) -> &BatchBudget {
+        &self.budget
+    }
+
+    /// Why the last sealed batch ended (K-02).
+    pub fn last_end_reason(&self) -> Option<EndReason> {
+        self.last_end_reason
     }
 
     pub fn height(&self) -> u64 {
@@ -436,14 +475,18 @@ impl<A: LaneApp> Core<A> {
                 user_cap,
                 include_inbox,
             });
-            let end = builder::checkpoint_end(
-                &self.budget,
-                built.encoded_len,
-                self.cfg.checkpoint_every_blocks,
-                self.app.pending_withdrawals(&self.state),
-                limits.max_pending_withdrawals as usize,
-            );
-            built.block.checkpoint_end = end;
+            let reason = builder::checkpoint_end(&builder::EndInput {
+                budget: &self.budget,
+                block_len: built.encoded_len,
+                block: built.content(),
+                timestamp_ms: built.block.timestamp_ms,
+                checkpoint_every_blocks: self.cfg.checkpoint_every_blocks,
+                timing: self.cfg.checkpoint_timing.as_ref(),
+                pending_at_start: self.app.pending_withdrawals(&self.state),
+                max_pending: limits.max_pending_withdrawals as usize,
+            });
+            built.block.checkpoint_end = reason.is_some();
+            self.end_reason = reason;
             let bytes = built
                 .block
                 .encode()
@@ -557,6 +600,7 @@ impl<A: LaneApp> Core<A> {
 
         self.prev_block_hash = block_hash(&record);
         self.budget.add(record.input.len());
+        self.budget.note(built.content(), built.block.timestamp_ms);
         let mut done = built.included.clone();
         done.extend(built.dropped.iter().copied());
         self.mempool.remove(&done);
@@ -570,6 +614,10 @@ impl<A: LaneApp> Core<A> {
             let row = self.seal(height, &mut incidents)?;
             self.perf.record("seal", t_seal.elapsed());
             self.budget.reset();
+            self.budget.opened_at(built.block.timestamp_ms);
+            if let Some(r) = self.end_reason {
+                self.last_end_reason = Some(r);
+            }
             Some(row)
         } else {
             None

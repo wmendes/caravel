@@ -25,6 +25,7 @@ pub fn seq_config() -> SequencerConfig {
     SequencerConfig {
         ids: ids(),
         checkpoint_every_blocks: 10,
+        checkpoint_timing: None,
         max_batch_bytes: 96_000,
         mempool_max: 10_000,
         mempool_max_per_account: 256,
@@ -53,8 +54,12 @@ pub fn store_in_memory() -> Store {
 
 impl T {
     pub fn with(exec: Executor, store: Store) -> Self {
+        Self::with_config(exec, store, seq_config())
+    }
+
+    pub fn with_config(exec: Executor, store: Store, cfg: SequencerConfig) -> Self {
         let (_, config_hash) = genesis();
-        let core = Core::open(PerpsApp, exec, store, config_hash, seq_config()).unwrap();
+        let core = Core::open(PerpsApp, exec, store, config_hash, cfg).unwrap();
         let inbox_n = core.inbox_reported();
         let inbox_acc = match inbox_n {
             0 => [0; 32],
