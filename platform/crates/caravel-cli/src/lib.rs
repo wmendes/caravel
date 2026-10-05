@@ -1722,7 +1722,7 @@ pub fn deployment_notes(m: &Manifest) -> Vec<String> {
 
 /// `ms` as minutes or hours, for notes.
 fn minutes(ms: u64) -> String {
-    if ms >= 3_600_000 && ms % 3_600_000 == 0 {
+    if ms >= 3_600_000 && ms.is_multiple_of(3_600_000) {
         format!("{} h", ms / 3_600_000)
     } else if ms >= 60_000 {
         format!("{:.0} min", ms as f64 / 60_000.0)
