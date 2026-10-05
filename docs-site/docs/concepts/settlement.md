@@ -12,7 +12,7 @@ A user calls the settlement contract on Stellar, which locks the tokens and adds
 
 ## Checkpoints
 
-Every so many blocks (`checkpoint_every_blocks`), the sequencer seals a **checkpoint**: a header that commits to the lane's state, its withdrawals, the inbox it has processed and the batch of blocks since the last one.
+When something is waiting for Stellar (within seconds of a deposit or withdrawal, within a minute of a trade, and every so often when the lane is idle; see [Block time and checkpoints](../reference/lane-file/index.md#block-time-and-checkpoints)), the sequencer seals a **checkpoint**: a header that commits to the lane's state, its withdrawals, the inbox it has processed and the batch of blocks since the last one.
 
 1. Each validator re-executes the blocks itself, rebuilds the header, and signs it only if it is byte for byte the same. It never signs two different headers for one checkpoint.
 2. The relayer submits the header, its batch and the signatures to the settlement contract.

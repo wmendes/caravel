@@ -1695,10 +1695,11 @@ pub fn deployment_notes(m: &Manifest) -> Vec<String> {
                 t.urgent_ms as f64 / 1000.0,
                 t.busy_ms as f64 / 1000.0,
                 minutes(idle_ms),
-                if idle_ms < t.idle_ms {
+                if idle_ms == every_ms && every_ms < t.idle_ms {
+                    " (checkpoint_every_blocks caps it)".to_string()
+                } else if idle_ms < t.idle_ms {
                     format!(
-                        " (sooner than checkpoint_idle_ms: {} of {} ms blocks fill a batch)",
-                        if idle_ms == every_ms { "checkpoint_every_blocks" } else { "empty blocks" },
+                        " (before checkpoint_idle_ms: empty {} ms blocks fill a batch by then)",
                         node.block_time_ms
                     )
                 } else {

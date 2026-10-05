@@ -14,7 +14,10 @@ engine_wasm_sha256 = "4571cd252d4b78d523d01fc4a31ab763a1aff77aecafbb9d7302cfb879
 
 [node]                                     # not consensus
 block_time_ms = 500                        # allowed 200..=5000; 0.5 s on testnet (DEC-104)
-checkpoint_every_blocks = 120               # still one checkpoint a minute (DEC-044, DEC-104)
+checkpoint_every_blocks = 7200              # only a cap now: an hour of blocks (DEC-123)
+checkpoint_urgent_ms = 5000                # a deposit or withdrawal on Stellar within ~5 s (§14.2 d)
+checkpoint_busy_ms = 60000                 # trades within a minute (§14.2 e)
+checkpoint_idle_ms = 3600000               # idle: hourly, though empty blocks fill a batch in ~6 min (§14.2 f)
 max_batch_bytes = 96000
 
 [access]
