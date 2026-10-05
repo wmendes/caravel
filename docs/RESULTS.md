@@ -298,3 +298,33 @@ On the VM (e2-small, 2 shared vCPUs, pd-standard), from the sequencer's `/v1/sta
 The sequencer's `lock_wait` peaked at 190 ms while it archived the old checkpoints' blocks, 8 at a time. That is harmless at 500 ms blocks, but it needs to move outside the lock before any faster block time.
 
 **200 ms stays off for lane #1.** All four nodes execute every block, so 200 ms would mean about 43% of one vCPU while idle. An e2-small sustains about half of one, which leaves no room for load.
+
+## Checkpoints when needed (M0.10, 2026-10-05)
+
+**Settings:** lane #1's new checkpoint rules (`checkpoint_urgent_ms = 5000`, `checkpoint_busy_ms = 60000`, `checkpoint_idle_ms = 3600000`) and the settlement contract v2, which keeps a record only for checkpoints with withdrawals (DEC-123, DEC-124).
+
+**Fees, measured on testnet** (the e2e on v2, 12 checkpoints; the relayer records each fee's parts from the transaction's metadata):
+
+| Checkpoint | Fee | Of which rent |
+|---|---|---|
+| Without withdrawals, 1 to 3 KB batch (10 of 12) | 0.0017 to 0.0027 XLM | 0 |
+| With withdrawals (2 of 12) | 0.335 XLM | 0.332 XLM, the record's 120 days |
+| Lane #1 today (contract v1, any checkpoint), for comparison | 0.354 XLM (p50) | ~0.333 XLM |
+
+Batch size still adds about 0.0005 XLM per KB. A full 84 KB idle batch on v2 should therefore cost about 0.045 XLM.
+
+**Cadence, measured on the local soak** (500 ms blocks, 15 minutes per run):
+- **Idle:** 3 checkpoints, all ended by a full batch (84 KB p50). That is about one every 5 minutes, **288 a day instead of 1,440**. Empty blocks and oracle updates fill a batch long before the hourly heartbeat.
+- **20 tx/s with the load mix's 3% withdrawals:** every batch ended `urgent`, one every 5 s (16,652 a day). Hard latency p50 / p99 was 4.0 / 7.3 s, and soft latency was 260 / 497 ms. Under steady load a withdrawal is always waiting, so the urgent rule fires all the time.
+
+**What it costs, per day, on testnet prices:**
+
+| Lane | Contract v1 (lane #1) | Contract v2 |
+|---|---|---|
+| Today's rule, one a minute, busy or idle | ~494 XLM | ~3.5 to 65 XLM |
+| Idle, the new rules | ~102 XLM (288 × 0.354) | ~13 XLM (288 × ~0.045) |
+| A few withdrawals a day (100 urgent checkpoints) | about +35 XLM | about +34 XLM |
+| A withdrawal always waiting, `urgent_ms = 5000` | ~6,100 XLM (17,280 × 0.354) | ~5,800 XLM (17,280 × 0.335) |
+| The same with `urgent_ms = 30000` | ~1,000 XLM | ~970 XLM |
+
+So the new rules cut idle cost 80% on lane #1's contract and 97% on v2, and deposits settle within about 5 s at almost no cost on v2. Withdrawals are different. Each checkpoint that carries them pays the record's rent on either contract. Making them claimable in seconds under steady withdrawal traffic costs one record per `urgent_ms`, and `urgent_ms` is that trade-off's knob.

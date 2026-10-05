@@ -8,6 +8,10 @@ export interface CheckpointMetric {
   ledger: number;
   fee_charged_stroops: string;
   min_resource_fee_stroops: string;
+  /** From the transaction's metadata (K-06); rent is part of the refundable fee. */
+  rent_fee_stroops?: string | undefined;
+  refundable_fee_stroops?: string | undefined;
+  non_refundable_fee_stroops?: string | undefined;
   tx_size_bytes: number;
   header_bytes: number;
   batch_bytes: number;
