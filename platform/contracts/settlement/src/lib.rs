@@ -372,19 +372,24 @@ impl Settlement {
         if h.withdrawals_total > available(env, h.inbox_through) {
             return Err(Error::Insolvent);
         }
-        // 9. Effects.
-        set(
-            env,
-            &DataKey::Ckpt(h.seq),
-            &CheckpointRecord {
-                header_hash: header_hash.clone(),
-                withdrawals_root: bytes32(env, &h.withdrawals_root),
-                withdrawal_count: h.withdrawal_count,
-                withdrawals_total: h.withdrawals_total,
-                claimed_total: 0,
-                stellar_ledger: env.ledger().sequence(),
-            },
-        );
+        // 9. Effects. Only a checkpoint with withdrawals keeps a record: the
+        // claims read it. Without one, a checkpoint is `LastCkpt` until the
+        // next, and its `ckpt` event (M0.10 K-04, DEC-124). The record's rent
+        // was ~97% of a checkpoint's fee.
+        if h.withdrawal_count > 0 {
+            set(
+                env,
+                &DataKey::Ckpt(h.seq),
+                &CheckpointRecord {
+                    header_hash: header_hash.clone(),
+                    withdrawals_root: bytes32(env, &h.withdrawals_root),
+                    withdrawal_count: h.withdrawal_count,
+                    withdrawals_total: h.withdrawals_total,
+                    claimed_total: 0,
+                    stellar_ledger: env.ledger().sequence(),
+                },
+            );
+        }
         set_instance(
             env,
             &DataKey::LastCkpt,

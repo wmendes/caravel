@@ -448,3 +448,66 @@ fn check_8_counts_withdrawals_not_yet_claimed() {
     let cp2 = h.crafted(std::vec![(a, 0)], std::vec![(a, 40 * USDC)]);
     h.accept(&cp2);
 }
+
+/// K-04: a checkpoint without withdrawals keeps no record. `LastCkpt` and
+/// its `ckpt` event say what it was; the next checkpoint chains to it as
+/// before, and one with withdrawals keeps its record for the claims.
+#[test]
+fn only_checkpoints_with_withdrawals_keep_a_record() {
+    let mut h = Harness::new();
+    h.deposit(A, 100 * USDC);
+    h.sync_inbox();
+    h.lane.block();
+    h.lane.all_ok();
+    let cp1 = h.checkpoint();
+    assert_eq!(cp1.header.withdrawal_count, 0);
+    h.accept(&cp1);
+    let hash1 = BytesN::from_array(&h.env, &sha256(&cp1.header.encode()));
+    // The event first: any later call starts a new event buffer.
+    let event = CheckpointEvent {
+        seq: 1,
+        header_hash: hash1.clone(),
+        last_block_height: cp1.header.last_block_height,
+        withdrawals_total: 0,
+    };
+    assert_eq!(
+        h.env
+            .events()
+            .all()
+            .filter_by_contract(&h.id)
+            .events()
+            .last(),
+        Some(&event.to_xdr(&h.env, &h.id))
+    );
+    assert_eq!(h.c().checkpoint(&1), None, "no record");
+    assert!(!h.env.as_contract(&h.id, || h
+        .env
+        .storage()
+        .persistent()
+        .has(&DataKey::Ckpt(1))));
+    assert_eq!(h.c().last_checkpoint().header_hash, hash1);
+    // A claim against it finds nothing.
+    let who = h.user(A, 0);
+    let none =
+        h.c()
+            .try_claim_withdrawal(&who, &key32(&h.env, A), &1, &0, &USDC, &Vec::new(&h.env));
+    assert!(none.is_err());
+
+    // Checkpoint 2 carries a withdrawal: it chains to 1 and keeps a record.
+    h.lane.withdraw(A, 30 * USDC);
+    h.lane.block();
+    h.lane.all_ok();
+    let cp2 = h.checkpoint();
+    assert_eq!(cp2.header.seq, 2);
+    h.accept(&cp2);
+    let record = h.c().checkpoint(&2).expect("stored");
+    assert_eq!(
+        (record.withdrawal_count, record.withdrawals_total),
+        (1, 30 * USDC)
+    );
+    let proof = h.withdrawal_proof(&cp2, 0);
+    h.c()
+        .claim_withdrawal(&who, &key32(&h.env, A), &2, &0, &(30 * USDC), &proof);
+    assert_eq!(h.token().balance(&who), 30 * USDC);
+    assert_eq!(h.c().totals(), (30 * USDC, 30 * USDC));
+}
