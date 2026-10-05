@@ -66,15 +66,19 @@ async function reconcile(seq: SequencerApi, st: SettlementApi, p: PendingCheckpo
   const headerHash = toHex(sha256(p.header));
   const last = await st.lastCheckpoint();
   if (last.seq >= p.seq) {
+    // A checkpoint with withdrawals has a record; since DEC-124 one without
+    // has none, and `LastCkpt` (if it is the last) or its event says what
+    // Stellar accepted.
     const onChain = await st.checkpoint(p.seq);
-    if (!onChain) throw new Error(`Stellar is at seq ${last.seq} but has no record of ${p.seq}`);
-    if (toHex(onChain.headerHash) !== headerHash) {
-      throw new CheckpointDivergence(`seq ${p.seq}: Stellar accepted header ${toHex(onChain.headerHash)}, the sequencer has ${headerHash}`);
+    const tx = await st.findCheckpointTx(p.seq, onChain?.stellarLedger);
+    const accepted = onChain?.headerHash ?? (last.seq === p.seq ? last.headerHash : tx?.headerHash);
+    if (!accepted) throw new Error(`Stellar is at seq ${last.seq} but has no record or event of ${p.seq} in RPC's window`);
+    if (toHex(accepted) !== headerHash) {
+      throw new CheckpointDivergence(`seq ${p.seq}: Stellar accepted header ${toHex(accepted)}, the sequencer has ${headerHash}`);
     }
-    const tx = await st.findCheckpointTx(p.seq, onChain.stellarLedger);
-    // Without the event (older than RPC retention) the ledger still identifies it.
+    // Without the event (older than RPC retention) the record's ledger still identifies it.
     const hash = tx?.hash ?? "unknown";
-    await seq.reportAccepted(p.seq, hash, tx?.ledger ?? onChain.stellarLedger);
+    await seq.reportAccepted(p.seq, hash, tx?.ledger ?? onChain?.stellarLedger ?? 0);
     return { kind: "reconciled", seq: p.seq, hash };
   }
   if (last.seq + 1n !== p.seq) throw new Error(`Stellar is at seq ${last.seq}; the queue head is ${p.seq}`);

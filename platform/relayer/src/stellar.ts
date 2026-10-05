@@ -42,8 +42,12 @@ export interface SettlementApi {
   inbox(index: bigint): Promise<InboxRecord | null>;
   lastCheckpoint(): Promise<{ seq: bigint; headerHash: Uint8Array }>;
   checkpoint(seq: bigint): Promise<CheckpointRecord | null>;
-  /** The transaction that accepted `seq`, from its `ckpt` event. */
-  findCheckpointTx(seq: bigint, fromLedger: number): Promise<{ hash: string; ledger: number } | null>;
+  /**
+   * The transaction that accepted `seq`, from its `ckpt` event, with the
+   * header hash the event carries. Searched from `fromLedger`, or from the
+   * oldest ledger RPC still holds.
+   */
+  findCheckpointTx(seq: bigint, fromLedger?: number): Promise<{ hash: string; ledger: number; headerHash: Uint8Array } | null>;
   submitCheckpoint(p: PendingCheckpoint): Promise<SubmitResult>;
 }
 
@@ -149,11 +153,14 @@ export class RpcSettlement implements SettlementApi {
     return { headerHash: bytes(r.header_hash, "header_hash"), stellarLedger: Number(r.stellar_ledger) };
   }
 
-  async findCheckpointTx(seq: bigint, fromLedger: number): Promise<{ hash: string; ledger: number } | null> {
+  async findCheckpointTx(seq: bigint, fromLedger?: number): Promise<{ hash: string; ledger: number; headerHash: Uint8Array } | null> {
+    const startLedger = fromLedger ?? (await this.c.server.getHealth()).oldestLedger;
     const topics = [[xdr.ScVal.scvSymbol("ckpt").toXDR("base64"), u64(seq).toXDR("base64")]];
-    const res = await this.c.server.getEvents({ startLedger: fromLedger, filters: [{ type: "contract", contractIds: [this.c.contractId], topics }], limit: 5 });
+    const res = await this.c.server.getEvents({ startLedger, filters: [{ type: "contract", contractIds: [this.c.contractId], topics }], limit: 5 });
     const e = res.events[0];
-    return e ? { hash: e.txHash, ledger: e.ledger } : null;
+    if (!e) return null;
+    const data = scValToNative(e.value) as Record<string, unknown>;
+    return { hash: e.txHash, ledger: e.ledger, headerHash: bytes(data.header_hash, "event header_hash") };
   }
 
   async submitCheckpoint(p: PendingCheckpoint): Promise<SubmitResult> {

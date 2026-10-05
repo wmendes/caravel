@@ -107,6 +107,33 @@ describe("checkpoint submitter (spec §17.2)", () => {
     expect(st.submits).toBe(2);
   });
 
+  it("reconciles without a record, from LastCkpt or the event (DEC-124)", async () => {
+    const st = new FakeSettlement();
+    st.noRecords = true;
+    const seq = new FakeSequencer();
+    seq.queue.push(pending(1n), pending(2n));
+    // Both land, and the relayer dies before reporting either.
+    st.crashAfterSubmit = true;
+    await expect(submitNext(seq, st, new Metrics())).rejects.toThrow(/died/);
+    st.crashAfterSubmit = false;
+    await st.submitCheckpoint(pending(2n));
+    // Seq 1 is older than LastCkpt: its event says what was accepted.
+    expect(await submitNext(seq, st, new Metrics())).toMatchObject({ kind: "reconciled", seq: 1n });
+    // Seq 2 is LastCkpt.
+    expect(await submitNext(seq, st, new Metrics())).toMatchObject({ kind: "reconciled", seq: 2n });
+    expect(st.submits).toBe(2);
+    expect(seq.reported.map((r) => r.seq)).toEqual([1n, 2n]);
+  });
+
+  it("refuses a different header without a record too", async () => {
+    const st = new FakeSettlement();
+    st.noRecords = true;
+    const seq = new FakeSequencer();
+    st.accepted.push({ seq: 1n, header: new Uint8Array(442).fill(7), ledger: 50, hash: "x" });
+    seq.queue.push(pending(1n, 1));
+    await expect(submitNext(seq, st, new Metrics())).rejects.toBeInstanceOf(CheckpointDivergence);
+  });
+
   it("refuses to skip a seq", async () => {
     const st = new FakeSettlement();
     const seq = new FakeSequencer();
