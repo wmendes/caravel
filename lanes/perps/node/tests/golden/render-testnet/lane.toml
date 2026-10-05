@@ -24,7 +24,10 @@ min_withdrawal = 10000000
 
 [node]
 block_time_ms = 500
-checkpoint_every_blocks = 120
+checkpoint_busy_ms = 60000
+checkpoint_every_blocks = 7200
+checkpoint_idle_ms = 3600000
+checkpoint_urgent_ms = 5000
 max_batch_bytes = 96000
 
 [perps.accounts]

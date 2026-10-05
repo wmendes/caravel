@@ -13,7 +13,10 @@ engine_wasm_sha256 = "4571cd252d4b78d523d01fc4a31ab763a1aff77aecafbb9d7302cfb879
 
 [node]                                     # not consensus
 block_time_ms = 1000                       # allowed 200..=5000
-checkpoint_every_blocks = 10
+checkpoint_every_blocks = 60               # a cap; the times below decide (§14.2 d-f)
+checkpoint_urgent_ms = 2000                # deposits and withdrawals
+checkpoint_busy_ms = 10000                 # user transactions
+checkpoint_idle_ms = 15000                 # anything
 max_batch_bytes = 96000
 
 [access]

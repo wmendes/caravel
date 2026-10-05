@@ -268,7 +268,12 @@ async fn validators_follow_sign_and_refuse_a_tampered_chain() {
     let lane_text =
         std::fs::read_to_string(root().join("lanes/perps/config/lane.caravel-perps.local.toml"))
             .unwrap()
-            .replace("block_time_ms = 1000", "block_time_ms = 200");
+            .replace("block_time_ms = 1000", "block_time_ms = 200")
+            // Idle checkpoints every 5 s (25 blocks), so the test needn't wait.
+            .replace(
+                "checkpoint_every_blocks = 60",
+                "checkpoint_every_blocks = 25",
+            );
     std::fs::write(dir.path().join("lane.toml"), lane_text).unwrap();
     let lane = LaneFile::load(&dir.path().join("lane.toml")).unwrap();
     let lane_id = lane.lane_id();
@@ -566,12 +571,16 @@ async fn validators_follow_sign_and_refuse_a_tampered_chain() {
     assert_eq!(none.status(), 404);
     assert!(t.elapsed() >= std::time::Duration::from_millis(300));
 
-    // K-02: the checkpoint rules and why batches ended. This lane has no
-    // time rules, so every batch ended on checkpoint_every_blocks.
+    // K-01, K-02: the local lane's time rules, and why batches ended. The
+    // deposits above made the first checkpoint urgent: 2 s, not a minute.
     let cp = &seq_status["checkpoint_policy"];
-    assert!(cp["idle_ms"].is_null(), "{cp}");
-    assert_eq!(cp["last_end_reason"], "blocks", "{cp}");
-    assert!(cp["end_reasons"]["blocks"].as_u64().unwrap() >= 1, "{cp}");
+    assert_eq!(cp["urgent_ms"], 2000, "{cp}");
+    assert_eq!(cp["idle_ms"], 15000, "{cp}");
+    assert!(cp["end_reasons"]["urgent"].as_u64().unwrap() >= 1, "{cp}");
+    assert!(
+        ["urgent", "blocks"].contains(&cp["last_end_reason"].as_str().unwrap()),
+        "{cp}"
+    );
     assert!(cp["open_batch"]["blocks"].as_u64().is_some(), "{cp}");
 
     // No fixed retry sleep between a seal and its signatures any more (F-10):

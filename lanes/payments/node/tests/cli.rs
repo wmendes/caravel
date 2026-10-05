@@ -244,7 +244,7 @@ fn validate_notes_a_fast_checkpoint_cadence() {
     assert_eq!(notes.len(), 1, "{notes:?}");
     assert!(
         notes[0].contains("within 5 s of a deposit or withdrawal, 60 s of a trade")
-            && notes[0].contains("empty blocks"),
+            && notes[0].contains("fill a batch"),
         "{}",
         notes[0]
     );
