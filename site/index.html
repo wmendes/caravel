@@ -710,33 +710,66 @@ const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   }
 })();
 
-/* Lane #1, live: real numbers only, every 2 s while the tab is visible. */
+/* Lane #1, live: real numbers only. Each block arrives on the lane's own
+   stream (a WebSocket to the sequencer; Vercel's rewrites can't carry one)
+   as it is made, every 0.5 s. One status read fills in the rest; if the
+   stream won't open, the status is read every 2 s instead. */
 (function live() {
   const box = document.getElementById("live"); if (!box) return;
   const H = document.getElementById("lvH"), B = document.getElementById("lvB"), C = document.getElementById("lvC"), A = document.getElementById("lvA"), note = document.getElementById("liveNote");
+  const STREAM = "wss://35-224-76-64.sslip.io/v1/stream";
   const fmt = (n) => Number(n).toLocaleString("en-US");
   const set = (e, s) => { if (e.textContent === s) return; e.textContent = s; if (!REDUCE) { e.classList.add("tick"); requestAnimationFrame(() => requestAnimationFrame(() => e.classList.remove("tick"))); } };
-  let timer = 0, fails = 0;
-  async function poll() {
+  let ws = null, retry = 500, wsFails = 0, poller = 0, ager = 0, fails = 0;
+  let height = 0, accepted = 0, lastTs = 0, halted = null;
+  const showHeight = (h) => { h = Number(h); if (h > height) { height = h; set(H, fmt(h)); } };
+  const showAccepted = (c) => { c = Number(c); if (c > accepted) { accepted = c; set(C, fmt(c)); } };
+  function showAge() {
+    if (!lastTs) return;
+    const age = Math.max(0, (Date.now() - lastTs) / 1000);
+    A.textContent = age < 2 ? "just now" : age < 120 ? Math.round(age) + " s ago" : Math.round(age / 60) + " min ago";
+    const up = !halted && age < 30;
+    box.classList.toggle("on", up);
+    note.textContent = halted ? "Halted: " + halted : up ? "Running in containers on testnet" : "Not making blocks right now";
+  }
+  async function status() {
     try {
       const r = await fetch("/lane/status", { cache: "no-store" });
       if (!r.ok) throw new Error(r.status);
       const s = await r.json();
       fails = 0;
-      set(H, fmt(s.height));
+      showHeight(s.height);
       if (s.block_time_ms) B.textContent = (s.block_time_ms / 1000) + " s";
-      if (s.checkpoints) set(C, fmt(s.checkpoints.accepted));
-      const age = Math.max(0, (Date.now() - Number(s.last_block_timestamp_ms)) / 1000);
-      A.textContent = age < 2 ? "just now" : age < 120 ? Math.round(age) + " s ago" : Math.round(age / 60) + " min ago";
-      const up = !s.halted && age < 30;
-      box.classList.toggle("on", up);
-      note.textContent = s.halted ? "Halted: " + s.halted : up ? "Running in containers on testnet" : "Not making blocks right now";
+      if (s.checkpoints) showAccepted(s.checkpoints.accepted);
+      halted = s.halted || null;
+      lastTs = Math.max(lastTs, Number(s.last_block_timestamp_ms) || 0);
+      showAge();
     } catch (e) {
-      if (++fails >= 3) { box.classList.remove("on"); note.textContent = "Open the trading app"; }
+      if (++fails >= 3 && !ws) { box.classList.remove("on"); note.textContent = "Open the trading app"; }
     }
   }
-  function start() { if (!timer) { poll(); timer = setInterval(poll, 2000); } }
-  function stop() { clearInterval(timer); timer = 0; }
+  const startPoll = () => { if (!poller) poller = setInterval(status, 2000); };
+  const stopPoll = () => { clearInterval(poller); poller = 0; };
+  function connect() {
+    if (ws || document.hidden || !("WebSocket" in window)) { if (!("WebSocket" in window)) startPoll(); return; }
+    const sock = new WebSocket(STREAM);
+    ws = sock;
+    sock.onopen = () => { retry = 500; wsFails = 0; stopPoll(); sock.send(JSON.stringify({ blocks: true, markets: [] })); };
+    sock.onmessage = (e) => {
+      let m; try { m = JSON.parse(e.data); } catch { return; }
+      if (m.type === "block") { showHeight(m.height); lastTs = Number(m.timestamp_ms) || Date.now(); showAge(); }
+      else if (m.type === "checkpoint" && m.status === "accepted") showAccepted(m.seq);
+    };
+    sock.onclose = () => {
+      if (ws === sock) ws = null;
+      if (document.hidden) return;
+      if (++wsFails >= 3) startPoll();
+      setTimeout(connect, retry);
+      retry = Math.min(retry * 2, 15000);
+    };
+  }
+  function start() { status(); connect(); if (!ager) ager = setInterval(showAge, 1000); }
+  function stop() { const sock = ws; ws = null; if (sock) sock.close(); stopPoll(); clearInterval(ager); ager = 0; }
   document.addEventListener("visibilitychange", () => (document.hidden ? stop() : start()));
   if (!document.hidden) start();
 })();
