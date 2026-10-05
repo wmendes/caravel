@@ -463,7 +463,7 @@ dependencies = [
 
 [[package]]
 name = "caravel-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "caravel-deploy",
@@ -489,7 +489,7 @@ dependencies = [
 
 [[package]]
 name = "caravel-deploy"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "caravel-core",
@@ -510,7 +510,7 @@ dependencies = [
 
 [[package]]
 name = "caravel-harness"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "caravel-app-sdk",
  "caravel-core",
@@ -520,7 +520,7 @@ dependencies = [
 
 [[package]]
 name = "caravel-lanefile"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "proptest",
  "tempfile",
@@ -536,7 +536,7 @@ dependencies = [
 
 [[package]]
 name = "caravel-node"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -568,7 +568,7 @@ dependencies = [
 
 [[package]]
 name = "caravel-payments-node"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -606,7 +606,7 @@ dependencies = [
 
 [[package]]
 name = "caravel-perps-node"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -637,7 +637,7 @@ dependencies = [
 
 [[package]]
 name = "caravel-runtime"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "caravel-core",
  "ed25519-dalek",
