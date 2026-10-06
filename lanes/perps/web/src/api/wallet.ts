@@ -24,12 +24,19 @@ let kitPromise: Promise<Kit> | null = null;
 /** The kit, loaded and initialised once, with the modules that need no extra setup. */
 function kit(): Promise<Kit> {
   kitPromise ??= (async () => {
-    const [{ StellarWalletsKit, SwkAppDarkTheme }, { defaultModules }] = await Promise.all([
+    const [{ StellarWalletsKit, SwkAppDarkTheme }, { defaultModules }, { GhostsigModule, GHOSTSIG_ID }] = await Promise.all([
       import("@creit.tech/stellar-wallets-kit"),
       import("@creit.tech/stellar-wallets-kit/modules/utils"),
+      import("@creit.tech/stellar-wallets-kit/modules/ghostsig"),
     ]);
     StellarWalletsKit.init({
-      modules: defaultModules(),
+      // GHOSTSIG's module starts on Stellar's public network unless it is
+      // given one, and `defaultModules()` gives it none: connecting then asks
+      // for an account there, which `assertNetwork` refuses. So it gets the lane's.
+      modules: [
+        ...defaultModules({ filterBy: (m) => m.productId !== GHOSTSIG_ID }),
+        new GhostsigModule({ network: config.networkPassphrase }),
+      ],
       network: config.networkPassphrase as KitNetwork,
       theme: SwkAppDarkTheme,
       authModal: { showInstallLabel: true },

@@ -9,16 +9,34 @@ import { fromHex } from "../codec/bytes";
 import { sep53Hash } from "../codec/tx";
 
 // The kit, as a wallet module would drive it.
-const kitState: { signMessage: (m: string) => Promise<{ signedMessage: string }>; network: string; address: string | null } = {
+type Module = { productId: string; getNetwork: () => Promise<{ network: string; networkPassphrase: string }> };
+const kitState: {
+  signMessage: (m: string) => Promise<{ signedMessage: string }>;
+  network: string;
+  address: string | null;
+  modules: Module[];
+} = {
   signMessage: async () => ({ signedMessage: "" }),
   network: "Test SDF Network ; September 2015",
   address: null,
+  modules: [],
 };
-vi.mock("@creit.tech/stellar-wallets-kit/modules/utils", () => ({ defaultModules: () => [] }));
+// The kit's default list, as 2.7.0 builds it: GHOSTSIG's module on mainnet.
+vi.mock("@creit.tech/stellar-wallets-kit/modules/utils", () => ({
+  defaultModules: (opts?: { filterBy: (m: Module) => boolean }) => {
+    const all: Module[] = [
+      { productId: "freighter", getNetwork: async () => ({ network: "", networkPassphrase: "" }) },
+      { productId: "ghostsig", getNetwork: async () => ({ network: "PUBLIC", networkPassphrase: "Public Global Stellar Network ; September 2015" }) },
+    ];
+    return opts ? all.filter(opts.filterBy) : all;
+  },
+}));
 vi.mock("@creit.tech/stellar-wallets-kit", () => ({
   SwkAppDarkTheme: {},
   StellarWalletsKit: {
-    init: () => {},
+    init: (opts: { modules: Module[] }) => {
+      kitState.modules = opts.modules;
+    },
     authModal: async () => ({ address: kitState.address }),
     getAddress: async () => {
       if (!kitState.address) throw { code: -1, message: "No wallet has been connected." };
@@ -75,6 +93,14 @@ describe("the wallet layer over Stellar Wallets Kit", () => {
     expect(await wallet.current()).toBe(address);
     kitState.address = null;
     expect(await wallet.current()).toBeNull();
+  });
+
+  it("puts GHOSTSIG on the lane's network, not mainnet", async () => {
+    await wallet.connect();
+    const ids = kitState.modules.map((m) => m.productId);
+    expect(ids).toEqual(["freighter", "ghostsig"]);
+    const ghostsig = kitState.modules.find((m) => m.productId === "ghostsig")!;
+    expect((await ghostsig.getNetwork()).networkPassphrase).toBe("Test SDF Network ; September 2015");
   });
 
   it("refuses a wallet on another network", async () => {
