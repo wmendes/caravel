@@ -345,3 +345,30 @@ So the new rules cut idle cost 80% on lane #1's contract and 97% on v2, and depo
 
   **About 7 s from the withdrawal to claimable**, against up to about 66 s before. The checkpoint paid the record's rent: 0.3452 XLM, of which 0.3308 was rent. The command as a whole took 110 s: about 45 s before it sent the withdrawal and about a minute after acceptance to land its claim. That was the CLI's own flow, since fixed (K-09): it read every block of the withdrawal's checkpoint, one HTTPS request at a time (171 blocks at ~0.35 s each), to tell several same-amount withdrawals apart. With one candidate leaf it now skips that; with several it reads only up to the withdrawal's block, 16 at a time, and it polls every 250 ms instead of every second. The same withdrawal after a 3-minute quiet stretch (a 373-block checkpoint) went from the command to claimed on Stellar in **17.8 s**: about 2 s to send, 7 s to an accepted checkpoint, 6 s for the claim transaction (130 claims took 5.8 s each), and polling.
 - **Expected cost:** with lane #1's light traffic, about 288 idle checkpoints a day at ~0.35 XLM (~100 XLM a day, against ~494). A withdrawal-triggered checkpoint costs ~0.35 XLM as before.
+
+## Lane #1, a day on 0.4.0 (2026-10-06)
+
+Read on 2026-10-06 at about 11:40 UTC, 27 hours after the 0.4.0 deploy, from `/v1/status`, the relayer's checkpoint metrics, the stores and `docker stats`.
+
+| Measure | The day before 0.4.0 | The last 24 h |
+|---|---|---|
+| Checkpoints | 1,437 | **376** (−74%) |
+| Relayer XLM | 506.7 | **138.1** (−73%) |
+| Fee per checkpoint, p50 | 0.3545 XLM (20 KB batch) | 0.3700 XLM (84 KB batch) |
+| Time between checkpoints, p50 / p90 / max | 60 s | 245 / 260 / 275 s |
+
+**Why batches ended**, since the restart: `full` 415, `urgent` 12 (deposits and withdrawals), `busy` 3 (trades). An idle batch fills its 96 KB in about 4 minutes. Each checkpoint still pays the record's rent on lane #1's contract (v1), so fewer checkpoints is the whole saving here.
+
+**Storage.** The background pruning has caught up:
+- **The sequencer** has archived every block before the last few checkpoints: 755,375 blocks in 95.7 MB, **127 B a block** (~280 B raw). Its store's live pages hold 126 MB.
+- **Each validator** keeps about 1,770 recent blocks, and its live pages hold 24 MB, down from ~121 MB. It now grows only by its checkpoint rows.
+- **Growth across the four stores:** about **22 MB a day** (the sequencer's 127 B × 172,800 blocks), against **~190 MB a day** before M0.9.
+- **The files have not shrunk.** These stores predate incremental vacuum, so ~135 MB (sequencer) and ~234 MB (each validator) of free pages stay inside them, about 840 MB in all, until `compact` (RUNBOOK §3.2, at the next release). Those pages are reused first, so the files won't grow for months.
+- **The disk:** 7.1 of 19 GB used. 424 MB of that is the container images of 0.2.0 and 0.3.0, which nothing removes.
+
+**Speed and resources:**
+- Sequencer execute p50 / p99: 14.4 / 17.5 ms. Commit: 2.5 / 4.3 ms.
+- Seal to signed p50 / p99: 66 / 177 ms.
+- The block loop's longest wait for the core lock: 27 ms (190 ms while the backlog was being archived).
+- The containers use about 18% of one vCPU together.
+- The sequencer's memory held at 68 to 72 MB over 15 minutes of samples (16 MB at the 0.3.0 restart, before the archive backlog), so it isn't growing.
