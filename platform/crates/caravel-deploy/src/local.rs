@@ -51,12 +51,70 @@ fn copy_dir(from: &Path, to: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Whether `pid` runs: a zombie (exited, not yet reaped by the caravel that
+/// started it) does not. `kill -0` when `ps` is missing.
 fn alive(pid: u32) -> bool {
+    match Command::new("ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .stderr(Stdio::null())
+        .output()
+    {
+        Ok(o) => {
+            o.status.success()
+                && !String::from_utf8_lossy(&o.stdout)
+                    .trim_start()
+                    .starts_with('Z')
+        }
+        Err(_) => Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success()),
+    }
+}
+
+/// Sends `sig` (`-INT`, `-KILL`) to `pid`; whether `kill` succeeded.
+fn signal(pid: u32, sig: &str) -> bool {
     Command::new("kill")
-        .args(["-0", &pid.to_string()])
+        .args([sig, &pid.to_string()])
         .stderr(Stdio::null())
         .status()
         .is_ok_and(|s| s.success())
+}
+
+/// SIGINT, up to `grace` to exit, then SIGKILL and up to `after_kill`: an
+/// error if the process is still there, so a wipe never runs under a live
+/// node (issue #145, O-01).
+fn stop_pid(
+    pid: u32,
+    grace: Duration,
+    after_kill: Duration,
+    signal: impl Fn(u32, &str) -> bool,
+    alive: impl Fn(u32) -> bool,
+) -> Result<()> {
+    let wait = |d: Duration| {
+        let deadline = Instant::now() + d;
+        while alive(pid) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        !alive(pid)
+    };
+    if !alive(pid) {
+        return Ok(());
+    }
+    let int = signal(pid, "-INT");
+    if wait(grace) {
+        return Ok(());
+    }
+    let kill = signal(pid, "-KILL");
+    if wait(after_kill) {
+        return Ok(());
+    }
+    bail!(
+        "process {pid} is still running after SIGINT ({}) and SIGKILL ({})",
+        if int { "sent" } else { "not sent" },
+        if kill { "sent" } else { "not sent" }
+    )
 }
 
 impl Local {
@@ -346,25 +404,19 @@ impl Local {
         Ok(())
     }
 
-    /// Stops `node`: SIGINT, then SIGKILL after 15 s.
+    /// Stops `node`: SIGINT, then SIGKILL after 15 s; fails if it lives on.
     pub fn stop(&self, node: &str) -> Result<()> {
         let Some(pid) = self.pid(node) else {
             return Ok(());
         };
-        if alive(pid) {
-            let _ = Command::new("kill")
-                .args(["-INT", &pid.to_string()])
-                .status();
-            let deadline = Instant::now() + Duration::from_secs(15);
-            while alive(pid) && Instant::now() < deadline {
-                std::thread::sleep(Duration::from_millis(200));
-            }
-            if alive(pid) {
-                let _ = Command::new("kill")
-                    .args(["-KILL", &pid.to_string()])
-                    .status();
-            }
-        }
+        stop_pid(
+            pid,
+            Duration::from_secs(15),
+            Duration::from_secs(5),
+            signal,
+            alive,
+        )
+        .with_context(|| format!("stopping {node}"))?;
         let _ = std::fs::remove_file(self.pid_file(node));
         let _ = std::fs::remove_file(self.started_file(node));
         Ok(())
@@ -597,6 +649,84 @@ fn rotate_log(path: &Path, max: u64, keep: u32) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::{Cell, RefCell};
+
+    #[test]
+    fn a_stop_fails_while_the_process_lives() {
+        let ms = Duration::from_millis;
+        // Signals that fail and a process that never exits: an error.
+        let sent = RefCell::new(Vec::new());
+        let r = stop_pid(
+            7,
+            ms(20),
+            ms(20),
+            |_, s| {
+                sent.borrow_mut().push(s.to_string());
+                false
+            },
+            |_| true,
+        );
+        let e = format!("{:#}", r.unwrap_err());
+        assert!(e.contains("still running") && e.contains("not sent"), "{e}");
+        assert_eq!(*sent.borrow(), ["-INT", "-KILL"]);
+
+        // Exits on SIGINT: no SIGKILL.
+        let up = Cell::new(true);
+        let sent = RefCell::new(Vec::new());
+        stop_pid(
+            7,
+            ms(500),
+            ms(20),
+            |_, s| {
+                sent.borrow_mut().push(s.to_string());
+                up.set(false);
+                true
+            },
+            |_| up.get(),
+        )
+        .unwrap();
+        assert_eq!(*sent.borrow(), ["-INT"]);
+
+        // Ignores SIGINT, dies on SIGKILL.
+        let up = Cell::new(true);
+        stop_pid(
+            7,
+            ms(20),
+            ms(500),
+            |_, s| {
+                if s == "-KILL" {
+                    up.set(false);
+                }
+                true
+            },
+            |_| up.get(),
+        )
+        .unwrap();
+
+        // Already gone: nothing is sent.
+        stop_pid(7, ms(20), ms(20), |_, _| panic!("signalled"), |_| false).unwrap();
+    }
+
+    #[test]
+    fn a_real_process_that_ignores_sigint_is_killed() {
+        let mut child = Command::new("sh")
+            .args(["-c", "trap '' INT; sleep 30"])
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        std::thread::sleep(Duration::from_millis(100));
+        stop_pid(
+            pid,
+            Duration::from_millis(200),
+            Duration::from_secs(5),
+            signal,
+            alive,
+        )
+        .unwrap();
+        // Killed, and left unreaped by this process: a zombie counts as gone.
+        assert!(!alive(pid));
+        let _ = child.wait();
+    }
 
     #[test]
     fn a_big_log_rotates_and_the_oldest_goes() {

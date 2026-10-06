@@ -45,6 +45,7 @@ provider = "local"                 # or "ssh"
 - `host = { provider, address, transport, project, zone, public_url, root, private_address, namespace, runtime }` (or `hosts`, [below](./hosts.md#several-hosts)):
   - `address` is `user@host` for ssh, or the VM name with `transport = "gcloud-iap"`;
   - `public_url` is where the lane's API is served, and the user commands use it;
+  - `root` is a directory the lane owns on the host, `/opt/caravel` by default. `apply` replaces its `bin/`, and `destroy --wipe` empties its `data/`. So it must be an absolute path at least two levels deep, with no `.` or `..` part, and outside `/bin`, `/etc`, `/usr` and the other system directories;
   - `runtime` is how the nodes run: `"process"` (the `local` default), `"systemd"` (the `ssh` default) or `"docker"`, [below](#containers).
 
 ### Containers

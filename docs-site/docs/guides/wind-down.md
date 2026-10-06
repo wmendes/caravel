@@ -14,7 +14,7 @@ caravel destroy --env testnet
 4. **Trigger, then wait** out the forced-withdrawal window, so the contract allows a freeze.
 5. **Freeze**, so users withdraw on Stellar with their proofs.
 
-Without `--yes`, destroy asks you to type the lane's name. **A frozen lane can't be restarted.** The validators keep serving proofs unless you pass `--stop-validators`, and `--pay-out` claims every exit for its owner.
+Without `--yes`, destroy asks you to type the lane's name. **A frozen lane can't be restarted.** The validators keep serving proofs unless you pass `--stop-validators`, and `--pay-out` claims every exit for its owner. `--wipe` empties each host's `data/` only once every node there is confirmed stopped: a unit systemd still reports running, a container still there, or a process still alive stops the destroy first.
 
 After the freeze, each user runs `caravel escape <identity>`. It needs only the lane file and the admin's public key, and takes the proof from `exit.json`, a validator, or a replay from Stellar.
 

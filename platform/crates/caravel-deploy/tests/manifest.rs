@@ -240,6 +240,16 @@ fn every_rule_is_checked() {
             "root = \"/opt/x;rm\"\npublic_url",
             "absolute path",
         ),
+        ("public_url", "root = \"/.\"\npublic_url", "absolute path"),
+        ("public_url", "root = \"/opt/.\"\npublic_url", "absolute path"),
+        ("public_url", "root = \"//opt\"\npublic_url", "absolute path"),
+        ("public_url", "root = \"/opt\"\npublic_url", "absolute path"),
+        (
+            "public_url",
+            "root = \"/usr/local/caravel\"\npublic_url",
+            "absolute path",
+        ),
+        ("public_url", "root = \"/run/x\"\npublic_url", "absolute path"),
         (
             "admin = \"demo-admin\"",
             "admin = \"demo-admin\"\nsettlement = \"CXYZ\"",
