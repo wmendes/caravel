@@ -138,6 +138,46 @@ fn restart_resumes_from_sqlite() {
         .any(|a| a.key == pk(seeds::C)));
 }
 
+/// Issue #145, R-01: the block that seals a checkpoint and the checkpoint's
+/// row commit together. A failure at the row (a trigger standing in for a
+/// crash between the two) leaves the store at the block before, the core
+/// produces the block again, and a restart finds every checkpoint it needs.
+#[test]
+fn a_checkpoint_commits_with_its_block() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("lane.sqlite");
+    let (state, config_hash) = genesis();
+    let open = || Store::open(&path, &config().lane_id, &config_hash, &state).unwrap();
+    let raw = rusqlite::Connection::open(&path).unwrap();
+
+    let mut t = T::with(Executor::Native, open());
+    busy_lane(&mut t, 19);
+    raw.execute_batch("CREATE TRIGGER fail BEFORE INSERT ON checkpoints BEGIN SELECT RAISE(ABORT, 'injected'); END;")
+        .unwrap();
+    assert!(t.core.produce_block(t.now).is_err());
+    assert_eq!(t.core.height(), 19, "memory did not move");
+    assert_eq!(t.core.store().tip().unwrap(), 19, "nor did the store");
+    assert!(t.core.store().snapshot_at(20).unwrap().is_none());
+    let (hash, now) = (t.core.state_hash(), t.now);
+    drop(t);
+
+    // Restarted with the row still failing: the store opens at 19.
+    let mut t = T::with(Executor::Native, open());
+    assert_eq!((t.core.height(), t.core.state_hash()), (19, hash));
+    t.now = now;
+    raw.execute_batch("DROP TRIGGER fail;").unwrap();
+    let p = t.block();
+    let row = p.checkpoint.expect("block 20 seals checkpoint 2");
+    assert_eq!((row.seq, row.first_height, row.last_height), (2, 11, 20));
+    drop(t);
+
+    let t = T::with(Executor::Native, open());
+    assert_eq!(t.core.height(), 20);
+    let (replayed, headers) = replay(t.core.store(), 20);
+    assert_eq!(replayed, t.core.state_hash());
+    assert_eq!(headers[1].encode().to_vec(), row.header);
+}
+
 /// A lazy head (F-07): stopped anywhere, the sequencer resumes at the same
 /// height and state by re-executing the blocks after its head, writes the
 /// head again, and goes on sealing the same checkpoints.

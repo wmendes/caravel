@@ -280,32 +280,45 @@ impl<A: LaneApp> Follower<A> {
         } else {
             Vec::new()
         };
-        // 4. Persist (our own receipts), then any flags.
+        // 4. Persist (our own receipts) with our checkpoint, if the block
+        // seals one, and any flags: one transaction, so a crash keeps all of
+        // the block or none of it, and memory moves only once it committed
+        // (issue #145, R-02, R-03).
         let own = BlockRecordV1 {
             input: record.input.clone(),
             state_hash_after: state_hash,
         };
-        let seq = input.checkpoint_end.then_some(new_frame.checkpoint_seq);
         self.perf.record("decode", t_decode.elapsed());
+        let row = if input.checkpoint_end {
+            let t_ck = std::time::Instant::now();
+            let row = self.compute_checkpoint(height, &own, &out.receipts, &out.state)?;
+            if row.seq != new_frame.checkpoint_seq {
+                return Err(FollowError::Store("checkpoint seq".into()));
+            }
+            self.perf.record("checkpoint", t_ck.elapsed());
+            Some(row)
+        } else {
+            None
+        };
         let t_commit = std::time::Instant::now();
-        self.store
-            .commit_block(height, &own, &out.receipts, &out.state, seq)?;
+        self.store.commit_block(
+            height,
+            &own,
+            &out.receipts,
+            &out.state,
+            row.as_ref(),
+            &flags,
+        )?;
         self.perf.record("commit", t_commit.elapsed());
-        for f in &flags {
-            self.store.flag_block(height, f)?;
-        }
         self.prev_block_hash = block_hash(&own);
         self.state_bytes = out.state;
         self.state = Arc::new(new_state);
         self.frame = new_frame;
-        let checkpoint = if input.checkpoint_end {
-            let t_ck = std::time::Instant::now();
-            let seq = self.compute_checkpoint(height)?;
-            self.perf.record("checkpoint", t_ck.elapsed());
-            Some(seq)
-        } else {
-            None
-        };
+        let checkpoint = row.map(|row| {
+            self.last_header_hash = sha256(&row.header);
+            self.batch_start = height + 1;
+            row.seq
+        });
         Ok(Applied {
             height,
             flags,
@@ -313,17 +326,22 @@ impl<A: LaneApp> Follower<A> {
         })
     }
 
-    /// Builds our own header and batch for the checkpoint `height` sealed.
-    fn compute_checkpoint(&mut self, height: u64) -> Result<u64, FollowError> {
-        let blocks = self.store.blocks(self.batch_start, height)?;
+    /// Builds our own header and batch for the checkpoint block `height`
+    /// (not stored yet) seals: the open batch from the store, then that
+    /// block, against `state`, the state it produced.
+    fn compute_checkpoint(
+        &self,
+        height: u64,
+        record: &BlockRecordV1,
+        receipts: &[u8],
+        state: &[u8],
+    ) -> Result<CheckpointRow, FollowError> {
+        let mut blocks = self.store.blocks(self.batch_start, height - 1)?;
+        blocks.push((record.clone(), receipts.to_vec()));
         let records: Vec<BlockRecordV1> = blocks.iter().map(|(r, _)| r.clone()).collect();
-        let (batch, header) = checkpoint::assemble(
-            &self.ids,
-            self.last_header_hash,
-            &records,
-            &self.state_bytes,
-        )
-        .map_err(|e| FollowError::Store(format!("assembling checkpoint: {e:?}")))?;
+        let (batch, header) =
+            checkpoint::assemble(&self.ids, self.last_header_hash, &records, state)
+                .map_err(|e| FollowError::Store(format!("assembling checkpoint: {e:?}")))?;
         let decoded: Vec<(BlockRecordV1, ReceiptsV1)> = blocks
             .into_iter()
             .map(|(r, rc)| {
@@ -334,10 +352,9 @@ impl<A: LaneApp> Follower<A> {
             .collect::<Result<_, _>>()?;
         let leaves = checkpoint::withdrawal_leaves(&header, &decoded)
             .map_err(|_| FollowError::Store("withdrawal leaves".into()))?;
-        let header_bytes = header.encode();
-        self.store.insert_checkpoint(&CheckpointRow {
+        Ok(CheckpointRow {
             seq: header.seq,
-            header: header_bytes.to_vec(),
+            header: header.encode().to_vec(),
             batch_len: batch.len(),
             batch,
             first_height: self.batch_start,
@@ -348,10 +365,7 @@ impl<A: LaneApp> Follower<A> {
             sigs: None,
             stellar_tx_hash: None,
             stellar_ledger: None,
-        })?;
-        self.last_header_hash = sha256(&header_bytes);
-        self.batch_start = height + 1;
-        Ok(header.seq)
+        })
     }
 
     /// `POST /v1/sign`: signs `H(header)` only if header and batch are
