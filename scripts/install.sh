@@ -156,6 +156,37 @@ stellar_cli() {
   fi
 }
 
+# gh attestation verify, with this release's identity; prints only gh's errors.
+gh_verify() {
+  gh attestation verify "$1" --bundle "$2" --repo "$REPO" \
+    --signer-workflow "$REPO/.github/workflows/release.yml" --source-ref "refs/tags/$VERSION" 2>&1 > /dev/null
+}
+
+# The archive and IMAGES against the release's signed attestation (A-08,
+# DEC-131): SLSA provenance from this repository's release workflow at this
+# tag, signed through Sigstore. `gh attestation verify --bundle` checks it
+# without a GitHub login. Without gh the checksums still hold, and
+# CARAVEL_REQUIRE_SIGNATURE=1 makes a missing check an error.
+verify_attestation() {
+  local bundle="$DL/caravel.sigstore.json" f
+  if [[ ! -f "$bundle" ]]; then
+    [[ "${CARAVEL_REQUIRE_SIGNATURE:-0}" != 1 ]] || fail "$VERSION has no signed attestation (releases before 0.4.3)"
+    return 0
+  fi
+  if ! command -v gh > /dev/null; then
+    [[ "${CARAVEL_REQUIRE_SIGNATURE:-0}" != 1 ]] || fail "checking the release's signature needs the GitHub CLI (gh)"
+    echo "install: note: the checksums match; install the GitHub CLI (gh) to check the release's signature too" >&2
+    return 0
+  fi
+  for f in "$DL/$NAME" ${IMAGES_SIGNED:+"$DL/IMAGES"}; do
+    # Twice: gh fetches Sigstore's trusted root, which can fail on a bad network.
+    if ! gh_verify "$f" "$bundle" > /dev/null && ! why="$(gh_verify "$f" "$bundle")"; then
+      fail "$(basename "$f") does not match the release's signed attestation: $(printf '%s\n' "$why" | grep -m1 -i error)"
+    fi
+  done
+  echo "Signed by $REPO's release workflow at $VERSION (gh attestation verify)."
+}
+
 # What to run now, and in this shell first if PATH changed only for new ones.
 next_steps() {
   if [[ "$ON_PATH" == 0 && "$MODIFY_PATH" == 1 ]]; then
@@ -189,6 +220,8 @@ if [[ -z "$ARCHIVE" && ( -z "$ROOT" || "$RELEASE" == 1 ) ]]; then
   grep "  $NAME\$" "$DL/SHA256SUMS" > "$DL/$NAME.sha256" || fail "$NAME is not in the release's SHA256SUMS"
   # The release's container images by digest (D-01): releases before M0.8 have none.
   curl -fsSL -o "$DL/IMAGES" "$BASE/IMAGES" 2> /dev/null || rm -f "$DL/IMAGES"
+  # The release's signed attestation (A-08): releases before 0.4.3 have none.
+  curl -fsSL -o "$DL/caravel.sigstore.json" "$BASE/caravel.sigstore.json" 2> /dev/null || rm -f "$DL/caravel.sigstore.json"
   ARCHIVE="$DL/$NAME"
 fi
 
@@ -214,11 +247,13 @@ if [[ -n "$ARCHIVE" ]]; then
     # IMAGES is in the release's SHA256SUMS from 0.4.2 (issue #145, O-02).
     images_sum="$(awk '$2 == "IMAGES" { print $1 }' "$DL/SHA256SUMS")"
     if [[ -n "$images_sum" ]]; then
+      IMAGES_SIGNED=1
       [[ -f "$DL/IMAGES" ]] || fail "downloading $BASE/IMAGES failed"
       [[ "$("${SHA256[@]}" "$DL/IMAGES" | awk '{print $1}')" == "$images_sum" ]] || fail "IMAGES does not match the release's SHA256SUMS"
     elif [[ -f "$DL/IMAGES" ]]; then
       echo "install: note: this release's SHA256SUMS does not list IMAGES (releases before 0.4.2), so its image refs are used unchecked" >&2
     fi
+    verify_attestation
     if [[ -f "$DL/IMAGES" ]]; then cp "$DL/IMAGES" "$dir/IMAGES"; fi
   fi
   [[ "$STELLAR_CLI" == 1 ]] && stellar_cli
