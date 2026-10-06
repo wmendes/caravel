@@ -39,3 +39,5 @@ Every other command works the same: `plan` restarts only the nodes whose configs
 ## Where the images come from
 
 A release names its images in an `IMAGES` file: one per node template (`caravel-perps-node`, `caravel-payments-node`), the relayer (`caravel-relayer`) and each web app (`caravel-perps-web`), on `ghcr.io`. Releases from CI and from `install.sh` carry it. To run your own changes, build a release from your checkout and package it: `scripts/assemble-release.sh <dir>` on Linux, or `scripts/build-linux-release.sh <dir>` anywhere with Docker (it builds the binaries in the pinned Rust image, for your Docker's architecture), then `scripts/build-images.sh <dir>`, which builds the images and writes the file. Give `caravel` that release with `--release-dir <dir>`.
+
+Each deploy keeps the host's disk in check: once it has pulled the new release's images, it removes the lane's older ones, except those of the release the nodes were running, so a rollback needs no download. Images you built yourself, and Caddy's, are never removed.
