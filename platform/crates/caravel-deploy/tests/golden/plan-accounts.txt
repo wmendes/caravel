@@ -11,7 +11,7 @@ Lane demo-pay-0 · env local · network local
 + mint      100 USDC to alice (by its issuer, demo-admin)  account.alice
 + fund      bob GDRO…FJ2X (friendbot)       account.bob
 + trust     bob USDC:GCQK…AGP5              account.bob
-+ upload    settlement Wasm ffddd99e…       wasm.settlement
++ upload    settlement Wasm 603a413d…       wasm.settlement
 + deploy    settlement CC3UKZIZZ2LOLG6ZXQ3UNAEAP5JSCTWSSU4X33RU3VIAJMYUDZCSC6D4  contract.settlement
 + release   0a1b2c3d                        release
 ~ write     lane.toml                       file.lane.toml

@@ -5,7 +5,7 @@ Lane demo-pay-0 · env local · network testnet
 
 + fund      admin GCQK…AGP5 (friendbot)     account.admin
 + fund      relayer GCQ2…DJX7 (friendbot)   account.relayer
-+ upload    settlement Wasm ffddd99e…       wasm.settlement
++ upload    settlement Wasm 603a413d…       wasm.settlement
 + deploy    settlement CC3UKZIZZ2LOLG6ZXQ3UNAEAP5JSCTWSSU4X33RU3VIAJMYUDZCSC6D4  contract.settlement
 - wipe      the host's lane data (it belongs to a contract that is gone)  host.data
 ~ restart   validator-1                     node.validator-1

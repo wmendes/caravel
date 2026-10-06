@@ -36,3 +36,4 @@ pub mod state;
 pub mod step;
 pub mod tags;
 pub mod tx;
+pub mod wide;

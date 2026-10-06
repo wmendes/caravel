@@ -237,12 +237,12 @@ fn wide_payout_matches_the_hosts_i256() {
                 .div(&soroban_sdk::I256::from_i128(&env, c))
                 .to_i128();
             assert_eq!(
-                caravel_core::fixed::mul_div_floor_wide(a, b, c).ok(),
+                caravel_core::wide::mul_div_floor(a, b, c).ok(),
                 host,
                 "{a} × {b} / {c}"
             );
         }
-        assert!(caravel_core::fixed::mul_div_floor_wide(a, num, den).is_ok());
+        assert!(caravel_core::wide::mul_div_floor(a, num, den).is_ok());
     }
 }
 

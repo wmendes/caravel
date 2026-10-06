@@ -1363,7 +1363,7 @@ impl Flows {
         let expected = if freeze.payout_den <= 0 || freeze.payout_num <= 0 || equity <= 0 {
             0
         } else {
-            caravel_core::fixed::mul_div_floor_wide(equity, freeze.payout_num, freeze.payout_den)
+            caravel_core::wide::mul_div_floor(equity, freeze.payout_num, freeze.payout_den)
                 .map_err(|_| {
                     anyhow!(
                         "the escape payout does not compute (equity {equity}, payout {}/{}): the contract refuses the claim",

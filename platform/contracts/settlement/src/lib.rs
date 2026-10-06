@@ -18,12 +18,12 @@ pub mod types;
 use alloc::vec::Vec as AllocVec;
 
 use caravel_core::checkpoint::{CheckpointHeaderV1, CHECKPOINT_HEADER_LEN};
-use caravel_core::fixed::mul_div_floor_wide;
 use caravel_core::inbox::{inbox_acc_preimage, InboxKind, InboxMsgV1};
 use caravel_core::merkle::SorobanSha256;
 use caravel_core::preimage::{
     account_leaf_preimage, rotate_message_preimage, withdrawal_leaf_preimage,
 };
+use caravel_core::wide;
 use soroban_sdk::token::TokenClient;
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
@@ -637,7 +637,7 @@ impl Settlement {
         } else {
             or_panic(
                 &env,
-                mul_div_floor_wide(equity, frozen.payout_num, frozen.payout_den)
+                wide::mul_div_floor(equity, frozen.payout_num, frozen.payout_den)
                     .map_err(|_| Error::PayoutOverflow),
             )
         };
