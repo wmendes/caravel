@@ -13,6 +13,7 @@ caravel destroy --env testnet
 3. **Export** every account's exit proof to `exit.json`.
 4. **Trigger, then wait** out the forced-withdrawal window, so the contract allows a freeze.
 5. **Freeze**, so users withdraw on Stellar with their proofs.
+6. **Check** `exit.json` against the checkpoint the freeze fixed. A checkpoint already sent can land after the export, so destroy reads Stellar's last checkpoint again and exports once more if the file is for another. Until it matches, nothing is paid out or wiped. Running destroy on a frozen lane runs the same check.
 
 Without `--yes`, destroy asks you to type the lane's name. **A frozen lane can't be restarted.** The validators keep serving proofs unless you pass `--stop-validators`, and `--pay-out` claims every exit for its owner. `--wipe` empties each host's `data/` only once every node there is confirmed stopped: a unit systemd still reports running, a container still there, or a process still alive stops the destroy first.
 

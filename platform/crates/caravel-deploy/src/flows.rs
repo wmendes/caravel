@@ -154,6 +154,33 @@ fn num(v: &Value) -> Option<u64> {
         .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
 }
 
+/// `exit.json` as JSON.
+pub fn read_exit(path: &std::path::Path) -> std::result::Result<Value, String> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .ok_or_else(|| format!("{} doesn't read as JSON", path.display()))
+}
+
+/// Whether an `exit.json` holds the proofs of Stellar's last checkpoint
+/// `last` (seq and header hash): the only one escapes are proven against
+/// after a freeze. `Err` says what it is for instead.
+pub fn exit_matches(e: &Value, last: (u64, [u8; 32])) -> std::result::Result<(), String> {
+    let seq = num(&e["seq"]);
+    let hash = e["header_hash"].as_str().unwrap_or_default();
+    let want = caravel_runtime::sequencer::hex(&last.1);
+    if seq == Some(last.0) && hash == want {
+        return Ok(());
+    }
+    Err(format!(
+        "is for checkpoint {} ({}), Stellar's last is {} ({})",
+        seq.map_or("?".into(), |s| s.to_string()),
+        hash.get(..16).unwrap_or(hash),
+        last.0,
+        &want[..16]
+    ))
+}
+
 /// One withdrawal leaf of an accepted checkpoint (`/v1/proofs/withdrawals`,
 /// `exit.json`).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1176,24 +1203,10 @@ impl Flows {
         let Some(path) = self.exit_file.as_ref().filter(|p| p.exists()) else {
             return Ok(None);
         };
-        let e: Value = std::fs::read_to_string(path)
-            .ok()
-            .and_then(|t| serde_json::from_str(&t).ok())
-            .ok_or_else(|| format!("{} doesn't read as JSON", path.display()))?;
-        let seq = num(&e["seq"]);
-        let hash = e["header_hash"].as_str().unwrap_or_default();
-        let want = caravel_runtime::sequencer::hex(&last.1);
-        if seq == Some(last.0) && hash == want {
-            return Ok(Some(e));
-        }
-        Err(format!(
-            "{} is for checkpoint {} ({}), Stellar's last is {} ({})",
-            path.display(),
-            seq.map_or("?".into(), |s| s.to_string()),
-            hash.get(..16).unwrap_or(hash),
-            last.0,
-            &want[..16]
-        ))
+        let e = read_exit(path)?;
+        exit_matches(&e, last)
+            .map(|()| Some(e))
+            .map_err(|why| format!("{} {why}", path.display()))
     }
 
     async fn escape_claimed(&self, who: &Key) -> Result<bool> {
@@ -1497,6 +1510,34 @@ async fn processed(api: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_exit_file_counts_only_for_stellars_last_checkpoint() {
+        let hash = [0xab; 32];
+        let hex = caravel_runtime::sequencer::hex(&hash);
+        let e = serde_json::json!({ "seq": "7", "header_hash": hex });
+        assert_eq!(exit_matches(&e, (7, hash)), Ok(()));
+        assert_eq!(
+            exit_matches(
+                &serde_json::json!({ "seq": 7, "header_hash": hex }),
+                (7, hash)
+            ),
+            Ok(())
+        );
+        // A checkpoint landed after the export: the freeze fixed seq 8.
+        let late = exit_matches(&e, (8, [0xcd; 32])).unwrap_err();
+        assert!(
+            late.contains("checkpoint 7") && late.contains("last is 8"),
+            "{late}"
+        );
+        // Same seq, another header (a redeployed lane's file).
+        assert!(exit_matches(&e, (7, [0xcd; 32])).is_err());
+        assert!(exit_matches(&serde_json::json!({}), (7, hash)).is_err());
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("exit.json");
+        std::fs::write(&p, "not json").unwrap();
+        assert!(read_exit(&p).unwrap_err().contains("doesn't read as JSON"));
+    }
 
     #[test]
     fn units() {
