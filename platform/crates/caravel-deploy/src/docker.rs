@@ -100,6 +100,22 @@ fn image_lines(d: &str, template: &str, images: &BTreeMap<String, String>) -> St
     script + &prune
 }
 
+/// Removes a compose service's containers, then checks none is left: a
+/// failed `docker ps` or `docker rm` fails the stop, so a wipe never runs
+/// under a live container (issue #145, O-01).
+fn stop_script(d: &str, s: &str, project: &str, node: &str, root: &str) -> String {
+    let ps = format!(
+        "{d} ps -aq --filter label=com.docker.compose.project={p} --filter label=com.docker.compose.service={n}",
+        p = q(project),
+        n = q(node)
+    );
+    format!(
+        "set -e; ids=$({ps}); [ -z \"$ids\" ] || {d} rm -f $ids >/dev/null; left=$({ps}); if [ -n \"$left\" ]; then echo \"the {node} container is still there\" >&2; exit 1; fi; {s}rm -f {r}/run/{f}",
+        r = q(root),
+        f = q(&format!("{node}.started")),
+    )
+}
+
 /// An image ref that names a registry (pullable), not a local build's tag.
 fn pullable(image: &str) -> bool {
     image.contains('@')
@@ -437,30 +453,21 @@ impl Docker {
     /// Removes a node's container, also one the compose file no longer names.
     pub fn stop(&self, node: &str) -> Result<()> {
         self.exec(
-            &format!(
-                "ids=$({d} ps -aq --filter label=com.docker.compose.project={p} --filter label=com.docker.compose.service={n}); [ -z \"$ids\" ] || {d} rm -f $ids >/dev/null; {s}rm -f {r}/run/{f}",
-                d = self.docker(),
-                p = q(&self.project),
-                n = q(node),
-                s = self.s(),
-                r = q(&self.root),
-                f = q(&format!("{node}.started")),
-            ),
+            &stop_script(self.docker(), self.s(), &self.project, node, &self.root),
             b"",
         )
         .map(|_| ())
     }
 
+    /// Removes `nodes`' containers and the web's, each verified, then
+    /// empties `<root>/data`.
     pub fn wipe(&self, nodes: &[String]) -> Result<()> {
         for n in nodes {
             self.stop(n)?;
         }
         self.stop("web")?;
-        self.exec(
-            &format!("{}sh -c 'rm -rf -- {}/data/*'", self.s(), self.root),
-            b"",
-        )
-        .map(|_| ())
+        self.exec(&crate::ssh::wipe_script(self.s(), &self.root), b"")
+            .map(|_| ())
     }
 
     /// `export-proofs` in a one-off container of the validator's image.
@@ -649,6 +656,40 @@ mod tests {
                 .all(|l| l.ends_with("|| true; done")),
             "{s}"
         );
+    }
+
+    #[test]
+    fn a_stop_fails_unless_the_container_is_gone() {
+        use crate::ssh::fakes;
+        // `docker ps` answers from a file the fake `rm` empties, or not.
+        let cases = [
+            ("rm works", "rm) : > ids ;;", true),
+            ("rm fails", "rm) exit 1 ;;", false),
+            ("rm says yes, the container stays", "rm) exit 0 ;;", false),
+            ("ps fails", "ps) exit 1 ;; rm) : > ids ;;", false),
+        ];
+        for (what, arms, ok) in cases {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("lane");
+            std::fs::create_dir_all(root.join("run")).unwrap();
+            std::fs::create_dir_all(root.join("data")).unwrap();
+            std::fs::write(root.join("run/sequencer.started"), b"x").unwrap();
+            std::fs::write(root.join("data/store.sqlite"), b"x").unwrap();
+            std::fs::write(dir.path().join("ids"), "c0ffee\n").unwrap();
+            let docker = format!("case \"$1\" in {arms} ps) cat ids ;; esac");
+            let r = root.to_str().unwrap();
+            let script = format!(
+                "{} && {}",
+                stop_script("sudo docker", "sudo ", "pay-dev", "sequencer", r),
+                crate::ssh::wipe_script("sudo ", r)
+            );
+            let (success, calls, err) =
+                fakes::run(dir.path(), &script, &[fakes::SUDO, ("docker", &docker)]);
+            assert_eq!(success, ok, "{what}: {calls} {err}");
+            assert_eq!(root.join("data/store.sqlite").exists(), !ok, "{what}");
+            assert_eq!(root.join("run/sequencer.started").exists(), !ok, "{what}");
+            assert!(calls.contains("docker ps -aq --filter label=com.docker.compose.project=pay-dev --filter label=com.docker.compose.service=sequencer"), "{calls}");
+        }
     }
 
     #[test]

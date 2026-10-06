@@ -281,6 +281,27 @@ pub struct HostSpec {
     pub runtime: Option<Runtime>,
 }
 
+/// A host's root goes into shell commands on the host: `rm -rf <root>/data/*`,
+/// `rsync --delete` into `<root>/bin`, `chown` of `<root>/run`. So it is a
+/// plain, normalized absolute path at least two levels deep, outside the
+/// system trees: `/.` or `/usr/local` never pass (issue #145, O-04).
+pub fn root_ok(root: &str) -> bool {
+    const SYSTEM: [&str; 12] = [
+        "bin", "boot", "dev", "etc", "lib", "lib32", "lib64", "proc", "run", "sbin", "sys", "usr",
+    ];
+    let Some(rest) = root.strip_prefix('/') else {
+        return false;
+    };
+    let segs: Vec<&str> = rest.split('/').collect();
+    root.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '-' | '.'))
+        && segs.len() >= 2
+        && segs
+            .iter()
+            .all(|s| !s.is_empty() && *s != "." && *s != "..")
+        && !SYSTEM.contains(&segs[0])
+}
+
 fn default_root() -> String {
     "/opt/caravel".into()
 }
@@ -1507,18 +1528,9 @@ fn host_problems(at: &str, h: &HostSpec) -> Vec<String> {
                 )),
             _ => {}
         }
-        // The root goes into shell commands on the host (`rm -rf <root>/data/*`
-        // among them), so it is a plain absolute path, never `/` itself.
-        let plain = h.root.starts_with('/')
-            && h.root.len() > 1
-            && !h.root.ends_with('/')
-            && h.root
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '_' | '-' | '.'))
-            && !h.root.split('/').any(|seg| seg == "..");
-        if !plain {
+        if !root_ok(&h.root) {
             p.push(format!(
-                "{at}.root = {:?}: an absolute path of letters, digits, '/', '_', '-', '.', not / itself",
+                "{at}.root = {:?}: a directory caravel owns (it replaces its bin/ and empties its data/), as an absolute path at least two levels deep like /opt/caravel, of letters, digits, '/', '_', '-', '.', with no empty, '.' or '..' part, outside /bin, /etc, /usr and the other system directories",
                 h.root
             ));
         }

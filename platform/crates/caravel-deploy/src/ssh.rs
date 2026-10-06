@@ -500,25 +500,18 @@ impl Ssh {
         .map(|_| ())
     }
 
+    /// Stops `node`'s unit, and fails unless systemd then reports it stopped.
     pub fn stop(&self, node: &str) -> Result<()> {
-        self.exec(
-            &format!(
-                "sudo systemctl disable --now {} >/dev/null 2>&1 || true; sudo rm -f {r}/run/{}",
-                q(&self.unit(node)),
-                q(&format!("{node}.started")),
-                r = q(&self.root)
-            ),
-            b"",
-        )
-        .map(|_| ())
+        self.exec(&stop_script(&self.unit(node), &self.root, node), b"")
+            .map(|_| ())
     }
 
+    /// Stops `nodes`, each verified, then empties `<root>/data`.
     pub fn wipe(&self, nodes: &[String]) -> Result<()> {
         for n in nodes {
             self.stop(n)?;
         }
-        // The root is a plain absolute path (the manifest checks it).
-        self.exec(&format!("sudo sh -c 'rm -rf -- {}/data/*'", self.root), b"")
+        self.exec(&wipe_script("sudo ", &self.root), b"")
             .map(|_| ())
     }
 
@@ -657,6 +650,76 @@ fn copy_dir(from: &Path, to: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Disables and stops `unit`, then checks systemd's view of it: anything
+/// but `inactive` or `failed` (an unknown unit reads `inactive`) fails, so
+/// a wipe never runs under a live node (issue #145, O-01).
+fn stop_script(unit: &str, root: &str, node: &str) -> String {
+    format!(
+        "set -e; sudo systemctl disable --now {u} >/dev/null 2>&1 || true; s=$(systemctl show -p ActiveState --value {u}); case \"$s\" in inactive|failed) ;; *) echo \"{unit} did not stop: it is $s\" >&2; exit 1 ;; esac; sudo rm -f {r}/run/{f}",
+        u = q(unit),
+        r = q(root),
+        f = q(&format!("{node}.started")),
+    )
+}
+
+/// Empties `<root>/data`, the root passed as an argument rather than spliced
+/// into the script. A missing root has nothing to wipe; one that resolves to
+/// `/`, or a `data` that is a link, is refused (issue #145, O-04).
+pub(crate) fn wipe_script(sudo: &str, root: &str) -> String {
+    format!(
+        "{sudo}sh -c 'cd -P -- \"$1\" 2>/dev/null || exit 0; if [ \"$(pwd -P)\" = / ] || [ -L data ]; then echo \"refusing to wipe $1/data: the root resolves to / or data is a link\" >&2; exit 1; fi; rm -rf -- data/*' sh {}",
+        q(root)
+    )
+}
+
+#[cfg(test)]
+pub(crate) mod fakes {
+    //! Runs host scripts with fake commands first on PATH, for fault tests.
+    use std::path::Path;
+    use std::process::Command;
+
+    /// Runs `script` under bash with each `(name, body)` as an executable
+    /// shell script; each call is logged as `name args…` in `calls.log`.
+    pub fn run(dir: &Path, script: &str, fakes: &[(&str, &str)]) -> (bool, String, String) {
+        let bin = dir.join("fakebin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let log = dir.join("calls.log");
+        for (name, body) in fakes {
+            let p = bin.join(name);
+            std::fs::write(
+                &p,
+                format!(
+                    "#!/bin/bash\necho \"{name} $*\" >> {}\n{body}\n",
+                    log.display()
+                ),
+            )
+            .unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let path = format!(
+            "{}:{}",
+            bin.display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        let out = Command::new("bash")
+            .arg("-c")
+            .arg(script)
+            .env("PATH", path)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        (
+            out.status.success(),
+            std::fs::read_to_string(&log).unwrap_or_default(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    }
+
+    /// `sudo` that runs its command.
+    pub const SUDO: (&str, &str) = ("sudo", "exec \"$@\"");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -678,5 +741,112 @@ mod tests {
             Some("/etc/caddy/caravel.d/pay.caddy")
         );
         assert_eq!(system_path("sequencer.toml"), None);
+    }
+
+    /// A lane root with a store, for the wipe tests.
+    fn root_with_data(dir: &std::path::Path) -> std::path::PathBuf {
+        let root = dir.join("lane");
+        std::fs::create_dir_all(root.join("data")).unwrap();
+        std::fs::create_dir_all(root.join("run")).unwrap();
+        std::fs::write(root.join("data/store.sqlite"), b"x").unwrap();
+        std::fs::write(root.join("run/sequencer.started"), b"x").unwrap();
+        root
+    }
+
+    #[test]
+    fn a_stop_fails_unless_systemd_says_the_unit_stopped() {
+        for (state, ok) in [
+            ("inactive", true),
+            ("failed", true),
+            ("active", false),
+            ("deactivating", false),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let root = root_with_data(dir.path());
+            let script = stop_script("caravel-sequencer", root.to_str().unwrap(), "sequencer");
+            // `disable --now` fails, as on a permission or D-Bus error.
+            let systemctl = format!("case \"$1\" in disable) exit 1 ;; show) echo {state} ;; esac");
+            let (success, calls, err) = fakes::run(
+                dir.path(),
+                &script,
+                &[fakes::SUDO, ("systemctl", &systemctl)],
+            );
+            assert_eq!(success, ok, "{state}: {calls} {err}");
+            assert!(calls.contains("systemctl show -p ActiveState --value caravel-sequencer"));
+            assert_eq!(root.join("run/sequencer.started").exists(), !ok, "{state}");
+            if !ok {
+                assert!(err.contains("did not stop"), "{err}");
+            }
+        }
+        // systemctl itself failing is a failed stop too.
+        let dir = tempfile::tempdir().unwrap();
+        let root = root_with_data(dir.path());
+        let script = stop_script("caravel-sequencer", root.to_str().unwrap(), "sequencer");
+        let (success, _, _) =
+            fakes::run(dir.path(), &script, &[fakes::SUDO, ("systemctl", "exit 1")]);
+        assert!(!success);
+    }
+
+    #[test]
+    fn a_wipe_runs_only_after_every_stop_and_never_on_slash() {
+        // A failed stop, then the wipe as `Ssh::wipe` chains them.
+        let dir = tempfile::tempdir().unwrap();
+        let root = root_with_data(dir.path());
+        let r = root.to_str().unwrap();
+        let systemctl = "case \"$1\" in show) echo active ;; esac";
+        let script = format!(
+            "{} && {}",
+            stop_script("u", r, "sequencer"),
+            wipe_script("sudo ", r)
+        );
+        let (success, _, _) = fakes::run(
+            dir.path(),
+            &script,
+            &[fakes::SUDO, ("systemctl", systemctl)],
+        );
+        assert!(!success);
+        assert!(root.join("data/store.sqlite").exists());
+
+        // A clean stop wipes `data/` and only that.
+        let systemctl = "case \"$1\" in show) echo inactive ;; esac";
+        let (success, _, err) = fakes::run(
+            dir.path(),
+            &script,
+            &[fakes::SUDO, ("systemctl", systemctl)],
+        );
+        assert!(success, "{err}");
+        assert!(root.join("data").is_dir());
+        assert!(!root.join("data/store.sqlite").exists());
+
+        // No root: nothing to wipe.
+        let (success, _, _) = fakes::run(dir.path(), &wipe_script("", &format!("{r}-gone")), &[]);
+        assert!(success);
+
+        // A root that resolves to /, or a data/ that is a link, is refused.
+        let up = dir.path().join("up");
+        std::os::unix::fs::symlink("/", &up).unwrap();
+        let (success, _, err) = fakes::run(dir.path(), &wipe_script("", up.to_str().unwrap()), &[]);
+        assert!(!success && err.contains("refusing"), "{err}");
+        let linked = dir.path().join("linked");
+        std::fs::create_dir_all(&linked).unwrap();
+        let elsewhere = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::write(elsewhere.join("keep"), b"x").unwrap();
+        std::os::unix::fs::symlink(&elsewhere, linked.join("data")).unwrap();
+        let (success, _, _) =
+            fakes::run(dir.path(), &wipe_script("", linked.to_str().unwrap()), &[]);
+        assert!(!success);
+        assert!(elsewhere.join("keep").exists());
+
+        // A root with a space or a quote stays one argument.
+        let odd = dir.path().join("a b'c");
+        std::fs::create_dir_all(odd.join("data")).unwrap();
+        std::fs::write(odd.join("data/s"), b"x").unwrap();
+        std::fs::write(dir.path().join("a"), b"keep").unwrap();
+        let (success, _, err) =
+            fakes::run(dir.path(), &wipe_script("", odd.to_str().unwrap()), &[]);
+        assert!(success, "{err}");
+        assert!(!odd.join("data/s").exists());
+        assert!(dir.path().join("a").exists());
     }
 }
