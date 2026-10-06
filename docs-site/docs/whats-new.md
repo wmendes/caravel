@@ -6,6 +6,7 @@ description: "Changes to Caravel, newest first."
 
 ## October 2026
 
+- **Caravel 0.4.3: signed releases.** Each release now carries a signed attestation of its archives and image list, made by the release workflow through GitHub and Sigstore. The installer checks it when the GitHub CLI is installed ([The release's signature](getting-started/install.md#the-releases-signature)). Caravel Perps' trading app also connects GHOSTSIG wallets on testnet; before, they were asked for an account on Stellar's public network.
 - **Caravel 0.4.2: fixes from a security review.** An AI agent's source audit ([#145](https://github.com/wmendes/caravel/issues/145)) found eight problems, and all are fixed:
   - **Escape payout.** A valid escape claim on a token with many decimals could pay 0 and use itself up, because `equity × payout` passed 128 bits before the division. New lanes' settlement contract computes the payout exactly, and refuses rather than pays 0. Lanes created before 0.4.2 on such a token should be recreated.
   - **Wipes.** `destroy --wipe` empties a host's data only once every node there is confirmed stopped.
