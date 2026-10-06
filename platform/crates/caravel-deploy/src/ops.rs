@@ -18,7 +18,7 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
 
 use crate::address::strkey;
@@ -370,7 +370,9 @@ impl Prepared {
             Err(why) => why,
         };
         eprintln!("→ {} {why}: export it again", exit.display());
-        self.export(exit).await?;
+        self.export(exit).await.with_context(|| {
+            format!("{} {why}, so nothing is paid out or wiped", exit.display())
+        })?;
         let e = crate::flows::read_exit(exit).map_err(|why| anyhow!(why))?;
         crate::flows::exit_matches(&e, last).map_err(|why| {
             anyhow!(
