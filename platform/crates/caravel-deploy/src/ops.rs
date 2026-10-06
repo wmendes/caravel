@@ -18,7 +18,7 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde_json::{json, Value};
 
 use crate::address::strkey;
@@ -280,12 +280,11 @@ impl Prepared {
                     Err(e) => return Err(e),
                 }
             }
+            self.checked_exit(&exit).await?;
             eprintln!("Frozen. Every account's exit is in {}.", exit.display());
         } else {
             eprintln!("The lane is already frozen.");
-            if !exit.exists() {
-                self.export(&exit).await?;
-            }
+            self.checked_exit(&exit).await?;
         }
         if o.pay_out {
             self.pay_out(&exit)?;
@@ -355,7 +354,45 @@ impl Prepared {
         }
     }
 
-    /// Claims every escape and withdrawal in `exit.json` for its owner.
+    /// Makes `exit.json` hold the proofs of Stellar's last checkpoint, the
+    /// one the freeze fixed. A checkpoint sent before the sequencer stopped
+    /// can land after the first export, and an earlier destroy may have
+    /// left a file for another: then it is exported again. Until it
+    /// matches, nothing is paid out or wiped (issue #145, O-03).
+    async fn checked_exit(&self, exit: &std::path::Path) -> Result<()> {
+        let last = self.chain_last().await?;
+        let why = match crate::flows::read_exit(exit) {
+            _ if !exit.exists() => "is missing".to_string(),
+            Ok(e) => match crate::flows::exit_matches(&e, last) {
+                Ok(()) => return Ok(()),
+                Err(why) => why,
+            },
+            Err(why) => why,
+        };
+        eprintln!("→ {} {why}: export it again", exit.display());
+        self.export(exit).await.with_context(|| {
+            format!("{} {why}, so nothing is paid out or wiped", exit.display())
+        })?;
+        let e = crate::flows::read_exit(exit).map_err(|why| anyhow!(why))?;
+        crate::flows::exit_matches(&e, last).map_err(|why| {
+            anyhow!(
+                "{} {why}: no validator exported Stellar's last checkpoint, so nothing is paid out or wiped. Run destroy again once a validator has seen it.",
+                exit.display()
+            )
+        })
+    }
+
+    /// Stellar's last accepted checkpoint: its seq and header hash.
+    async fn chain_last(&self) -> Result<(u64, [u8; 32])> {
+        let last = caravel_node::stellar_rpc::Rpc::new(self.m.rpc_url())?
+            .last_checkpoint(&self.desired.settlement)
+            .await?
+            .ok_or_else(|| anyhow!("the settlement contract has no checkpoint"))?;
+        Ok((last.seq, last.header_hash))
+    }
+
+    /// Claims every escape and withdrawal in `exit.json` for its owner,
+    /// once [`Self::checked_exit`] found it to match Stellar's last checkpoint.
     fn pay_out(&self, exit: &std::path::Path) -> Result<()> {
         let admin = self.m.env.admin.as_str();
         let e: Value = serde_json::from_str(&std::fs::read_to_string(exit)?)?;
