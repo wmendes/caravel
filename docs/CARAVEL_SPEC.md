@@ -2394,12 +2394,12 @@ Branches `a-0x-…`, stacked; the gate is A-06.
 
 | ID | Task | Depends on | Status |
 |---|---|---|---|
-| A-01 | **S-01: the exact escape payout** (§13.6, DEC-126). `escape_claim` paid `mul_div_floor(...).unwrap_or(0)`: when `equity × payout_num` passed `i128::MAX`, a valid claim paid 0 and was used up. `caravel_core::wide::mul_div_floor` divides a 256-bit product; a payout that does not compute fails with `PayoutOverflow` (64) and the claim stays open. `caravel escape` previews with the same helper. Lane #1 keeps its contract: 7-decimal testnet USDC cannot reach the overflow | – | review |
-| A-02 | **O-01 and O-04: a wipe only after a verified stop, and a safe root.** Every provider checks that a node stopped (systemd's `ActiveState`, no container left, the process gone) before `data/` is emptied; the root must be normalized, at least two components deep and outside the system trees (DEC-127) | A-01 | review |
-| A-03 | **R-01 to R-03: a block, its checkpoint row and its flags in one transaction** (DEC-128). A crash keeps all of a block or none of it, and memory moves only after the commit | A-02 | review |
-| A-04 | **O-03: `exit.json` against the freeze** (DEC-129). Destroy re-reads Stellar's last checkpoint after the freeze, exports again if `exit.json` is stale, and refuses pay-out and wipe until it matches | A-03 | review |
-| A-05 | **O-02: `IMAGES` under the release's checksums** (DEC-130). `SHA256SUMS` lists `IMAGES` and the installer checks it; a registry image ref must carry its digest. Signed release manifests stay a follow-up | A-04 | review |
-| A-06 | **Records, release 0.4.2 and lane #1** — **Gate.** Docs, the issue's reply, the release and lane #1's deploy, each with the human's OK | A-05 | doing |
+| A-01 | **S-01: the exact escape payout** (§13.6, DEC-126). `escape_claim` paid `mul_div_floor(...).unwrap_or(0)`: when `equity × payout_num` passed `i128::MAX`, a valid claim paid 0 and was used up. `caravel_core::wide::mul_div_floor` divides a 256-bit product; a payout that does not compute fails with `PayoutOverflow` (64) and the claim stays open. `caravel escape` previews with the same helper. Lane #1 keeps its contract: 7-decimal testnet USDC cannot reach the overflow | – | done |
+| A-02 | **O-01 and O-04: a wipe only after a verified stop, and a safe root.** Every provider checks that a node stopped (systemd's `ActiveState`, no container left, the process gone) before `data/` is emptied; the root must be normalized, at least two components deep and outside the system trees (DEC-127) | A-01 | done |
+| A-03 | **R-01 to R-03: a block, its checkpoint row and its flags in one transaction** (DEC-128). A crash keeps all of a block or none of it, and memory moves only after the commit | A-02 | done |
+| A-04 | **O-03: `exit.json` against the freeze** (DEC-129). Destroy re-reads Stellar's last checkpoint after the freeze, exports again if `exit.json` is stale, and refuses pay-out and wipe until it matches | A-03 | done |
+| A-05 | **O-02: `IMAGES` under the release's checksums** (DEC-130). `SHA256SUMS` lists `IMAGES` and the installer checks it; a registry image ref must carry its digest. Signed release manifests stay a follow-up | A-04 | done |
+| A-06 | **Records, release 0.4.2 and lane #1** — **Gate.** Docs, the issue's reply, the release and lane #1's deploy, each with the human's OK. The human said go on 2026-10-06: #146 to #151 merged, 0.4.2 published, #145 answered and closed, lane #1 compacted (1,035 MB to 137 MB) and on 0.4.2 (`docs/RESULTS.md`) | A-05 | done |
 
 ## 21. Later milestones (not for M0 agents to start without a human go-ahead)
 
