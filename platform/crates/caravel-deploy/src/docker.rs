@@ -11,6 +11,7 @@
 //! host the files belong to uid 10001, the containers' user, and the scripts
 //! use `sudo`; here they belong to you, and the containers run as you.
 
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -61,6 +62,42 @@ fn owner(header: &str) -> Option<(String, String)> {
     let (lane, rest) = rest.strip_prefix('"')?.split_once('"')?;
     let env = rest.split_once("[env.")?.1.split_once(']')?.0;
     Some((lane.to_string(), env.to_string()))
+}
+
+/// The release step's image commands: pull (or check) each image this lane
+/// runs, then remove the older images of the lane's own repositories (D-20).
+/// Docker refuses to remove an image a container still uses, running or
+/// stopped, so the release the nodes run until their restart stays: after a
+/// deploy the host keeps this release and the one before it, the rollback
+/// target. Only registry refs by digest are pruned (never a local build's
+/// tags), and never `caddy`, a shared upstream image.
+fn image_lines(d: &str, template: &str, images: &BTreeMap<String, String>) -> String {
+    let mut script = String::new();
+    let mut prune = String::new();
+    for (role, image) in images {
+        let own = role == &format!("{template}-node")
+            || role == &format!("{template}-web")
+            || role == "relayer";
+        if !own && role != "caddy" {
+            continue;
+        }
+        if !pullable(image) {
+            script += &format!(
+                "{d} image inspect {i} >/dev/null 2>&1 || {{ echo 'no local image {image}: build it with scripts/build-images.sh' >&2; exit 1; }}\n",
+                i = q(image)
+            );
+            continue;
+        }
+        script += &format!("{d} pull -q {} >/dev/null\n", q(image));
+        if let (true, Some((repo, _))) = (own, image.split_once('@')) {
+            prune += &format!(
+                "keep=$({d} image inspect -f '{{{{.Id}}}}' {i}); for id in $({d} images -q --no-trunc {r} | sort -u); do [ \"$id\" = \"$keep\" ] || {d} image rm \"$id\" >/dev/null 2>&1 || true; done\n",
+                i = q(image),
+                r = q(repo)
+            );
+        }
+    }
+    script + &prune
 }
 
 /// An image ref that names a registry (pullable), not a local build's tag.
@@ -313,24 +350,7 @@ impl Docker {
             s = self.s(),
             own = self.own(),
         );
-        let t = &self.template;
-        for (role, image) in &r.images {
-            let ours = role == &format!("{t}-node")
-                || role == &format!("{t}-web")
-                || role == "relayer"
-                || role == "caddy";
-            if !ours {
-                continue;
-            }
-            if pullable(image) {
-                script += &format!("{d} pull -q {} >/dev/null\n", q(image));
-            } else {
-                script += &format!(
-                    "{d} image inspect {i} >/dev/null 2>&1 || {{ echo 'no local image {image}: build it with scripts/build-images.sh' >&2; exit 1; }}\n",
-                    i = q(image)
-                );
-            }
-        }
+        script += &image_lines(d, &self.template, &r.images);
         script += &format!(
             "echo {} | {put}\n",
             q(&r.commit),
@@ -552,6 +572,84 @@ impl Docker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_release_pulls_its_images_and_prunes_only_its_own_older_ones() {
+        let node = "ghcr.io/wmendes/caravel-perps-node@sha256:aa";
+        let images = BTreeMap::from([
+            ("perps-node".to_string(), node.to_string()),
+            (
+                "relayer".to_string(),
+                "ghcr.io/wmendes/caravel-relayer@sha256:bb".to_string(),
+            ),
+            (
+                "perps-web".to_string(),
+                "caravel-perps-web:local-1".to_string(),
+            ),
+            (
+                "caddy".to_string(),
+                "docker.io/library/caddy:2.11.6@sha256:cc".to_string(),
+            ),
+            (
+                "payments-node".to_string(),
+                "ghcr.io/wmendes/caravel-payments-node@sha256:dd".to_string(),
+            ),
+        ]);
+        let s = image_lines("sudo docker", "perps", &images);
+        // Every image this lane runs is pulled, or checked when it is local.
+        for i in [
+            node,
+            "ghcr.io/wmendes/caravel-relayer@sha256:bb",
+            "docker.io/library/caddy:2.11.6@sha256:cc",
+        ] {
+            assert!(s.contains(&format!("sudo docker pull -q {}", q(i))), "{s}");
+        }
+        assert!(
+            s.contains(&format!(
+                "image inspect {} >/dev/null",
+                q("caravel-perps-web:local-1")
+            )),
+            "{s}"
+        );
+        // Older images go for the node and the relayer, each keeping its own digest.
+        assert!(
+            s.contains(&format!(
+                "keep=$(sudo docker image inspect -f '{{{{.Id}}}}' {})",
+                q(node)
+            )),
+            "{s}"
+        );
+        assert!(
+            s.contains(&format!(
+                "images -q --no-trunc {}",
+                q("ghcr.io/wmendes/caravel-perps-node")
+            )),
+            "{s}"
+        );
+        assert!(
+            s.contains(&format!(
+                "images -q --no-trunc {}",
+                q("ghcr.io/wmendes/caravel-relayer")
+            )),
+            "{s}"
+        );
+        // Never a local build, caddy, or another template's repository.
+        assert!(!s.contains("--no-trunc 'caravel-perps-web"), "{s}");
+        assert!(
+            !s.contains(&format!("--no-trunc {}", q("docker.io/library/caddy"))),
+            "{s}"
+        );
+        assert!(!s.contains("caravel-payments-node"), "{s}");
+        // The prune comes after every pull, and can't fail the step.
+        let last_pull = s.rfind(" pull -q ").unwrap();
+        assert!(s.find("keep=").unwrap() > last_pull, "{s}");
+        assert!(
+            s.lines()
+                .filter(|l| l.starts_with("keep="))
+                .all(|l| l.ends_with("|| true; done")),
+            "{s}"
+        );
+    }
 
     #[test]
     fn registry_refs_are_pulled_local_tags_are_not() {
