@@ -389,3 +389,10 @@ Read on 2026-10-06 at about 11:40 UTC, 27 hours after the 0.4.0 deploy, from `/v
 - **After the restart:** height went on at 500 ms blocks. Checkpoint 8,460 (`full`) was accepted on Stellar at 21:30:59, about 3.5 minutes after the restart. `caravel status` shows every node up and a plan with no changes.
 - **Memory:** sequencer 27 MB, validators 10 to 11 MB each, relayer 108 MB. The node containers had restarted with small stores. The disk is at 6.4 GB of 19.
 - **Images:** the host keeps 0.4.2's and 0.4.0's, the one the nodes ran until then (D-20).
+
+## Lane #1 on 0.4.3 (2026-10-06)
+
+`caravel apply` with v0.4.3 (signed releases, and GHOSTSIG on testnet) at 22:31 UTC, 153 s from start to "Applied". `config_hash` and the engine are unchanged, and nothing changed on Stellar.
+- Checkpoint 8,475 was accepted on Stellar at 22:34:56.
+- The trading app served from the lane builds its wallet list with `new GhostsigModule({ network: <testnet passphrase> })`.
+- **The release's signature:** `gh attestation verify --bundle caravel.sigstore.json`, with the release workflow and tag pinned, passes with no GitHub login for each archive and `IMAGES`. It fails for a wrong tag, a wrong workflow or a tampered `IMAGES`. The public installer with `CARAVEL_REQUIRE_SIGNATURE=1` printed "Signed by wmendes/caravel's release workflow at v0.4.3".
