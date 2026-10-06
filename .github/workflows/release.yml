@@ -193,6 +193,8 @@ jobs:
         run: |
           cd assets
           cat *.sha256 > SHA256SUMS
+          # The image refs too: the installer checks IMAGES against this (issue #145, O-02).
+          sha256sum IMAGES >> SHA256SUMS
           cat SHA256SUMS
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
             --title "Caravel $GITHUB_REF_NAME" \

@@ -14,7 +14,7 @@ On x86_64 or arm64 Linux and arm64 macOS:
 curl -fsSL https://raw.githubusercontent.com/wmendes/caravel/main/scripts/install.sh | bash
 ```
 
-The script downloads the release for your machine and checks it against the release's `SHA256SUMS`. It also brings the pinned Stellar CLI (28.1.0, checked against GitHub's published digest) unless the `stellar` on your PATH is already that version. `--version vX.Y.Z` picks a release; `--no-stellar-cli` skips the CLI.
+The script downloads the release for your machine and checks it against the release's `SHA256SUMS`, along with the `IMAGES` file that names its container images by digest. It also brings the pinned Stellar CLI (28.1.0, checked against GitHub's published digest) unless the `stellar` on your PATH is already that version. `--version vX.Y.Z` picks a release; `--no-stellar-cli` skips the CLI.
 
 ### Your PATH
 

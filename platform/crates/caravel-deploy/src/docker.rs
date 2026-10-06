@@ -21,7 +21,7 @@ use anyhow::{anyhow, bail, Context, Result};
 
 use crate::manifest::{Manifest, Provider};
 use crate::plan::{Host, Key, NodeReport, NodeState};
-use crate::release::Release;
+use crate::release::{pullable, Release};
 use crate::render::{validator_node, validator_port};
 use crate::ssh::Ssh;
 
@@ -114,14 +114,6 @@ fn stop_script(d: &str, s: &str, project: &str, node: &str, root: &str) -> Strin
         r = q(root),
         f = q(&format!("{node}.started")),
     )
-}
-
-/// An image ref that names a registry (pullable), not a local build's tag.
-fn pullable(image: &str) -> bool {
-    image.contains('@')
-        || image
-            .split_once('/')
-            .is_some_and(|(r, _)| r.contains('.') || r.contains(':') || r == "localhost")
 }
 
 impl Docker {
