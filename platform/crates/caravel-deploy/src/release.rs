@@ -29,7 +29,9 @@ pub struct Release {
 }
 
 /// Parses an `IMAGES` file: one `<role> <image ref>` per line; blank lines
-/// and `#` comments are skipped.
+/// and `#` comments are skipped. A ref that names a registry is pulled, so
+/// it must carry its digest; a local build's tag is never pulled
+/// (issue #145, O-02).
 pub fn parse_images(text: &str) -> Result<BTreeMap<String, String>> {
     let mut out = BTreeMap::new();
     for (i, line) in text.lines().enumerate() {
@@ -44,11 +46,34 @@ pub fn parse_images(text: &str) -> Result<BTreeMap<String, String>> {
                 i + 1
             );
         };
+        if pullable(image) && !pinned(image) {
+            bail!(
+                "IMAGES line {}: {image} names a registry but no digest (@sha256:<64 hex digits>), and a release pins every image it pulls",
+                i + 1
+            );
+        }
         if out.insert(role.to_string(), image.to_string()).is_some() {
             bail!("IMAGES line {}: {role} is listed twice", i + 1);
         }
     }
     Ok(out)
+}
+
+/// An image ref that names a registry (pullable), not a local build's tag.
+pub(crate) fn pullable(image: &str) -> bool {
+    image.contains('@')
+        || image
+            .split_once('/')
+            .is_some_and(|(r, _)| r.contains('.') || r.contains(':') || r == "localhost")
+}
+
+/// A ref by digest: `…@sha256:<64 lowercase hex>`.
+fn pinned(image: &str) -> bool {
+    image.rsplit_once("@sha256:").is_some_and(|(_, d)| {
+        d.len() == 64
+            && d.bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    })
 }
 
 /// `caravel-<template>-node`.
@@ -259,6 +284,33 @@ pub fn find_repo() -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pulled_image_must_carry_its_digest() {
+        let d = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        // A published release's IMAGES (scripts/build-images.sh --push).
+        let ok = format!(
+            "# release v0.4.2\nperps-node ghcr.io/wmendes/caravel-perps-node@sha256:{d}\n\nrelayer ghcr.io/wmendes/caravel-relayer@sha256:{d}\ncaddy docker.io/library/caddy:2.11.6@sha256:{d}\n"
+        );
+        assert_eq!(parse_images(&ok).unwrap().len(), 3);
+        // A local build's tags are never pulled.
+        assert!(parse_images("perps-node caravel-perps-node:local-1234\n").is_ok());
+        for bad in [
+            "perps-node ghcr.io/evil/caravel-perps-node:latest".to_string(),
+            "perps-node localhost:5000/caravel-perps-node:x".to_string(),
+            format!("perps-node ghcr.io/x/n@sha256:{}", &d[..63]),
+            format!("perps-node ghcr.io/x/n@sha256:{}", d.to_uppercase()),
+            format!("perps-node ghcr.io/x/n@sha512:{d}"),
+        ] {
+            let e = parse_images(&bad).unwrap_err().to_string();
+            assert!(e.contains("no digest"), "{bad}: {e}");
+        }
+        assert!(parse_images("perps-node a b\n").is_err());
+        assert!(parse_images(&format!("{ok}relayer caravel-relayer:x\n"))
+            .unwrap_err()
+            .to_string()
+            .contains("listed twice"));
+    }
 
     #[test]
     fn platforms() {

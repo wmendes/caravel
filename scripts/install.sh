@@ -210,7 +210,17 @@ if [[ -n "$ARCHIVE" ]]; then
   dir="$(find "$STAGE" -mindepth 1 -maxdepth 1 -type d | head -1)"
   [[ -f "$dir/COMMIT" && -f "$dir/SHA256SUMS" ]] || fail "$ARCHIVE is not a Caravel release"
   (cd "$dir" && "${SHA256[@]}" -c --quiet SHA256SUMS) || fail "$ARCHIVE: a file does not match SHA256SUMS"
-  if [[ -n "${DL:-}" && -f "$DL/IMAGES" ]]; then cp "$DL/IMAGES" "$dir/IMAGES"; fi
+  if [[ -n "${DL:-}" ]]; then
+    # IMAGES is in the release's SHA256SUMS from 0.4.2 (issue #145, O-02).
+    images_sum="$(awk '$2 == "IMAGES" { print $1 }' "$DL/SHA256SUMS")"
+    if [[ -n "$images_sum" ]]; then
+      [[ -f "$DL/IMAGES" ]] || fail "downloading $BASE/IMAGES failed"
+      [[ "$("${SHA256[@]}" "$DL/IMAGES" | awk '{print $1}')" == "$images_sum" ]] || fail "IMAGES does not match the release's SHA256SUMS"
+    elif [[ -f "$DL/IMAGES" ]]; then
+      echo "install: note: this release's SHA256SUMS does not list IMAGES (releases before 0.4.2), so its image refs are used unchecked" >&2
+    fi
+    if [[ -f "$DL/IMAGES" ]]; then cp "$DL/IMAGES" "$dir/IMAGES"; fi
+  fi
   [[ "$STELLAR_CLI" == 1 ]] && stellar_cli
   install_release "$dir"
   next_steps
