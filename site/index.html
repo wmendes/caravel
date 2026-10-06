@@ -335,7 +335,7 @@ footer p { font-size: .875rem; color: var(--muted); }
       <div class="pitch">
         <p class="for">Open source, for teams building on Stellar</p>
         <h1 id="hero-h">For Stellar apps that need their own rules.</h1>
-        <p class="like" aria-live="off">Like <span class="swap" id="whoSwap"><span class="on">an exchange that matches every 0.5 s</span><span aria-hidden="true">a payment network for members only</span><span aria-hidden="true">a game economy with 200 ms turns</span><span aria-hidden="true">agents that pay per request in 200 ms</span></span></p>
+        <p class="like" aria-live="off">Like <span class="swap" id="whoSwap"><span class="on">an exchange that matches every 500 ms</span><span aria-hidden="true">a payment network for members only</span><span aria-hidden="true">a game economy with 200 ms turns</span><span aria-hidden="true">agents that pay per request in 200 ms</span></span></p>
         <p class="lede">Caravel runs your app as a <b>lane</b>: an appchain with its own block time, fees, members, limits and validators, declared in one file. Your users' money stays on Stellar, in the token you choose.</p>
         <div class="cta-row">
           <a class="btn btn-primary" href="#start">Run a lane in 5 minutes</a>
@@ -362,7 +362,7 @@ footer p { font-size: .875rem; color: var(--muted); }
       <div class="live" id="live" aria-live="off">
         <div class="who"><b><span class="dot" aria-hidden="true"></span>Live: Caravel Perps, lane #1</b><a href="https://35-224-76-64.sslip.io" id="liveNote">Running in containers on testnet</a></div>
         <div class="stat"><span class="k">Height</span><span class="v num" id="lvH">419,000+</span></div>
-        <div class="stat"><span class="k">Block time</span><span class="v num" id="lvB">0.5 s</span></div>
+        <div class="stat"><span class="k">Block time</span><span class="v num" id="lvB">500 ms</span></div>
         <div class="stat"><span class="k">Checkpoints</span><span class="v num" id="lvC">6,700+</span></div>
         <div class="stat"><span class="k">Last block</span><span class="v num" id="lvA">live</span></div>
       </div>
@@ -712,7 +712,7 @@ const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /* Lane #1, live: real numbers only. Each block arrives on the lane's own
    stream (a WebSocket to the sequencer; Vercel's rewrites can't carry one)
-   as it is made, every 0.5 s. One status read fills in the rest; if the
+   as it is made, every 500 ms. One status read fills in the rest; if the
    stream won't open, the status is read every 2 s instead. */
 (function live() {
   const box = document.getElementById("live"); if (!box) return;
@@ -739,7 +739,7 @@ const REDUCE = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       const s = await r.json();
       fails = 0;
       showHeight(s.height);
-      if (s.block_time_ms) B.textContent = (s.block_time_ms / 1000) + " s";
+      if (s.block_time_ms) B.textContent = s.block_time_ms + " ms";
       if (s.checkpoints) showAccepted(s.checkpoints.accepted);
       halted = s.halted || null;
       lastTs = Math.max(lastTs, Number(s.last_block_timestamp_ms) || 0);
