@@ -182,21 +182,37 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      id-token: write       # the Sigstore certificate for the attestation
+      attestations: write   # stored with the repository's attestations
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: assets
           merge-multiple: true
-      - name: Draft the release
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Checksums
         run: |
           cd assets
           cat *.sha256 > SHA256SUMS
           # The image refs too: the installer checks IMAGES against this (issue #145, O-02).
           sha256sum IMAGES >> SHA256SUMS
           cat SHA256SUMS
+      # One signed attestation for every file SHA256SUMS lists, the archives
+      # and IMAGES (and through IMAGES' digests, the images): SLSA provenance
+      # naming this repository, workflow, tag and commit (A-08, DEC-131).
+      - name: Attest the release
+        id: attest
+        uses: actions/attest@v4
+        with:
+          subject-checksums: assets/SHA256SUMS
+          create-storage-record: false
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          cd assets
+          cp "$BUNDLE" caravel.sigstore.json
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
             --title "Caravel $GITHUB_REF_NAME" \
             --notes "Testnet only, not audited. Install: curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/$GITHUB_REF_NAME/scripts/install.sh | bash" \
-            *.tar.gz SHA256SUMS IMAGES
+            *.tar.gz SHA256SUMS IMAGES caravel.sigstore.json
