@@ -160,7 +160,7 @@ caravel apply --release-dir /tmp/rel
 
 ## Live on testnet
 
-**Lane #1, Caravel Perps**, has run on Stellar testnet since 2026-09-29, in Circle's testnet USDC. It makes a block every 0.5 s and checkpoints to Stellar every minute. Its nodes and Caddy run as containers on one e2-small VM that OpenTofu describes. Its whole deployment is the `[env.testnet]` table in [`lane.caravel-perps.testnet.toml`](lanes/perps/config/lane.caravel-perps.testnet.toml).
+**Lane #1, Caravel Perps**, has run on Stellar testnet since 2026-09-29, in Circle's testnet USDC. It makes a block every 500 ms and checkpoints to Stellar within seconds of a deposit or withdrawal, and every few minutes otherwise. Its nodes and Caddy run as containers on one e2-small VM that OpenTofu describes. Its whole deployment is the `[env.testnet]` table in [`lane.caravel-perps.testnet.toml`](lanes/perps/config/lane.caravel-perps.testnet.toml).
 
 | | |
 |---|---|
@@ -168,7 +168,7 @@ caravel apply --release-dir /tmp/rel
 | Lane status | https://35-224-76-64.sslip.io/v1/status |
 | Settlement contract | [`CBIHBEUZ…GPONWO`](https://stellar.expert/explorer/testnet/contract/CBIHBEUZYFZQZEQPBJH2ID6CDRDZFEDI6XHAXVOCHG6FO5XWUIGPONWO) |
 
-Measured on that lane with 1 s blocks, before the move to 0.5 s ([`docs/RESULTS.md`](docs/RESULTS.md), 2026-09-29):
+Measured on that lane with 1 s blocks, before the move to 500 ms ([`docs/RESULTS.md`](docs/RESULTS.md), 2026-09-29):
 
 | At 45 tx/s for 5 minutes | Result |
 |---|---|
