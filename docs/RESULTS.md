@@ -372,3 +372,20 @@ Read on 2026-10-06 at about 11:40 UTC, 27 hours after the 0.4.0 deploy, from `/v
 - The block loop's longest wait for the core lock: 27 ms (190 ms while the backlog was being archived).
 - The containers use about 18% of one vCPU together.
 - The sequencer's memory held at 68 to 72 MB over 15 minutes of samples (16 MB at the 0.3.0 restart, before the archive backlog), so it isn't growing.
+
+## Lane #1 on 0.4.2 (2026-10-06)
+
+`caravel apply` with v0.4.2 (the fixes for #145, M0.11) at 21:27 UTC, 153 s from start to "Applied": the release, the image digests in `compose.yml`, and the five nodes restarted. `config_hash` and the engine are unchanged, nothing changed on Stellar, and the settlement contract stays `8a2fafbd…`: with 7-decimal USDC, S-01's overflow is out of reach.
+
+- **Stores compacted first** (RUNBOOK §3.2, decided 2026-10-05). With the relayer, sequencer and validators stopped, `compact` ran in each node's container through `docker compose run`. It took 36 s in all:
+
+  | Store | Before | After |
+  |---|---|---|
+  | sequencer | 261 MB | 120 MB |
+  | validator-1, -2, -3 | 258 MB each | 5 MB each |
+  | All four | 1,035 MB | 137 MB |
+
+  These stores predated incremental vacuum (F-06), so the pages they had pruned stayed inside the files. They are converted now, and later prunes shrink them.
+- **After the restart:** height went on at 500 ms blocks. Checkpoint 8,460 (`full`) was accepted on Stellar at 21:30:59, about 3.5 minutes after the restart. `caravel status` shows every node up and a plan with no changes.
+- **Memory:** sequencer 27 MB, validators 10 to 11 MB each, relayer 108 MB. The node containers had restarted with small stores. The disk is at 6.4 GB of 19.
+- **Images:** the host keeps 0.4.2's and 0.4.0's, the one the nodes ran until then (D-20).
