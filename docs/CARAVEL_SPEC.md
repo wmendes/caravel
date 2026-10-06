@@ -2399,7 +2399,7 @@ Branches `a-0x-…`, stacked; the gate is A-06.
 | A-03 | **R-01 to R-03: a block, its checkpoint row and its flags in one transaction** (DEC-128). A crash keeps all of a block or none of it, and memory moves only after the commit | A-02 | review |
 | A-04 | **O-03: `exit.json` against the freeze** (DEC-129). Destroy re-reads Stellar's last checkpoint after the freeze, exports again if `exit.json` is stale, and refuses pay-out and wipe until it matches | A-03 | review |
 | A-05 | **O-02: `IMAGES` under the release's checksums** (DEC-130). `SHA256SUMS` lists `IMAGES` and the installer checks it; a registry image ref must carry its digest. Signed release manifests stay a follow-up | A-04 | review |
-| A-06 | **Records, release 0.4.2 and lane #1** — **Gate.** Docs, the issue's reply, the release and lane #1's deploy, each with the human's OK | A-05 | todo |
+| A-06 | **Records, release 0.4.2 and lane #1** — **Gate.** Docs, the issue's reply, the release and lane #1's deploy, each with the human's OK | A-05 | doing |
 
 ## 21. Later milestones (not for M0 agents to start without a human go-ahead)
 
