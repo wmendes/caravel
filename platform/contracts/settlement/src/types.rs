@@ -170,6 +170,9 @@ pub enum Error {
     FreezeNotAllowed = 61,
     NotRefundable = 62,
     UnknownInboxMessage = 63,
+    /// The escape payout does not compute (issue #145, S-01): the claim is
+    /// refused and stays unclaimed, never paid 0.
+    PayoutOverflow = 64,
 }
 
 // --- Events (spec §13.2) --------------------------------------------------------

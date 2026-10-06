@@ -90,6 +90,7 @@ fn settlement_error(n: u32) -> Option<&'static str> {
         60 => "the lane isn't frozen",
         61 => "the contract doesn't allow a freeze yet",
         62 | 63 => "nothing to refund for that inbox message",
+        64 => "the escape payout does not compute: the claim is refused and stays open",
         _ => return None,
     })
 }
@@ -1358,11 +1359,18 @@ impl Flows {
             out["note"] = json!("the account has no balance in the lane's last checkpoint");
             return Ok(());
         };
-        let expected = if freeze.payout_den == 0 {
+        // What the contract pays (`escape_claim`, issue #145 S-01).
+        let expected = if freeze.payout_den <= 0 || freeze.payout_num <= 0 || equity <= 0 {
             0
         } else {
-            caravel_core::fixed::mul_div_floor(equity, freeze.payout_num, freeze.payout_den)
-                .unwrap_or(0)
+            caravel_core::wide::mul_div_floor(equity, freeze.payout_num, freeze.payout_den)
+                .map_err(|_| {
+                    anyhow!(
+                        "the escape payout does not compute (equity {equity}, payout {}/{}): the contract refuses the claim",
+                        freeze.payout_num,
+                        freeze.payout_den
+                    )
+                })?
         };
         out["equity"] = json!(format_units(equity, decimals));
         out["expected"] = json!(format_units(expected.max(0), decimals));

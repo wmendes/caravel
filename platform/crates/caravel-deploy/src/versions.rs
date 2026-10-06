@@ -51,13 +51,15 @@ pub fn settlement_wasm() -> &'static str {
 }
 
 /// Every settlement build a lane may run: the build of record, lane #1's,
-/// deployed before it (DEC-061), and the build that kept a record of every
-/// checkpoint, before M0.10 (DEC-124).
-pub fn known_settlement_builds() -> [&'static str; 3] {
+/// deployed before it (DEC-061), the build that kept a record of every
+/// checkpoint, before M0.10 (DEC-124), and M0.10's, before the exact escape
+/// payout (DEC-126).
+pub fn known_settlement_builds() -> [&'static str; 4] {
     [
         settlement_wasm(),
         get("lanes.perps.settlement_deployed_wasm_sha256"),
         get("artifacts.settlement_v1_wasm_sha256"),
+        get("artifacts.settlement_v2_wasm_sha256"),
     ]
 }
 

@@ -18,12 +18,12 @@ pub mod types;
 use alloc::vec::Vec as AllocVec;
 
 use caravel_core::checkpoint::{CheckpointHeaderV1, CHECKPOINT_HEADER_LEN};
-use caravel_core::fixed::mul_div_floor;
 use caravel_core::inbox::{inbox_acc_preimage, InboxKind, InboxMsgV1};
 use caravel_core::merkle::SorobanSha256;
 use caravel_core::preimage::{
     account_leaf_preimage, rotate_message_preimage, withdrawal_leaf_preimage,
 };
+use caravel_core::wide;
 use soroban_sdk::token::TokenClient;
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
@@ -629,13 +629,19 @@ impl Settlement {
         ) {
             panic_with_error!(&env, Error::BadProof);
         }
-        let amount = if frozen.payout_den == 0 {
+        // Nothing to pay when the vault held nothing for escapes (payout_num ≤ 0).
+        // Otherwise exact, with a 256-bit intermediate: a payout that doesn't
+        // compute refuses the claim, which stays unclaimed (issue #145, S-01).
+        let amount = if frozen.payout_den <= 0 || frozen.payout_num <= 0 || equity <= 0 {
             0
         } else {
-            mul_div_floor(equity, frozen.payout_num, frozen.payout_den).unwrap_or(0)
+            or_panic(
+                &env,
+                wide::mul_div_floor(equity, frozen.payout_num, frozen.payout_den)
+                    .map_err(|_| Error::PayoutOverflow),
+            )
         };
         set(&env, &claimed, &true);
-        // Nothing to pay when the vault held nothing for escapes (payout_num ≤ 0).
         if amount > 0 {
             TokenClient::new(&env, &cfg.usdc).transfer(
                 &env.current_contract_address(),
