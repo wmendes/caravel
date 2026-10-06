@@ -2400,7 +2400,8 @@ Branches `a-0x-…`, stacked; the gate is A-06.
 | A-04 | **O-03: `exit.json` against the freeze** (DEC-129). Destroy re-reads Stellar's last checkpoint after the freeze, exports again if `exit.json` is stale, and refuses pay-out and wipe until it matches | A-03 | done |
 | A-05 | **O-02: `IMAGES` under the release's checksums** (DEC-130). `SHA256SUMS` lists `IMAGES` and the installer checks it; a registry image ref must carry its digest. Signed release manifests stay a follow-up | A-04 | done |
 | A-06 | **Records, release 0.4.2 and lane #1** — **Gate.** Docs, the issue's reply, the release and lane #1's deploy, each with the human's OK. The human said go on 2026-10-06: #146 to #151 merged, 0.4.2 published, #145 answered and closed, lane #1 compacted (1,035 MB to 137 MB) and on 0.4.2 (`docs/RESULTS.md`) | A-05 | done |
-| A-08 | **Signed releases**, the follow-up to O-02 (DEC-131). The release workflow attests every file in `SHA256SUMS` with `actions/attest@v4` (SLSA provenance, Sigstore, no keys) and attaches the bundle as `caravel.sigstore.json`. The installer checks the archive and `IMAGES` with `gh attestation verify --bundle` when gh is installed | A-06 | review |
+| A-08 | **Signed releases**, the follow-up to O-02 (DEC-131). The release workflow attests every file in `SHA256SUMS` with `actions/attest@v4` (SLSA provenance, Sigstore, no keys) and attaches the bundle as `caravel.sigstore.json`. The installer checks the archive and `IMAGES` with `gh attestation verify --bundle` when gh is installed | A-06 | done |
+| A-09 | **Caravel 0.4.3.** A-08's signed releases, and the trading app's GHOSTSIG fix (D-22): the kit's GHOSTSIG module started on Stellar's public network, so connecting asked for an account there. The release's attestation is checked with the installer's own flags before it is published; then lane #1 gets the release | A-08 | doing |
 
 ## 21. Later milestones (not for M0 agents to start without a human go-ahead)
 
