@@ -238,6 +238,79 @@ fn a_restarted_validator_resumes_and_keeps_its_signatures() {
     ));
 }
 
+/// Issue #145, R-02 and R-03: a validator stores a block with its own
+/// checkpoint and its live-check flags in one transaction. A failure at
+/// either (a trigger standing in for a crash) leaves the store at the block
+/// before; a restart opens, applies the block again, and a flagged block
+/// still blocks signing after another restart.
+#[test]
+fn a_flag_and_a_checkpoint_commit_with_their_block() {
+    let mut t = T::native();
+    busy_lane(&mut t, 10);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("validator.sqlite");
+    let (state, config_hash) = genesis();
+    let open = || {
+        let store = Store::open(&path, &config().lane_id, &config_hash, &state).unwrap();
+        Follower::open(
+            PerpsApp,
+            Executor::Native,
+            store,
+            ids(),
+            SigningKey::from_bytes(&[0x63; 32]),
+        )
+        .unwrap()
+    };
+    let raw = rusqlite::Connection::open(&path).unwrap();
+    let recs = records(&t, 1, 10);
+    let live = t.now + LIVE_WINDOW_MS * 1000;
+    // Block 3 arrives live while the validator's clock is 20 s behind.
+    let behind = recs[2].decode_input().unwrap().timestamp_ms - 20_000;
+
+    let mut v = open();
+    v.apply(&recs[0], live).unwrap();
+    v.apply(&recs[1], live).unwrap();
+    raw.execute_batch(
+        "CREATE TRIGGER fail BEFORE INSERT ON flags BEGIN SELECT RAISE(ABORT, 'injected'); END;",
+    )
+    .unwrap();
+    assert!(v.apply(&recs[2], behind).is_err());
+    assert_eq!(v.height(), 2);
+    assert_eq!(v.store().tip().unwrap(), 2, "no block without its flag");
+    drop(v);
+    raw.execute_batch("DROP TRIGGER fail;").unwrap();
+
+    let mut v = open();
+    assert_eq!(v.height(), 2);
+    assert!(!v.apply(&recs[2], behind).unwrap().flags.is_empty());
+    for r in &recs[3..9] {
+        v.apply(r, live).unwrap();
+    }
+    raw.execute_batch("CREATE TRIGGER fail BEFORE INSERT ON checkpoints BEGIN SELECT RAISE(ABORT, 'injected'); END;")
+        .unwrap();
+    assert!(v.apply(&recs[9], live).is_err());
+    assert_eq!(
+        v.store().tip().unwrap(),
+        9,
+        "no block without its checkpoint"
+    );
+    drop(v);
+    raw.execute_batch("DROP TRIGGER fail;").unwrap();
+
+    // Before the fix, block 10 was stored without checkpoint 1's row, and
+    // this open failed with Corrupt("last checkpoint").
+    let mut v = open();
+    assert_eq!(v.height(), 9);
+    assert_eq!(v.apply(&recs[9], live).unwrap().checkpoint, Some(1));
+    let (header, batch) = sealed(&t, 1);
+    assert_eq!(v.store().checkpoint(1).unwrap().unwrap().header, header);
+    drop(v);
+    let mut v = open();
+    assert!(
+        matches!(v.sign(&header, &batch), Err(Refusal::Suspicious(ref f)) if f.len() == 1 && f[0].0 == 3)
+    );
+}
+
 #[test]
 fn accepted_checkpoints_come_from_stellar() {
     let mut t = T::native();

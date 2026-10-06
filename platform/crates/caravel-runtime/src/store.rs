@@ -430,16 +430,19 @@ impl Store {
     }
 
     /// Stores block `height` with its receipts and the state it produced, in
-    /// one transaction. `checkpoint_seq` is set for a `CHECKPOINT_END` block,
-    /// whose output state becomes that checkpoint's snapshot. The head is
-    /// written at a checkpoint end and every `head_every` blocks (F-07).
+    /// one transaction. A `CHECKPOINT_END` block brings its checkpoint row,
+    /// and its output state becomes that checkpoint's snapshot; a validator's
+    /// live-check `flags` come along too. So a crash keeps all of a block or
+    /// none of it (issue #145, R-01 to R-03). The head is written at a
+    /// checkpoint end and every `head_every` blocks (F-07).
     pub fn commit_block(
         &mut self,
         height: u64,
         record: &BlockRecordV1,
         receipts: &[u8],
         state: &[u8],
-        checkpoint_seq: Option<u64>,
+        checkpoint: Option<&CheckpointRow>,
+        flags: &[String],
     ) -> Result<()> {
         // Cached statements: these run on every block (F-06).
         let tx = self.conn.transaction()?;
@@ -453,13 +456,22 @@ impl Store {
             "INSERT INTO blocks (height, input, state_hash_after, receipts) VALUES (?1, ?2, ?3, ?4)",
         )?
         .execute(params![i(height), record.input, record.state_hash_after.as_slice(), receipts])?;
-        if checkpoint_seq.is_some() || height.is_multiple_of(self.head_every) {
+        if checkpoint.is_some() || height.is_multiple_of(self.head_every) {
             tx.prepare_cached("UPDATE head SET height = ?1, state = ?2 WHERE id = 0")?
                 .execute(params![i(height), state])?;
         }
-        if let Some(seq) = checkpoint_seq {
+        if let Some(row) = checkpoint {
+            if row.last_height != height {
+                return Err(StoreError::Conflict(
+                    "checkpoint does not end at this block",
+                ));
+            }
             tx.prepare_cached("INSERT INTO snapshots (seq, height, state) VALUES (?1, ?2, ?3)")?
-                .execute(params![i(seq), i(height), state])?;
+                .execute(params![i(row.seq), i(height), state])?;
+            insert_checkpoint(&tx, row)?;
+        }
+        for reason in flags {
+            flag(&tx, height, reason)?;
         }
         tx.commit()?;
         Ok(())
@@ -702,28 +714,6 @@ impl Store {
     }
 
     // --- Checkpoints -------------------------------------------------------------
-
-    pub fn insert_checkpoint(&mut self, row: &CheckpointRow) -> Result<()> {
-        self.conn.execute(
-            "INSERT INTO checkpoints (seq, header, batch, first_height, last_height, withdrawals, status, epoch, sigs, stellar_tx_hash, stellar_ledger, batch_len)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-            params![
-                i(row.seq),
-                row.header,
-                row.batch,
-                i(row.first_height),
-                i(row.last_height),
-                row.withdrawals,
-                row.status.as_str(),
-                row.epoch.map(i),
-                row.sigs,
-                row.stellar_tx_hash,
-                row.stellar_ledger,
-                row.batch.len() as i64
-            ],
-        )?;
-        Ok(())
-    }
 
     pub fn set_signed(&mut self, seq: u64, epoch: u64, sigs_json: &str) -> Result<()> {
         let n = self.conn.execute(
@@ -1078,11 +1068,7 @@ impl Store {
     }
 
     pub fn flag_block(&mut self, height: u64, reason: &str) -> Result<()> {
-        self.conn.execute(
-            "INSERT INTO flags (height, reason) VALUES (?1, ?2) ON CONFLICT(height) DO UPDATE SET reason = excluded.reason, cleared = 0",
-            params![i(height), reason],
-        )?;
-        Ok(())
+        flag(&self.conn, height, reason)
     }
 
     /// Uncleared flags on blocks `from..=to`.
@@ -1146,6 +1132,38 @@ fn row_of(r: &rusqlite::Row<'_>) -> rusqlite::Result<Result<CheckpointRow>> {
     )
 }
 
+/// A checkpoint row, only ever written with its last block
+/// ([`Store::commit_block`]).
+fn insert_checkpoint(conn: &Connection, row: &CheckpointRow) -> Result<()> {
+    conn.prepare_cached(
+        "INSERT INTO checkpoints (seq, header, batch, first_height, last_height, withdrawals, status, epoch, sigs, stellar_tx_hash, stellar_ledger, batch_len)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+    )?
+    .execute(params![
+        i(row.seq),
+        row.header,
+        row.batch,
+        i(row.first_height),
+        i(row.last_height),
+        row.withdrawals,
+        row.status.as_str(),
+        row.epoch.map(i),
+        row.sigs,
+        row.stellar_tx_hash,
+        row.stellar_ledger,
+        row.batch.len() as i64
+    ])?;
+    Ok(())
+}
+
+fn flag(conn: &Connection, height: u64, reason: &str) -> Result<()> {
+    conn.prepare_cached(
+        "INSERT INTO flags (height, reason) VALUES (?1, ?2) ON CONFLICT(height) DO UPDATE SET reason = excluded.reason, cleared = 0",
+    )?
+    .execute(params![i(height), reason])?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1158,6 +1176,24 @@ mod tests {
             .unwrap()
     }
 
+    /// Checkpoint `seq`, sealed by block `last` after 4 blocks.
+    fn row(seq: u64, last: u64) -> CheckpointRow {
+        CheckpointRow {
+            seq,
+            header: vec![1; 100],
+            batch: vec![2; STATE],
+            batch_len: STATE,
+            first_height: last - 3,
+            last_height: last,
+            withdrawals: "[]".into(),
+            status: CheckpointStatus::Sequenced,
+            epoch: None,
+            sigs: None,
+            stellar_tx_hash: None,
+            stellar_ledger: None,
+        }
+    }
+
     /// 40 blocks, a checkpoint (with a 64 KiB batch and snapshot) every 4,
     /// all accepted on Stellar.
     fn fill(s: &mut Store) {
@@ -1166,26 +1202,16 @@ mod tests {
                 input: vec![h as u8; 100],
                 state_hash_after: [h as u8; 32],
             };
-            let end = (h % 4 == 0).then_some(h / 4);
-            s.commit_block(h, &record, &[1; 10], &vec![h as u8; STATE], end)
-                .unwrap();
-            if let Some(seq) = end {
-                s.insert_checkpoint(&CheckpointRow {
-                    seq,
-                    header: vec![1; 100],
-                    batch: vec![2; STATE],
-                    batch_len: STATE,
-                    first_height: h - 3,
-                    last_height: h,
-                    withdrawals: "[]".into(),
-                    status: CheckpointStatus::Sequenced,
-                    epoch: None,
-                    sigs: None,
-                    stellar_tx_hash: None,
-                    stellar_ledger: None,
-                })
-                .unwrap();
-            }
+            let row = (h % 4 == 0).then(|| row(h / 4, h));
+            s.commit_block(
+                h,
+                &record,
+                &[1; 10],
+                &vec![h as u8; STATE],
+                row.as_ref(),
+                &[],
+            )
+            .unwrap();
         }
         assert_eq!(
             s.count_checkpoints_with(CheckpointStatus::Sequenced)
@@ -1296,7 +1322,7 @@ mod tests {
         assert!(s.block(41).unwrap().is_none());
         // Archived blocks go on growing the chain as before.
         let (r, rc) = before[0].clone();
-        s.commit_block(41, &r, &rc, &[0; 8], None).unwrap();
+        s.commit_block(41, &r, &rc, &[0; 8], None, &[]).unwrap();
         assert_eq!(s.tip().unwrap(), 41);
     }
 
@@ -1317,6 +1343,64 @@ mod tests {
         assert_eq!(s.blocks(29, 40).unwrap(), before[28..].to_vec());
         assert!(s.blocks(20, 40).is_err(), "a range into dropped blocks");
         assert_eq!(s.prune_history(History::Drop, 100).unwrap(), 0);
+    }
+
+    /// Issue #145, R-01 to R-03: a block, its checkpoint row and its flags
+    /// are one transaction. A failure at the last statement (a trigger
+    /// standing in for a crash) leaves none of them.
+    #[test]
+    fn a_block_its_checkpoint_and_its_flags_commit_together() {
+        let mut s = Store::open_in_memory(&[1; 32], &[2; 32], &[0; 8]).unwrap();
+        let record = |h: u64| BlockRecordV1 {
+            input: vec![h as u8; 10],
+            state_hash_after: [h as u8; 32],
+        };
+        for h in 1..=3 {
+            s.commit_block(h, &record(h), &[1], &[h as u8; 8], None, &[])
+                .unwrap();
+        }
+        let count = |s: &Store, table: &str| -> i64 {
+            s.conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap()
+        };
+        let fail = |s: &Store, table: &str| {
+            s.conn
+                .execute_batch(&format!(
+                    "CREATE TRIGGER fail_{table} BEFORE INSERT ON {table} BEGIN SELECT RAISE(ABORT, 'injected'); END;"
+                ))
+                .unwrap()
+        };
+        let heal = |s: &Store, table: &str| {
+            s.conn
+                .execute_batch(&format!("DROP TRIGGER fail_{table};"))
+                .unwrap()
+        };
+        let flags = ["block timestamp ahead".to_string()];
+        let head = s.head().unwrap().0;
+        let snapshots = count(&s, "snapshots"); // genesis
+        for table in ["checkpoints", "flags"] {
+            fail(&s, table);
+            assert!(s
+                .commit_block(4, &record(4), &[1], &[4; 8], Some(&row(1, 4)), &flags)
+                .is_err());
+            assert_eq!(s.tip().unwrap(), 3, "{table}: no block");
+            assert_eq!(s.head().unwrap().0, head, "{table}: the head stays");
+            assert_eq!(count(&s, "snapshots"), snapshots, "{table}: no snapshot");
+            assert_eq!(count(&s, "checkpoints") + count(&s, "flags"), 0);
+            heal(&s, table);
+        }
+        s.commit_block(4, &record(4), &[1], &[4; 8], Some(&row(1, 4)), &flags)
+            .unwrap();
+        assert_eq!(s.tip().unwrap(), 4);
+        assert_eq!(s.checkpoint(1).unwrap().unwrap().last_height, 4);
+        assert_eq!(s.flags_in(1, 4).unwrap(), vec![(4, flags[0].clone())]);
+        assert_eq!(s.snapshot_at(4).unwrap().map(|(seq, _)| seq), Some(1));
+        // A row that doesn't end at its block is refused.
+        assert!(s
+            .commit_block(5, &record(5), &[1], &[5; 8], Some(&row(2, 8)), &[])
+            .is_err());
+        assert_eq!(s.tip().unwrap(), 4);
     }
 
     #[test]

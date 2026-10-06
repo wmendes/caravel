@@ -604,11 +604,31 @@ impl<A: LaneApp> Core<A> {
             state_hash_after: sha256(&out.state),
         };
         let end = built.block.checkpoint_end;
-        let seq = end.then_some(new_frame.checkpoint_seq);
         self.perf.record("decode", t_decode.elapsed());
+        // A CHECKPOINT_END block's checkpoint is built first and stored in
+        // the block's own transaction, and memory moves only once that
+        // committed: a crash or an error keeps all of the block or none of
+        // it (issue #145, R-01).
+        let sealed = if end {
+            let t_seal = std::time::Instant::now();
+            let sealed = self.seal(height, &record, &out.receipts, &out.state)?;
+            if sealed.0.seq != new_frame.checkpoint_seq {
+                return Err(CoreError::Corrupt("checkpoint seq"));
+            }
+            self.perf.record("seal", t_seal.elapsed());
+            Some(sealed)
+        } else {
+            None
+        };
         let t_commit = std::time::Instant::now();
-        self.store
-            .commit_block(height, &record, &out.receipts, &out.state, seq)?;
+        self.store.commit_block(
+            height,
+            &record,
+            &out.receipts,
+            &out.state,
+            sealed.as_ref().map(|(row, _)| row),
+            &[],
+        )?;
         self.perf.record("commit", t_commit.elapsed());
 
         self.prev_block_hash = block_hash(&record);
@@ -622,10 +642,14 @@ impl<A: LaneApp> Core<A> {
         self.state = Arc::new(new_state);
         self.frame = new_frame;
 
-        let checkpoint = if end {
-            let t_seal = std::time::Instant::now();
-            let row = self.seal(height, &mut incidents)?;
-            self.perf.record("seal", t_seal.elapsed());
+        let checkpoint = if let Some((row, header)) = sealed {
+            if let Err(reason) = self.precheck(&header, row.batch.len()) {
+                incidents.push(Incident::PrecheckFailed {
+                    seq: header.seq,
+                    reason,
+                });
+            }
+            self.last_header_hash = sha256(&row.header);
             self.budget.reset();
             self.budget.opened_at(built.block.timestamp_ms);
             if let Some(r) = self.end_reason {
@@ -648,22 +672,23 @@ impl<A: LaneApp> Core<A> {
         })
     }
 
-    /// Assembles the checkpoint the last block sealed and stores it.
+    /// Assembles the checkpoint block `last_height` (not stored yet) seals:
+    /// the open batch from the store, then that block, against `state`, the
+    /// state it produced.
     fn seal(
-        &mut self,
+        &self,
         last_height: u64,
-        incidents: &mut Vec<Incident>,
-    ) -> Result<CheckpointRow, CoreError> {
-        let first = self.frame.last_commitment.last_block_height - self.budget.blocks() as u64 + 1;
-        let blocks = self.store.blocks(first, last_height)?;
+        record: &BlockRecordV1,
+        receipts: &[u8],
+        state: &[u8],
+    ) -> Result<(CheckpointRow, CheckpointHeaderV1), CoreError> {
+        let first = self.frame.last_commitment.last_block_height + 1;
+        let mut blocks = self.store.blocks(first, last_height - 1)?;
+        blocks.push((record.clone(), receipts.to_vec()));
         let records: Vec<BlockRecordV1> = blocks.iter().map(|(r, _)| r.clone()).collect();
-        let (batch, header) = checkpoint::assemble(
-            &self.cfg.ids,
-            self.last_header_hash,
-            &records,
-            &self.state_bytes,
-        )
-        .map_err(|_| CoreError::Corrupt("checkpoint assembly"))?;
+        let (batch, header) =
+            checkpoint::assemble(&self.cfg.ids, self.last_header_hash, &records, state)
+                .map_err(|_| CoreError::Corrupt("checkpoint assembly"))?;
         let decoded: Vec<(BlockRecordV1, ReceiptsV1)> = blocks
             .into_iter()
             .map(|(r, rc)| {
@@ -689,15 +714,7 @@ impl<A: LaneApp> Core<A> {
             stellar_tx_hash: None,
             stellar_ledger: None,
         };
-        if let Err(reason) = self.precheck(&header, row.batch.len()) {
-            incidents.push(Incident::PrecheckFailed {
-                seq: header.seq,
-                reason,
-            });
-        }
-        self.store.insert_checkpoint(&row)?;
-        self.last_header_hash = sha256(&header_bytes);
-        Ok(row)
+        Ok((row, header))
     }
 
     /// What the contract will check, so validators are never asked to sign a
