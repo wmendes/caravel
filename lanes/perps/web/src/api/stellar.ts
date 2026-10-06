@@ -45,6 +45,7 @@ const ERRORS: Record<number, string> = {
   60: "the contract is not frozen",
   61: "freezing is not allowed yet",
   62: "this deposit cannot be refunded",
+  64: "the escape payout does not compute, so the claim stays open",
 };
 
 export function explain(e: unknown): string {

@@ -186,6 +186,66 @@ fn escape_rounds_down() {
     assert_eq!(h.token().balance(&h.id), 1);
 }
 
+/// Issue #145, S-01: `equity × payout_num` passes `i128::MAX` while the
+/// payout itself fits. Three accounts of 9e18 units each (a token with many
+/// decimals), so the product is 9e18 × 27e18 ≈ 2.4e38: each still gets
+/// all of its equity, and a claim never pays 0 for a valid leaf.
+#[test]
+fn escape_pays_in_full_when_the_product_passes_i128() {
+    let mut h = Harness::new();
+    let each: i128 = 9_000_000_000_000_000_000;
+    for seed in [A, B, C] {
+        h.deposit(seed, each);
+    }
+    h.sync_inbox();
+    let cp = h.crafted(
+        std::vec![(pk(A), each), (pk(B), each), (pk(C), each)],
+        std::vec![],
+    );
+    h.accept(&cp);
+    h.advance(PARAMS.escape_timeout_secs + 1);
+    h.c().freeze();
+    let info = h.c().frozen_info().unwrap();
+    assert_eq!((info.payout_num, info.payout_den), (3 * each, 3 * each));
+    assert!(each.checked_mul(info.payout_num).is_none());
+    for (j, seed) in [A, B, C].into_iter().enumerate() {
+        escape(&h, &cp, seed, j as u32, each).unwrap();
+        assert_eq!(h.token().balance(&h.user(seed, 0)), each);
+    }
+    assert_eq!(h.token().balance(&h.id), 0);
+}
+
+/// The payout helper agrees with the host's own 256-bit arithmetic (`I256`).
+#[test]
+fn wide_payout_matches_the_hosts_i256() {
+    let env = Env::default();
+    env.cost_estimate().budget().reset_unlimited();
+    let mut x: u128 = 0x9E37_79B9_7F4A_7C15_F39C_C060_5CED_C834;
+    let mut next = || {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        (x >> 1) as i128 >> (x % 100) as u32
+    };
+    for _ in 0..2000 {
+        let (a, b, c) = (next(), next(), next().max(1));
+        // The escape's shape: payout_num ≤ payout_den.
+        let (num, den) = (b.min(c), b.max(c).max(1));
+        for (a, b, c) in [(a, b, c), (a, num, den)] {
+            let host = soroban_sdk::I256::from_i128(&env, a)
+                .mul(&soroban_sdk::I256::from_i128(&env, b))
+                .div(&soroban_sdk::I256::from_i128(&env, c))
+                .to_i128();
+            assert_eq!(
+                caravel_core::fixed::mul_div_floor_wide(a, b, c).ok(),
+                host,
+                "{a} × {b} / {c}"
+            );
+        }
+        assert!(caravel_core::fixed::mul_div_floor_wide(a, num, den).is_ok());
+    }
+}
+
 #[test]
 fn escape_pays_nothing_when_the_vault_is_all_owed() {
     let mut h = Harness::new();
