@@ -1,0 +1,17 @@
+[package]
+name = "zk-payments-host"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+zk-payments-methods = { path = "../methods" }
+risc0-zkvm = { workspace = true, features = ["prove", "metal"] }
+caravel-core = { path = "../../../platform/crates/caravel-core", features = ["native"] }
+caravel-app-sdk = { path = "../../../platform/crates/caravel-app-sdk", features = ["native"] }
+caravel-payments = { path = "../../../lanes/payments/app", features = ["native"] }
+caravel-harness = { path = "../../../platform/crates/caravel-harness" }
+caravel-runtime = { path = "../../../platform/crates/caravel-runtime" }
+anyhow = "1"
+hex = "0.4"
+serde_json = "1"

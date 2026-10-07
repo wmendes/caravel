@@ -1,0 +1,13 @@
+# Spike (M0.12 X-01): prove a Caravel Payments checkpoint with RISC Zero and
+# verify it on Stellar. A workspace of its own: nothing here is in the root
+# workspace, its Cargo.lock, versions.json or CI. Not consensus code.
+[workspace]
+resolver = "2"
+members = ["host", "methods"]
+
+[workspace.dependencies]
+risc0-zkvm = { version = "=3.0.6" }
+risc0-build = { version = "=3.0.6" }
+
+[profile.release]
+debug = 1
