@@ -63,6 +63,38 @@ A proof for any other transition or header doesn't verify.
   - Each user transaction needs ~0.9M cycles, so this CPU proves about one every 47 s.
   - A CUDA GPU is the real target; kalien proves on rented GPUs. **The next number to get is one GPU's rate**, which costs money, so it waits for your OK.
 
+## What proving would cost (estimate, 2026-10-07)
+
+Nothing below was measured on a GPU yet, so treat it as order of magnitude.
+
+**Inputs.**
+- **Our cycles:** about 0.9M per transfer (97% of it the signature check), about 48k per empty block (proven lanes would skip empty blocks), plus a fixed recursion and Groth16 wrap per proof. The wrap took about 180 s on this Mac's CPU. Assume 30 to 60 s on a GPU until it's measured.
+- **GPU speed:** an RTX 4090 runs RISC Zero 3.0.4 at about **808k cycles a second** (succinct proofs, segment size 2^21), and 1.2M a second with the larger 2^22 segments ([anoma/arm-risc0#253](https://github.com/anoma/arm-risc0/issues/253)). That is about 42 times this Mac's CPU. RISC Zero publishes no GPU datasheet now; you run its `datasheet` example on your own machine.
+- **Prices:**
+  - an RTX 4090 on Vast.ai is $0.32 to $0.50 an hour on demand and from $0.16 interruptible; an RTX 5090 is from $0.43 ([gpuperhour](https://gpuperhour.com/providers/vastai/rtx-4090), [getdeploying](https://getdeploying.com/gpus/nvidia-rtx-5090));
+  - a Google Cloud L4 (`g2-standard-4`, us-central1) is $0.71 an hour on demand, $0.64 spot, and $0.45 on a one-year commitment ([holori](https://calculator.holori.com/gcp/vm/g2-standard-4)). The L4 has about a third of the 4090's memory bandwidth, so expect it to be slower.
+
+**How kalien does it.** It sends each proof to Boundless (RISC Zero's proof market, paid on Base) with a cap of **$0.10 per proof** (its proofs are about 19M cycles). If that fails, it falls back to one CUDA box rented on Vast.ai, and proofs take 1 to 5 minutes.
+
+**Unit costs** on a 4090 at $0.40 an hour:
+- about 1.1 GPU-seconds per transfer, or **$0.0001** each;
+- about 45 GPU-seconds per proof for the wrap, or **$0.005** each;
+- one 4090 proves about 0.9 transfers a second, sustained (78k a day).
+
+**Monthly cost for a proven Payments lane** (hourly proofs, no empty blocks):
+
+| Traffic | GPU time a day | Paying only for proving time | One GPU always on |
+|---|---:|---:|---:|
+| 1,000 transfers a day (a demo) | ~37 min | ~$8 | $230 to $365 (4090), or ~$515 (GCP L4) |
+| 10,000 a day | ~3.4 h | ~$40 | the same |
+| 1 a second (86k a day) | ~27 h | — | two 4090s, ~$580 (one with 2^22 segments) |
+
+"Paying only for proving time" in practice means Boundless, or interruptible instances started per batch.
+
+Keeping a GPU on all the time is what costs money, not the proofs themselves. Two further notes:
+- A Google Cloud GPU running all month is about 25 times the project's R$100 budget cap.
+- Under the hybrid design, the proof cadence is also the delay before a withdrawal becomes claimable. Proving hourly saves on wraps but holds claims up to an hour.
+
 ## Design, if it's a go
 
 1. **Contract v3.** Check 7 becomes "verify the proof of `H(LastCkpt) → H(header)` for the lane's image ID". Every other check stays. The contract then knows `state_hash` and the roots instead of trusting them.
@@ -90,7 +122,7 @@ The cheaper answer to "no single point of failure" is a standby sequencer that f
 
 ## Decisions for you
 
-1. Rent one CUDA GPU for an hour to measure proving speed, the go/no-go number.
+1. Measure on one GPU: about an hour of a Vast.ai RTX 4090, **about $0.50**. It gives our own segment speed and wrap time. It needs your Vast.ai account with prepaid credit.
 2. Proofs only, or the hybrid in point 4.
 3. Signature path: ed25519 as today, or measure the options in point 7 first.
 4. The trust-model and claims changes (spec §0.4), when a proven lane ships.
