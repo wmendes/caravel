@@ -396,3 +396,17 @@ Read on 2026-10-06 at about 11:40 UTC, 27 hours after the 0.4.0 deploy, from `/v
 - Checkpoint 8,475 was accepted on Stellar at 22:34:56.
 - The trading app served from the lane builds its wallet list with `new GhostsigModule({ network: <testnet passphrase> })`.
 - **The release's signature:** `gh attestation verify --bundle caravel.sigstore.json`, with the release workflow and tag pinned, passes with no GitHub login for each archive and `IMAGES`. It fails for a wrong tag, a wrong workflow or a tampered `IMAGES`. The public installer with `CARAVEL_REQUIRE_SIGNATURE=1` printed "Signed by wmendes/caravel's release workflow at v0.4.3".
+
+## A proven Payments checkpoint (M0.12 X-01, 2026-10-07)
+
+The spike is in `spikes/zk-payments`, and the design note in `docs/DESIGN_PROVEN_LANES.md`. A RISC Zero 3.0.6 guest re-runs the Payments engine over a checkpoint's batch and commits `H(prev_header) ‖ H(header)`. Its header matches `checkpoint::assemble`'s byte for byte, and a one-byte change to the batch can't be proven.
+
+On testnet, NethermindEth's Groth16 verifier (`CAMLOKU4…BI2S`) and a spike contract (`CAKXSLR7…7SXZ`) accept a checkpoint on the proof instead of signatures:
+- 32.8M CPU instructions (8% of the limit) and a 0.0048 XLM resource fee ([tx 72019ffd…](https://stellar.expert/explorer/testnet/tx/72019ffdc77c705243e44111ab142d31f99efc7d28de82b5fc1696a4d10b980b));
+- a tampered batch, a changed `state_hash`, a replay, a flipped journal byte and a wrong image ID are all refused.
+
+Prover cost:
+- **Cycles:** about 48k per empty block, and about 0.9M per transfer, 97% of it ed25519 (893k cycles per signature with the accelerated curve). State size barely matters.
+- **Time on an Apple M5 Pro**, on the CPU (no Metal for this circuit in 3.0.6): about 55 s per 1M-cycle segment. A Groth16 proof of a one-segment batch takes 236 s.
+
+So on-chain verification is a go. Proving needs a GPU, and its rate is the number still to measure.

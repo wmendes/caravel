@@ -1,0 +1,22 @@
+[package]
+name = "checkpoint"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+caravel-core = { path = "../../../../platform/crates/caravel-core" }
+caravel-app-sdk = { path = "../../../../platform/crates/caravel-app-sdk" }
+caravel-payments = { path = "../../../../lanes/payments/app" }
+ed25519-dalek = { version = "=2.2.0", default-features = false }
+risc0-zkvm = { version = "=3.0.6", default-features = false, features = ["std"] }
+
+# RISC Zero's accelerated curve25519 (dev.risczero.com/api/zkvm/precompiles).
+[patch.crates-io]
+curve25519-dalek = { git = "https://github.com/risc0/curve25519-dalek", tag = "curve25519-4.1.3-risczero.0" }
+crypto-bigint = { git = "https://github.com/risc0/RustCrypto-crypto-bigint", tag = "v0.5.5-risczero.0" }
+
+[profile.release]
+lto = "thin"

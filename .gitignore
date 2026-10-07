@@ -1,6 +1,7 @@
 # Build output
 /target/
 /lanes/perps/engine/target/
+/spikes/**/target/
 node_modules/
 dist/
 
